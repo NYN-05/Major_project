@@ -1,0 +1,26 @@
+{
+  "MLP": {
+    "model": "MLP",
+    "accuracy": 0.9375,
+    "precision": 0.9166666666666666,
+    "recall": 0.9625,
+    "f1": 0.9390243902439024,
+    "auc_roc": 0.9907812500000001
+  },
+  "RandomForest": {
+    "model": "RandomForest",
+    "accuracy": 0.95625,
+    "precision": 0.9620253164556962,
+    "recall": 0.95,
+    "f1": 0.9559748427672956,
+    "auc_roc": 0.9945312500000001
+  },
+  "SVM": {
+    "model": "SVM",
+    "accuracy": 0.95,
+    "precision": 0.95,
+    "recall": 0.95,
+    "f1": 0.95,
+    "auc_roc": 0.99046875
+  }
+}

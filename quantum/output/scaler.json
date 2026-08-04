@@ -1,0 +1,35 @@
+{
+  "feature_names": [
+    "temporal_consistency",
+    "inter_region_agreement",
+    "signal_stability",
+    "amplitude_reliability",
+    "rhythm_quality",
+    "sync_behavior",
+    "frame_quality_score",
+    "roi_stability",
+    "temporal_coverage_ratio"
+  ],
+  "min": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.06990066170692444,
+    0.06023182347416878,
+    0.04502350464463234
+  ],
+  "max": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.9890374541282654,
+    0.9935969114303589,
+    0.9957919716835022
+  ]
+}
