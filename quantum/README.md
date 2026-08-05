@@ -44,13 +44,26 @@ data → QAOA feature selection → hybrid VQC training → evaluation → class
 
 Two quantum algorithms are used:
 
-| Algorithm | Purpose | Where |
-|---|---|---|
-| **QAOA** (Quantum Approximate Optimization Algorithm) | Selects the 6 most relevant, least redundant features | `qaoa_selection.py` |
-| **VQC** (Variational Quantum Classifier) | Classifies real vs. fake from the selected features | `vqc.py` + `train.py` |
+| Algorithm                                                   | Purpose                                               | Where                     |
+| ----------------------------------------------------------- | ----------------------------------------------------- | ------------------------- |
+| **QAOA** (Quantum Approximate Optimization Algorithm) | Selects the 6 most relevant, least redundant features | `qaoa_selection.py`     |
+| **VQC** (Variational Quantum Classifier)              | Classifies real vs. fake from the selected features   | `vqc.py` + `train.py` |
 
 Both run on the `lightning.qubit` simulator via **PennyLane**, with Torch as the
 differentiation/training framework (adjoint diff method for the QNode).
+
+### Hardware Acceleration
+
+- **CUDA classical head (automatic):** if a CUDA-capable GPU is available, the classical
+  head of the `HybridVQC` runs on GPU and batched data is moved to it. The PennyLane
+  quantum block stays on CPU (the `lightning.qubit` simulator does not accept CUDA
+  tensors). Everything falls back to CPU automatically when no GPU is present.
+- **GPU quantum simulator (automatic, where supported):** the quantum device is resolved
+  at runtime by `resolve_device()` in `config.py` — it uses `lightning.gpu` when
+  `pennylane-lightning-gpu` is installed (Linux/WSL only), otherwise `lightning.qubit`.
+  No code changes needed to switch.
+- **Note:** `pennylane-lightning-gpu` ships Linux-only wheels; it cannot be installed on
+  native Windows.
 
 ---
 
@@ -133,44 +146,44 @@ hard-to-classify data:
 
 ### Configuration & Contracts
 
-| File | Description |
-|---|---|
-| `config.py` | Frozen dataclasses for every stage: `DataConfig`, `QAOASelectionConfig`, `VQCConfig`, `DecisionConfig`. Central place for hyperparameters, thresholds, and output paths. |
-| `features_schema.py` | The data contract: 9 rPPG feature names, real/fake label encoding, per-feature meanings, and a `FeatureContract` dataclass. Single source of truth for column order. |
-| `conditioning.py` | Feature matrix validation (2D, 9 columns, finite, [0,1] range) and min-max normalization via `FeatureConditioner`. Persists/loads to/from `output/scaler.json`. |
-| `__init__.py` | Package marker; defines `__version__`. |
+| File                   | Description                                                                                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.py`          | Frozen dataclasses for every stage:`DataConfig`, `QAOASelectionConfig`, `VQCConfig`, `DecisionConfig`. Central place for hyperparameters, thresholds, and output paths. |
+| `features_schema.py` | The data contract: 9 rPPG feature names, real/fake label encoding, per-feature meanings, and a`FeatureContract` dataclass. Single source of truth for column order.           |
+| `conditioning.py`    | Feature matrix validation (2D, 9 columns, finite, [0,1] range) and min-max normalization via`FeatureConditioner`. Persists/loads to/from `output/scaler.json`.              |
+| `__init__.py`        | Package marker; defines`__version__`.                                                                                                                                         |
 
 ### Data Layer
 
-| File | Description |
-|---|---|
-| `dummy_data.py` | Synthetic data generator: real samples drawn from a high latent (mean 0.7), fakes from a low latent (mean 0.3), with class-appropriate noise. Produces `output/data.npz`, `output/features.csv`, `output/scaler.json`. Also provides `load_dataset()`. |
-| `convert_csv_to_npz.py` | Bridge for real data: validates a CSV (`split,label,<9 features>`) against the schema and converts it to the pipeline's NPZ format. CLI: `--csv <file>`. |
+| File                      | Description                                                                                                                                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dummy_data.py`         | Synthetic data generator: real samples drawn from a high latent (mean 0.7), fakes from a low latent (mean 0.3), with class-appropriate noise. Produces`output/data.npz`, `output/features.csv`, `output/scaler.json`. Also provides `load_dataset()`. |
+| `convert_csv_to_npz.py` | Bridge for real data: validates a CSV (`split,label,<9 features>`) against the schema and converts it to the pipeline's NPZ format. CLI: `--csv <file>`.                                                                                                  |
 
 ### Quantum Modules
 
-| File | Description |
-|---|---|
-| `qaoa_selection.py` | QAOA feature selection: mutual-information scoring, correlation penalties, QUBO→Hamiltonian conversion, p=3 QAOA circuit optimization (COBYLA), marginals, target-count adjustment, and `verify_hamiltonian()` correctness check. |
-| `vqc.py` | Model definitions: `build_qnode()` (angle embedding + strongly-entangling layers), `QuantumFeatureBlock` (TorchLayer wrapper), `HybridVQC` (quantum block + classical head), and `BalancedFocalLoss`. |
-| `train.py` | Training loop: seeded DataLoaders, AdamW + cosine LR scheduler, per-epoch train/val metrics, best-val checkpointing to `output/hybrid_vqc.pt`, JSONL log to `output/training_log.jsonl`. Also exposes `predict_proba()`. |
+| File                  | Description                                                                                                                                                                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `qaoa_selection.py` | QAOA feature selection: mutual-information scoring, correlation penalties, QUBO→Hamiltonian conversion, p=3 QAOA circuit optimization (COBYLA), marginals, target-count adjustment, and`verify_hamiltonian()` correctness check. |
+| `vqc.py`            | Model definitions:`build_qnode()` (angle embedding + strongly-entangling layers), `QuantumFeatureBlock` (TorchLayer wrapper), `HybridVQC` (quantum block + classical head), and `BalancedFocalLoss`.                        |
+| `train.py`          | Training loop: seeded DataLoaders, AdamW + cosine LR scheduler, per-epoch train/val metrics, best-val checkpointing to`output/hybrid_vqc.pt`, JSONL log to `output/training_log.jsonl`. Also exposes `predict_proba()`.       |
 
 ### Evaluation & Comparison
 
-| File | Description |
-|---|---|
-| `evaluate.py` | Test evaluation: accuracy, precision, recall, F1, AUC-ROC, confusion matrix, Expected Calibration Error (ECE), and 3-way decision bins (real / uncertain / fake). Generates ROC and confusion-matrix plots. Writes `output/metrics_quantum.json`. |
-| `classical_baseline.py` | Trains MLP, RandomForest, and RBF-SVM on all 9 features for a classical comparison. Writes `output/metrics_baselines.json`. |
-| `results_report.py` | Merges quantum and baseline metrics into a markdown report: comparison table, QAOA selection summary, confusion matrix, calibration stats, plot references. Writes `docs/results_report.md`. |
+| File                      | Description                                                                                                                                                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `evaluate.py`           | Test evaluation: accuracy, precision, recall, F1, AUC-ROC, confusion matrix, Expected Calibration Error (ECE), and 3-way decision bins (real / uncertain / fake). Generates ROC and confusion-matrix plots. Writes`output/metrics_quantum.json`. |
+| `classical_baseline.py` | Trains MLP, RandomForest, and RBF-SVM on all 9 features for a classical comparison. Writes`output/metrics_baselines.json`.                                                                                                                       |
+| `results_report.py`     | Merges quantum and baseline metrics into a markdown report: comparison table, QAOA selection summary, confusion matrix, calibration stats, plot references. Writes`docs/results_report.md`.                                                      |
 
 ### Orchestration & Docs
 
-| File | Description |
-|---|---|
-| `run_quantum.py` | CLI entry point. Orchestrates all 6 pipeline stages; supports running each stage independently or all at once with `--all`. |
-| `docs/interface_contract.md` | Defines the data/schema expectations for integrating the real rPPG feature pipeline. |
-| `docs/qml_run_instructions.md` | Step-by-step run instructions for the quantum component. |
-| `docs/results_report.md` | Generated report comparing the quantum model against classical baselines. |
+| File                             | Description                                                                                                                  |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `run_quantum.py`               | CLI entry point. Orchestrates all 6 pipeline stages; supports running each stage independently or all at once with`--all`. |
+| `docs/interface_contract.md`   | Defines the data/schema expectations for integrating the real rPPG feature pipeline.                                         |
+| `docs/qml_run_instructions.md` | Step-by-step run instructions for the quantum component.                                                                     |
+| `docs/results_report.md`       | Generated report comparing the quantum model against classical baselines.                                                    |
 
 ---
 
@@ -179,24 +192,19 @@ hard-to-classify data:
 1. **Generate / load data** — `dummy_data.py` synthesizes train/val/test splits of 9 rPPG
    features (or a real CSV is converted via `convert_csv_to_npz.py`). The data is
    validated and min-max normalized (`conditioning.py`) into `output/data.npz`.
-
 2. **QAOA feature selection** — `qaoa_selection.py` computes per-feature mutual
    information (relevance) and pairwise correlations (redundancy), builds the QUBO
    Hamiltonian, optimizes a p=3 QAOA circuit with COBYLA, and selects the 6 most
    informative, least redundant features → `output/qaoa_selection.json`.
-
 3. **Train the hybrid VQC** — `train.py` slices the training data down to the selected
    features, then trains `HybridVQC` (`vqc.py`) — quantum embedding + entangling layers +
    classical head — with AdamW, cosine annealing, and the balanced focal loss. Best
    validation checkpoint → `output/hybrid_vqc.pt`.
-
 4. **Evaluate the quantum model** — `evaluate.py` reloads the checkpoint, predicts on the
    test split, computes metrics (acc/F1/AUC/ECE), applies real/uncertain/fake decision
    bins, and saves metrics + ROC/confusion plots.
-
 5. **Train classical baselines** — `classical_baseline.py` trains MLP, RandomForest, and
    SVM on the full 9-feature set for comparison.
-
 6. **Build the report** — `results_report.py` merges quantum and baseline results into a
    comparison report → `docs/results_report.md`.
 
@@ -303,22 +311,24 @@ python quantum/convert_csv_to_npz.py --csv path/to/features.csv
 ```
 
 **Dependencies:** Python 3.10+, PennyLane (with `lightning.qubit`), PyTorch, NumPy,
-SciPy, scikit-learn, matplotlib.
+SciPy, scikit-learn, matplotlib. Optional: CUDA-enabled PyTorch for GPU acceleration of
+the classical head; `pennylane-lightning-gpu` (Linux/WSL) for GPU-accelerated quantum
+simulation.
 
 ---
 
 ## Output Artifacts
 
-| Artifact | Description |
-|---|---|
-| `output/data.npz` | Conditioned train/val/test splits + feature names |
-| `output/features.csv` | Human-readable CSV of the same data |
-| `output/scaler.json` | Min-max conditioner parameters |
-| `output/qaoa_selection.json` | QAOA-selected features, marginals, energy |
-| `output/hybrid_vqc.pt` | Best-checkpoint hybrid VQC weights + metadata |
-| `output/training_log.jsonl` | Per-epoch training records |
-| `output/metrics_quantum.json` | Quantum test metrics |
-| `output/metrics_baselines.json` | Classical baseline metrics |
-| `output/roc_curve.png` | ROC curve (quantum model) |
-| `output/confusion_matrix.png` | Confusion matrix (quantum model) |
-| `docs/results_report.md` | Generated comparison report |
+| Artifact                          | Description                                       |
+| --------------------------------- | ------------------------------------------------- |
+| `output/data.npz`               | Conditioned train/val/test splits + feature names |
+| `output/features.csv`           | Human-readable CSV of the same data               |
+| `output/scaler.json`            | Min-max conditioner parameters                    |
+| `output/qaoa_selection.json`    | QAOA-selected features, marginals, energy         |
+| `output/hybrid_vqc.pt`          | Best-checkpoint hybrid VQC weights + metadata     |
+| `output/training_log.jsonl`     | Per-epoch training records                        |
+| `output/metrics_quantum.json`   | Quantum test metrics                              |
+| `output/metrics_baselines.json` | Classical baseline metrics                        |
+| `output/roc_curve.png`          | ROC curve (quantum model)                         |
+| `output/confusion_matrix.png`   | Confusion matrix (quantum model)                  |
+| `docs/results_report.md`        | Generated comparison report                       |

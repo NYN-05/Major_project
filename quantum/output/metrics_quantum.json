@@ -3,8 +3,8 @@
   "precision": 0.8620689655172413,
   "recall": 0.9375,
   "f1": 0.8982035928143712,
-  "auc_roc": 0.9715625,
-  "ece": 0.17202498409897085,
+  "auc_roc": 0.9696875,
+  "ece": 0.15953764859586955,
   "confusion_matrix": {
     "tn": 68,
     "fp": 12,
@@ -12,8 +12,8 @@
     "tp": 75
   },
   "decisions": {
-    "real_count": 76,
-    "uncertain_count": 84,
+    "real_count": 78,
+    "uncertain_count": 82,
     "fake_count": 0
   },
   "thresholds": {
@@ -31,7 +31,7 @@
   ],
   "expected_cost_energy": -0.9727064568807694,
   "checkpoint": "C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\quantum\\output\\hybrid_vqc.pt",
-  "n_epochs_trained": 8,
+  "n_epochs_trained": 9,
   "roc_plot": "C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\quantum\\output\\roc_curve.png",
   "confusion_plot": "C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\quantum\\output\\confusion_matrix.png"
 }

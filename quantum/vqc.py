@@ -32,16 +32,18 @@ class HybridVQC(nn.Module):
     def __init__(self, n_qubits: int, config: VQCConfig):
         super().__init__()
         self.n_qubits = n_qubits
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.quantum = QuantumFeatureBlock(n_qubits, config.qml_layers, config.device)
         self.head = nn.Sequential(
             nn.Linear(n_qubits, config.hidden_units),
             nn.ReLU(),
             nn.Dropout(config.dropout),
             nn.Linear(config.hidden_units, 1),
-        )
+        ).to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        quantum_out = self.quantum(x)
+        x = x.to(self.device)
+        quantum_out = self.quantum(x.cpu()).to(self.device)
         return self.head(quantum_out)
 
 

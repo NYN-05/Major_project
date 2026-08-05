@@ -1,10 +1,25 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+import os
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 QUANTUM_ROOT = Path(__file__).resolve().parents[0]
 OUTPUT_DIR = QUANTUM_ROOT / "output"
 DOCS_DIR = QUANTUM_ROOT / "docs"
+
+
+def resolve_device(preferred: str = "lightning.gpu", fallback: str = "lightning.qubit") -> str:
+    try:
+        import pennylane as qml
+
+        qml.device(preferred, wires=2)
+        return preferred
+    except Exception:
+        return fallback
+
+
+def default_num_workers() -> int:
+    return max(1, min(12, int((os.cpu_count() or 4) * 0.9)))
 
 
 @dataclass(frozen=True)
@@ -25,7 +40,7 @@ class QAOASelectionConfig:
     redundancy_penalty: float = 0.3
     cardinality_penalty: float = 0.5
     target_features: int = 6
-    device: str = "lightning.qubit"
+    device: str = field(default_factory=resolve_device)
     selection_file: Path = field(default_factory=lambda: OUTPUT_DIR / "qaoa_selection.json")
 
 
@@ -34,7 +49,8 @@ class VQCConfig:
     qml_layers: int = 3
     hidden_units: int = 8
     dropout: float = 0.2
-    device: str = "lightning.qubit"
+    device: str = field(default_factory=resolve_device)
+    num_workers: int = field(default_factory=default_num_workers)
     epochs: int = 40
     batch_size: int = 32
     learning_rate: float = 1e-2

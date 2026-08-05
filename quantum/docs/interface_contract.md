@@ -49,7 +49,7 @@ Keys: `X_train`, `y_train`, `X_val`, `y_val`, `X_test`, `y_test`
 Each `X_*` is shape `(n_samples, 9)` float32; each `y_*` is shape `(n_samples,)` int64.
 
 This matches `quantum/dummy_data.py` output exactly, so the simplest path is:
-produce your CSV, then run `quantum/tools_convert_csv_to_npz.py` (see below) or
+produce your CSV, then run `quantum/convert_csv_to_npz.py` (see below) or
 copy the format of `quantum/output/data.npz`.
 
 ## 3. How to Plug Real Data In

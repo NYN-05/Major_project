@@ -25,14 +25,14 @@ $python = "C:\Users\JHASHANK\AppData\Local\Programs\Python\Python310\python.exe"
 
 Pipeline steps and their outputs:
 
-| Step | Flag | Outputs |
-|------|------|---------|
-| 1. Generate synthetic rPPG dataset | `--gen-data` | `quantum/output/data.npz`, `quantum/output/features.csv`, `quantum/output/scaler.json` |
-| 2. QAOA feature selection | `--select` | `quantum/output/qaoa_selection.json` |
-| 3. Train hybrid VQC | `--train` | `quantum/output/hybrid_vqc.pt`, `quantum/output/training_log.jsonl` |
-| 4. Evaluate quantum model | `--evaluate` | `quantum/output/metrics_quantum.json`, `roc_curve.png`, `confusion_matrix.png` |
-| 5. Classical baselines (MLP/RF/SVM) | `--baselines` | `quantum/output/metrics_baselines.json` |
-| 6. Results report | `--report` | `quantum/docs/results_report.md` |
+| Step                                | Flag            | Outputs                                                                                      |
+| ----------------------------------- | --------------- | -------------------------------------------------------------------------------------------- |
+| 1. Generate synthetic rPPG dataset  | `--gen-data`  | `quantum/output/data.npz`, `quantum/output/features.csv`, `quantum/output/scaler.json` |
+| 2. QAOA feature selection           | `--select`    | `quantum/output/qaoa_selection.json`                                                       |
+| 3. Train hybrid VQC                 | `--train`     | `quantum/output/hybrid_vqc.pt`, `quantum/output/training_log.jsonl`                      |
+| 4. Evaluate quantum model           | `--evaluate`  | `quantum/output/metrics_quantum.json`, `roc_curve.png`, `confusion_matrix.png`         |
+| 5. Classical baselines (MLP/RF/SVM) | `--baselines` | `quantum/output/metrics_baselines.json`                                                    |
+| 6. Results report                   | `--report`    | `quantum/docs/results_report.md`                                                           |
 
 Steps can be run individually in order; each step needs the previous ones' outputs.
 
@@ -43,6 +43,19 @@ See `quantum/docs/interface_contract.md` for the exact feature schema (9 feature
 
 Deliver the file as `quantum/output/data.npz` (preferred) or `quantum/output/features.csv`,
 then rerun `--all`.
+
+## Hardware Acceleration (GPU)
+
+- **Classical head on CUDA (automatic):** with CUDA-enabled PyTorch and an NVIDIA GPU,
+  the hybrid VQC's classical head and data batches run on the GPU. The PennyLane quantum
+  block runs on CPU (`lightning.qubit` cannot take CUDA tensors). Falls back to full CPU
+  automatically when no GPU is found. No flags required.
+- **Quantum simulator on GPU (Linux/WSL only):** `resolve_device()` in `quantum/config.py`
+  automatically picks `lightning.gpu` if `pennylane-lightning-gpu` is installed, else
+  `lightning.qubit`. On Linux/WSL:
+  `python -m pip install pennylane-lightning-gpu`.
+  Note: `pennylane-lightning-gpu` has no Windows wheels, so it cannot run on native
+  Windows.
 
 ## Tuning
 

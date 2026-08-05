@@ -4,7 +4,7 @@
 
 | Model | Accuracy | Precision | Recall | F1 | AUC-ROC |
 |---|---:|---:|---:|---:|---:|
-| Hybrid VQC (QAOA-selected features) | 0.8938 | 0.8621 | 0.9375 | 0.8982 | 0.9716 |
+| Hybrid VQC (QAOA-selected features) | 0.8938 | 0.8621 | 0.9375 | 0.8982 | 0.9697 |
 | MLP | 0.9375 | 0.9167 | 0.9625 | 0.9390 | 0.9908 |
 | RandomForest | 0.9563 | 0.9620 | 0.9500 | 0.9560 | 0.9945 |
 | SVM | 0.9500 | 0.9500 | 0.9500 | 0.9500 | 0.9905 |
@@ -24,9 +24,9 @@ Expected-cost energy after optimization: -0.9727064568807694
 
 ## Calibration and Decisions
 
-- Expected Calibration Error (ECE): 0.1720
+- Expected Calibration Error (ECE): 0.1595
 - Decision thresholds: fake if p <= 0.3, real if p >= 0.7, otherwise uncertain
-- Test decisions -> real: 76, uncertain: 84, fake: 0
+- Test decisions -> real: 78, uncertain: 82, fake: 0
 
 ## Plots
 

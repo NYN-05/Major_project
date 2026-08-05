@@ -14,16 +14,19 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
-def build_loaders(data: dict, batch_size: int) -> tuple[DataLoader, DataLoader, DataLoader]:
+def build_loaders(data: dict, batch_size: int, num_workers: int = 0, pin_memory: bool = False) -> tuple[DataLoader, DataLoader, DataLoader]:
     X_train = torch.tensor(data["X_train"], dtype=torch.float32)
     y_train = torch.tensor(data["y_train"], dtype=torch.float32)
     X_val = torch.tensor(data["X_val"], dtype=torch.float32)
     y_val = torch.tensor(data["y_val"], dtype=torch.float32)
     X_test = torch.tensor(data["X_test"], dtype=torch.float32)
     y_test = torch.tensor(data["y_test"], dtype=torch.float32)
-    train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size)
-    test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size)
+    loader_kwargs = dict(num_workers=num_workers, pin_memory=pin_memory)
+    if num_workers > 0:
+        loader_kwargs["prefetch_factor"] = 2
+    train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size, **loader_kwargs)
+    test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, **loader_kwargs)
     return train_loader, val_loader, test_loader
 
 
@@ -33,7 +36,7 @@ def train_vqc(
     config: VQCConfig,
 ) -> HybridVQC:
     seed_everything(42)
-    train_loader, val_loader, _ = build_loaders(data, config.batch_size)
+    train_loader, val_loader, _ = build_loaders(data, config.batch_size, config.num_workers, torch.cuda.is_available())
 
     n_qubits = len(selected_indices)
     model = HybridVQC(n_qubits=n_qubits, config=config)
@@ -58,6 +61,7 @@ def train_vqc(
         correct = 0
         total = 0
         for X_batch, y_batch in train_loader:
+            X_batch, y_batch = X_batch.to(model.device), y_batch.to(model.device)
             X_batch = X_batch[:, selected_indices]
             optimizer.zero_grad()
             logits = model(X_batch).squeeze(-1)
@@ -110,6 +114,7 @@ def evaluate_epoch(model, loader: DataLoader, selected_indices: list[int], loss_
     total = 0
     with torch.no_grad():
         for X_batch, y_batch in loader:
+            X_batch, y_batch = X_batch.to(model.device), y_batch.to(model.device)
             X_batch = X_batch[:, selected_indices]
             logits = model(X_batch).squeeze(-1)
             loss = loss_fn(logits, y_batch)
@@ -121,8 +126,9 @@ def evaluate_epoch(model, loader: DataLoader, selected_indices: list[int], loss_
 
 
 def predict_proba(model: HybridVQC, X: np.ndarray, selected_indices: list[int]) -> np.ndarray:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
-    X_t = torch.tensor(X[:, selected_indices], dtype=torch.float32)
+    X_t = torch.tensor(X[:, selected_indices], dtype=torch.float32, device=device)
     with torch.no_grad():
         logits = model(X_t).squeeze(-1)
-        return torch.sigmoid(logits).numpy()
+        return torch.sigmoid(logits).cpu().numpy()
