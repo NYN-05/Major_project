@@ -10,9 +10,14 @@ node_modules/
 # Model weights larger than GitHub's 100 MB limit
 WORKING/frame/weights/yolov8x-face-lindevs.pt
 WORKING/frame/weights/yolov9e-face-lindevs.pt
+*.pt
+*.pkl
+*.csv
+*.json
+*.mp4
 
-# Regenerated pipeline output
-WORKING/frame/output/
+# Regenerated pipeline output (any directory named "output" at any level)
+output/
 
 # Unregistered experiment directory (nested repo with no .gitmodules)
 WORKING/RPPG/
