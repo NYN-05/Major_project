@@ -11,9 +11,9 @@ Stages
              (YOLO face detection, blur/dark/bright/face checks).
 2. RPPG    : physiological feature extraction via the `RPPG/` module
              (POS/CHROM pulse reconstruction -> 8-feature vector).
-3. QUANTUM : QAOA-selected subset of the raw rPPG features -> trained
-             Hybrid VQC checkpoint -> P(real) -> KYC decision bins
-             (real >= 0.7, fake <= 0.3).
+3. QUANTUM : train-fitted feature scaling + QAOA-selected subset of the
+              rPPG features -> trained Hybrid VQC checkpoint -> P(real) ->
+              KYC decision bins (real >= 0.7, fake <= 0.3).
 
 The quantum layer consumes the rPPG features directly (same names/order as
 RPPGFeatures.feature_names()); no synthetic or transformed data is used.
@@ -24,7 +24,7 @@ Usage
 
 Requires pre-trained quantum artifacts (output/qaoa_selection.json,
 output/hybrid_vqc.pt). If missing, run once from this folder:
-    python -m quantum.run --all
+    python -m quantum.pipeline --all
 """
 
 import argparse
@@ -35,7 +35,6 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-import torch
 
 WORKING = Path(__file__).resolve().parent
 FRAME_ROOT = WORKING / "frame"
@@ -46,26 +45,14 @@ for _root in (FRAME_ROOT, RPPG_ROOT, WORKING):
     if str(_root) not in sys.path:
         sys.path.insert(0, str(_root))
 
-from app.extract_frames import run_frame_sampling_quality_layer  # stage 1
+from app.pipeline import run_frame_sampling_quality_layer  # stage 1
 from rppg import RPPGPipeline  # stage 2
 
-from quantum.config import (  # stage 3
-    DecisionConfig,
-    FEATURE_NAMES as QUANTUM_FEATURE_NAMES,
-    LABEL_FAKE,
-    LABEL_REAL,
-    QAOASelectionConfig,
-    VQCConfig,
-)
-from quantum.selection import load_selection
-from quantum.vqc import HybridModel
+from quantum.pipeline import predict_features  # stage 3
 
 FRAME_WEIGHTS = FRAME_ROOT / "weights" / "yolov8n-face-lindevs.pt"
 RPPG_CLASSIFIER = RPPG_ROOT / "rppg_classifier.pkl"
 
-VERDICT_REAL = "REAL"
-VERDICT_FAKE = "FAKE"
-VERDICT_UNCERTAIN = "UNCERTAIN"
 VERDICT_INCONCLUSIVE = "INCONCLUSIVE"
 
 
@@ -185,49 +172,13 @@ def rppg_classifier_crosscheck(vector: np.ndarray) -> dict:
 # ---------------------------------------------------------------------------
 
 def quantum_inference(features: dict) -> dict:
-    qaoa_cfg = QAOASelectionConfig()
-    vqc_cfg = VQCConfig()
-    decision_cfg = DecisionConfig()
+    """QAOA-selected subset of the actual rPPG features -> trained hybrid VQC.
 
-    if not vqc_cfg.checkpoint_file.exists() or not qaoa_cfg.selection_file.exists():
-        raise FileNotFoundError(
-            f"Quantum artifacts missing. Run once from {WORKING}: python -m quantum.run --all "
-            f"(needs {qaoa_cfg.selection_file} and {vqc_cfg.checkpoint_file})"
-        )
-
-    selection = load_selection(qaoa_cfg.selection_file)
-    indices = [int(i) for i in selection["selected_indices"]]
-
-    full = np.asarray([features[name] for name in QUANTUM_FEATURE_NAMES], dtype=np.float32)
-    x = full[indices].reshape(1, -1)
-
-    model = HybridModel(len(indices), vqc_cfg)
-    model.load_state_dict(torch.load(vqc_cfg.checkpoint_file, map_location="cpu"))
-    model.eval()
-    with torch.no_grad():
-        prob_real = float(torch.sigmoid(model(torch.tensor(x, dtype=torch.float32))).item())
-
-    if prob_real >= decision_cfg.real_min_prob:
-        verdict, confidence = VERDICT_REAL, prob_real
-    elif prob_real <= decision_cfg.fake_max_prob:
-        verdict, confidence = VERDICT_FAKE, 1.0 - prob_real
-    else:
-        verdict, confidence = VERDICT_UNCERTAIN, max(prob_real, 1.0 - prob_real)
-
-    return {
-        "features": bridged,
-        "selected_indices": indices,
-        "selected_features": list(selection["selected_features"]),
-        "prob_real": prob_real,
-        "decision_bins": {
-            "fake_max_prob": decision_cfg.fake_max_prob,
-            "real_min_prob": decision_cfg.real_min_prob,
-            "label_real": LABEL_REAL,
-            "label_fake": LABEL_FAKE,
-        },
-        "verdict": verdict,
-        "confidence": confidence,
-    }
+    `predict_features` is the quantum layer's own inference entry point: it
+    applies the saved training-time QAOA indices to the 8-feature rPPG output
+    and returns P(real) plus the KYC verdict (REAL / FAKE / UNCERTAIN).
+    """
+    return predict_features(features)
 
 
 # ---------------------------------------------------------------------------

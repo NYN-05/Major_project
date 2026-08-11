@@ -58,7 +58,48 @@ def focal_loss(logits, targets, cfg):
     return focal.mean() - cfg.confidence_penalty * entropy.mean()
 
 
-def train_vqc(features, labels, cfg=None):
+def load_vqc_model(n_features, cfg=None):
+    """Build the HybridModel and load the saved checkpoint (evaluation + inference).
+
+    Compatible with both the current bundle format (dict with "state_dict"
+    and "metadata") and legacy bare-state_dict checkpoints.
+    """
+    cfg = cfg or VQCConfig()
+    model = HybridModel(n_features, cfg)
+    ckpt = torch.load(cfg.checkpoint_file, map_location="cpu")
+    state = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
+    model.load_state_dict(state)
+    model.eval()
+    return model
+
+
+def predict_vqc(model, X):
+    """P(real) for a (n, n_features) matrix from a trained VQC."""
+    with torch.no_grad():
+        logits = model(torch.tensor(np.asarray(X, dtype=np.float32)))
+    return torch.sigmoid(logits).numpy()
+
+
+def _val_metrics(model, X_val, y_val, cfg):
+    """Validation loss (same focal loss as training) + accuracy, eval-mode."""
+    model.eval()
+    with torch.no_grad():
+        X = torch.tensor(np.asarray(X_val, dtype=np.float32))
+        y = torch.tensor(np.asarray(y_val, dtype=np.float32))
+        val_loss = float(focal_loss(model(X), y, cfg).item())
+        probs = predict_vqc(model, X_val)
+    val_acc = float(((probs >= 0.5).astype(int) == np.asarray(y_val)).mean())
+    return val_loss, val_acc
+
+
+def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None):
+    """Train the hybrid VQC on the QAOA-selected features.
+
+    Architecture, optimizer, loss, and hyperparameters are unchanged;
+    `X_val`/`y_val` only add per-epoch validation monitoring (never used
+    for updates). The checkpoint is saved together with `metadata`
+    (QAOA selection, feature ordering, scaler, configs) for inference.
+    """
     cfg = cfg or VQCConfig()
     torch.manual_seed(cfg.seed)
     X = torch.tensor(np.asarray(features, dtype=np.float32))
@@ -72,6 +113,7 @@ def train_vqc(features, labels, cfg=None):
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay
     )
+    monitor_val = X_val is not None and y_val is not None
     log = []
     for epoch in range(cfg.epochs):
         model.train()
@@ -82,9 +124,17 @@ def train_vqc(features, labels, cfg=None):
             loss.backward()
             optimizer.step()
             total_loss += loss.item() * len(xb)
-        log.append({"epoch": epoch + 1, "train_loss": total_loss / len(features)})
+        record = {"epoch": epoch + 1, "train_loss": total_loss / len(features)}
+        if monitor_val:
+            val_loss, val_acc = _val_metrics(model, X_val, y_val, cfg)
+            record["val_loss"] = val_loss
+            record["val_accuracy"] = val_acc
+        log.append(record)
     cfg.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), cfg.checkpoint_file)
+    torch.save(
+        {"state_dict": model.state_dict(), "metadata": metadata or {}},
+        cfg.checkpoint_file,
+    )
     with open(cfg.log_file, "w") as fh:
         for row in log:
             fh.write(json.dumps(row) + "\n")

@@ -4,6 +4,10 @@ FF++/
 __pycache__/
 *.pyc
 
+# Python virtual environment
+venv/
+.env
+
 # Node dependencies
 node_modules/
 

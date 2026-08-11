@@ -68,19 +68,20 @@ no synthetic data is generated anywhere in the pipeline.
 - **Data** - `data.py` builds `output/data.npz` from the real labeled rPPG feature
   table `RPPG/dataset_features.csv` (rPPG label 1 = fake is flipped to the quantum
   convention LABEL_REAL = 1, LABEL_FAKE = 0) with a stratified train/val/test split
-- **QAOA feature selection** - selects the most informative rPPG features using a
-  cost Hamiltonian (mutual information weights + correlation redundancy penalty +
-  cardinality constraint), optimized with COBYLA
-- **Hybrid VQC** - angle-encoded features into a parameterized quantum circuit
-  (`StronglyEntanglingLayers`) feeding a small classical head
-- **Balanced focal loss** with label smoothing and confidence penalty
-- **Evaluation** - accuracy / precision / recall / F1 / AUC-ROC / ECE, KYC-friendly
-  decision bins (real / uncertain / fake), ROC and confusion-matrix plots
-- **Classical baselines** - MLP, RandomForest on the same features
+- **QAOA feature selection** - `qaoa.py` selects the most informative rPPG features
+  using a cost Hamiltonian (mutual information weights + correlation redundancy
+  penalty + cardinality constraint), optimized with COBYLA
+- **Hybrid VQC** - `vqc.py`: angle-encoded features into a parameterized quantum
+  circuit (`StronglyEntanglingLayers`) feeding a small classical head
+- **Evaluation** - `evaluate.py`: accuracy / precision / recall / F1 / AUC-ROC / ECE,
+  KYC-friendly decision bins (real / uncertain / fake), ROC and confusion-matrix
+  plots, plus classical baselines (MLP, RandomForest) on the same features
+- **Orchestration** - `pipeline.py` drives the full training flow and exposes
+  `predict_features()` as the single inference entry point used by `run_pipeline.py`
 
 ```bash
 # From WORKING/: build data, QAOA selection, train VQC, evaluate, baselines
-python -m quantum.run --all
+python -m quantum.pipeline --all
 ```
 
 ## Install

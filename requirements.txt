@@ -1,0 +1,30 @@
+# Global requirements for Deepfake-rPPG KYC pipeline (merged from WORKING/frame,
+# WORKING/RPPG, and WORKING/quantum). Install with:
+#   pip install -r requirements.txt
+# NOTE: frame/ pins opencv-python==4.6.0.66 but RPPG requires >=4.8.0;
+# the range below satisfies both and overrides the old frame pin.
+
+# ---------- CUDA-enabled PyTorch (CUDA 12.1) ----------
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+torch==2.5.1+cu121
+torchvision==0.20.1+cu121
+torchaudio==2.5.1+cu121
+
+# ---------- Stage 1: frame sampling / YOLO face detection ----------
+ultralytics==8.3.0
+
+# ---------- Stage 2: rPPG (MediaPipe, POS/CHROM, features) ----------
+mediapipe>=0.10.9
+streamlit>=1.30.0
+pandas>=2.0.0
+
+# ---------- Stage 3: quantum (PennyLane VQC + QAOA) ----------
+pennylane>=0.36.0
+
+# ---------- Shared numeric / ML / vision ----------
+numpy==1.26.4
+scipy>=1.11.0
+scikit-learn>=1.2.0
+matplotlib>=3.7.0
+opencv-python>=4.8.0,<5.0.0

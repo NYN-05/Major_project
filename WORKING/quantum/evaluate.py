@@ -6,6 +6,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     accuracy_score,
@@ -13,9 +14,10 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
+from sklearn.neural_network import MLPClassifier
 
 from quantum.config import DecisionConfig, VQCConfig
-from quantum.vqc import HybridModel
+from quantum.vqc import load_vqc_model, predict_vqc
 
 
 def expected_calibration_error(y_true, prob_real, n_bins=10):
@@ -94,12 +96,8 @@ def _plot_confusion(y_true, predictions, path):
 def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None):
     vqc_cfg = vqc_cfg or VQCConfig()
     decision_cfg = decision_cfg or DecisionConfig()
-    model = HybridModel(X_test.shape[1], vqc_cfg)
-    model.load_state_dict(torch.load(vqc_cfg.checkpoint_file, map_location="cpu"))
-    model.eval()
-    with torch.no_grad():
-        logits = model(torch.tensor(X_test, dtype=torch.float32))
-    prob_real = torch.sigmoid(logits).numpy()
+    model = load_vqc_model(X_test.shape[1], vqc_cfg)
+    prob_real = predict_vqc(model, X_test)
     payload = {
         "metrics": classification_metrics(y_test, prob_real),
         "decision_bins": decision_bins(y_test, prob_real, decision_cfg),
@@ -109,3 +107,25 @@ def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None):
     with open(vqc_cfg.metrics_file, "w") as fh:
         json.dump(payload, fh, indent=2)
     return payload
+
+
+def run_baselines(X_train, y_train, X_test, y_test, decision_cfg=None, seed=42):
+    """Classical research baselines (RandomForest, MLP) on the same
+    selected features; kept separate from the QAOA -> VQC decision path."""
+    decision_cfg = decision_cfg or DecisionConfig()
+    models = {
+        "random_forest": RandomForestClassifier(
+            n_estimators=200, random_state=seed, n_jobs=-1
+        ),
+        "mlp": MLPClassifier(
+            hidden_layer_sizes=(32, 16), max_iter=500, random_state=seed
+        ),
+    }
+    results = {}
+    for name, model in models.items():
+        model.fit(np.asarray(X_train), np.asarray(y_train))
+        prob_real = model.predict_proba(np.asarray(X_test))[:, 1]
+        results[name] = classification_metrics(y_test, prob_real)
+    with open(decision_cfg.metrics_baseline_file, "w") as fh:
+        json.dump(results, fh, indent=2)
+    return results
