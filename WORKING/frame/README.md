@@ -2,6 +2,11 @@
 
 A modular face processing pipeline for image, video, stream URL, and webcam input.
 
+This is **Component 1** of the deepfake-verification system under `WORKING/`:
+`frame` (this repo, stage 1) -> `RPPG/` (stage 2) -> `quantum/` (stage 3).
+It is invoked automatically by `WORKING/run_pipeline.py` (stage 1: frame sampling
++ quality assessment feeding the rPPG and quantum stages).
+
 ## Project Structure
 
 project_root/
