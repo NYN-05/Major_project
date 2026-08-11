@@ -2,7 +2,7 @@ import argparse
 
 from quantum.baselines import run_baselines
 from quantum.config import DataConfig, DecisionConfig, QAOASelectionConfig, VQCConfig
-from quantum.data import generate_dataset, load_dataset
+from quantum.data import build_dataset, load_dataset
 from quantum.evaluate import evaluate_quantum_model
 from quantum.selection import QAOASelector, load_selection, save_selection, verify_hamiltonian
 from quantum.vqc import train_vqc
@@ -12,7 +12,7 @@ def build_parser():
     parser = argparse.ArgumentParser(
         description="Quantum decision layer: QAOA feature selection + hybrid VQC classification."
     )
-    parser.add_argument("--gen-data", action="store_true", help="Generate the synthetic rPPG dataset")
+    parser.add_argument("--build-data", action="store_true", help="Build data.npz from the real rPPG feature table")
     parser.add_argument("--select", action="store_true", help="Run QAOA feature selection")
     parser.add_argument("--train", action="store_true", help="Train the hybrid VQC")
     parser.add_argument("--evaluate", action="store_true", help="Evaluate the trained VQC")
@@ -31,7 +31,7 @@ def main():
 
     if not any(
         [
-            args.gen_data,
+            args.build_data,
             args.select,
             args.train,
             args.evaluate,
@@ -42,9 +42,9 @@ def main():
         parser.print_help()
         return 2
 
-    if args.gen_data or args.all:
-        print("[1/6] Generating synthetic rPPG feature dataset...")
-        generate_dataset(data_cfg)
+    if args.build_data or args.all:
+        print("[1/6] Building dataset from rPPG layer output...")
+        build_dataset(data_cfg)
     data = load_dataset(data_cfg.data_file)
     for key in ("X_train", "X_val", "X_test"):
         print(f"  {key}: {data[key].shape}")

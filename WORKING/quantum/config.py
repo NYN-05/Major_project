@@ -4,28 +4,28 @@ from pathlib import Path
 LABEL_REAL = 1
 LABEL_FAKE = 0
 
+# Feature contract: the raw 8-feature vector produced by the rPPG layer
+# (same names/order as RPPGFeatures.feature_names() in RPPG/rppg/features.py).
 FEATURE_NAMES = [
-    "temporal_consistency",
-    "inter_region_agreement",
-    "signal_stability",
-    "amplitude_reliability",
-    "rhythm_quality",
-    "sync_behavior",
-    "frame_quality_score",
-    "roi_stability",
-    "temporal_coverage_ratio",
+    "heart_rate_bpm",
+    "snr_db",
+    "prv_std_ms",
+    "spectral_entropy",
+    "mad",
+    "signal_quality_index",
+    "cheek_forehead_correlation",
+    "left_right_cheek_correlation",
 ]
 
 FEATURE_MEANINGS = {
-    "temporal_consistency": "Coherence of the recovered pulse signal across the sampled sequence",
-    "inter_region_agreement": "Agreement between left cheek, right cheek, and forehead signals",
-    "signal_stability": "Waveform stability of the rPPG signal over time",
-    "amplitude_reliability": "Strength and reliability of the pulse amplitude",
-    "rhythm_quality": "Periodicity and biological plausibility of the rhythm",
-    "sync_behavior": "Synchronization behavior across facial regions",
-    "frame_quality_score": "Mean frame quality score from the extraction pipeline",
-    "roi_stability": "ROI consistency across the frame sequence",
-    "temporal_coverage_ratio": "Fraction of sampled frames accepted after quality filtering",
+    "heart_rate_bpm": "Dominant pulse frequency (BPM) of the recovered rPPG signal",
+    "snr_db": "Signal-to-noise ratio of the pulse spectrum (dB)",
+    "prv_std_ms": "Pulse rate variability: std of inter-beat intervals (ms)",
+    "spectral_entropy": "Shannon entropy of the normalized in-band power spectrum",
+    "mad": "Mean absolute deviation of the pulse waveform",
+    "signal_quality_index": "Beat-regularity and spectral-concentration quality in [0, 1]",
+    "cheek_forehead_correlation": "Pearson correlation between cheek and forehead pulse signals",
+    "left_right_cheek_correlation": "Pearson correlation between left and right cheek pulse signals",
 }
 
 QUANTUM_ROOT = Path(__file__).resolve().parent
@@ -36,9 +36,11 @@ DOCS_DIR = QUANTUM_ROOT / "docs"
 @dataclass(frozen=True)
 class DataConfig:
     seed: int = 42
-    train_per_class: int = 400
-    val_per_class: int = 80
-    test_per_class: int = 80
+    train_ratio: float = 0.6
+    val_ratio: float = 0.2
+    csv_file: Path = field(
+        default_factory=lambda: QUANTUM_ROOT.parent / "RPPG" / "dataset_features.csv"
+    )
     data_file: Path = field(default_factory=lambda: OUTPUT_DIR / "data.npz")
 
 
