@@ -18,6 +18,3 @@ WORKING/frame/weights/yolov9e-face-lindevs.pt
 
 # Regenerated pipeline output (any directory named "output" at any level)
 output/
-
-# Unregistered experiment directory (nested repo with no .gitmodules)
-WORKING/RPPG/
