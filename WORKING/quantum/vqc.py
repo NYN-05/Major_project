@@ -8,18 +8,23 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from quantum.config import VQCConfig
+from quantum.devices import vqc_device
 
 
 class QuantumLayer(nn.Module):
     def __init__(self, n_qubits, cfg):
         super().__init__()
-        dev = qml.device("default.qubit", wires=n_qubits)
+        # Simulator resolved with auto-fallback (lightning.gpu ->
+        # lightning.qubit -> default.qubit); adjoint gives the same
+        # analytic statevector gradients as backprop and is supported on
+        # all three backends.
+        dev = vqc_device(n_qubits)
         weight_shape = qml.StronglyEntanglingLayers.shape(
             n_layers=cfg.qml_layers, n_wires=n_qubits
         )
         self.weights = nn.Parameter(0.1 * torch.randn(*weight_shape))
 
-        @qml.qnode(dev, interface="torch", diff_method="backprop")
+        @qml.qnode(dev, interface="torch", diff_method="adjoint")
         def circuit(features, weights):
             qml.AngleEmbedding(features, wires=range(n_qubits), rotation="Y")
             qml.StronglyEntanglingLayers(weights, wires=range(n_qubits))

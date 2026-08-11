@@ -6,6 +6,7 @@ from scipy.optimize import minimize
 from sklearn.feature_selection import mutual_info_classif
 
 from quantum.config import FEATURE_NAMES, QAOASelectionConfig
+from quantum.devices import qaoa_device
 
 
 def _normalize_weights(weights):
@@ -52,7 +53,7 @@ def _classical_cost(bitstring, weights, correlation, cfg):
 
 def _make_circuits(coeffs, ops, wires):
     hamiltonian = qml.Hamiltonian(coeffs, ops)
-    dev = qml.device("default.qubit", wires=wires)
+    dev = qaoa_device(wires)
 
     def _apply_qaoa(params):
         for wire in range(wires):
@@ -113,7 +114,7 @@ def verify_hamiltonian(X, y, cfg=None):
     weights = _normalize_weights(mutual_info_classif(X, y, random_state=cfg.seed))
     correlation = np.abs(np.corrcoef(X.T))
     coeffs, ops = _cost_terms(weights, correlation, cfg)
-    dev = qml.device("default.qubit", wires=X.shape[1])
+    dev = qaoa_device(X.shape[1])
 
     @qml.qnode(dev)
     def basis_cost(bitstring):
