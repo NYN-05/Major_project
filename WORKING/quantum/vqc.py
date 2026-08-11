@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pennylane as qml
@@ -56,6 +57,21 @@ def focal_loss(logits, targets, cfg):
         (1 - probs).clamp(min=1e-6)
     )
     return focal.mean() - cfg.confidence_penalty * entropy.mean()
+
+
+def _sanitize_metadata(obj):
+    """Recursively convert metadata to JSON-safe (weights_only-loadable) values.
+
+    torch.load defaults to weights_only=True since PyTorch 2.6; Path objects
+    in dataclass configs would otherwise break checkpoint reloading.
+    """
+    if isinstance(obj, dict):
+        return {str(k): _sanitize_metadata(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_metadata(v) for v in obj]
+    if isinstance(obj, Path):
+        return str(obj)
+    return obj
 
 
 def load_vqc_model(n_features, cfg=None):
@@ -132,7 +148,7 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
         log.append(record)
     cfg.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
-        {"state_dict": model.state_dict(), "metadata": metadata or {}},
+        {"state_dict": model.state_dict(), "metadata": _sanitize_metadata(metadata or {})},
         cfg.checkpoint_file,
     )
     with open(cfg.log_file, "w") as fh:
