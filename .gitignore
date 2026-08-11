@@ -1,4 +1,18 @@
 FF++/
-Implementation/weights/yolov8x-face-lindevs.pt
-Implementation/weights/yolov9e-face-lindevs.pt
-quantum/frontend/node_modules/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Node dependencies
+node_modules/
+
+# Model weights larger than GitHub's 100 MB limit
+WORKING/frame/weights/yolov8x-face-lindevs.pt
+WORKING/frame/weights/yolov9e-face-lindevs.pt
+
+# Regenerated pipeline output
+WORKING/frame/output/
+
+# Unregistered experiment directory (nested repo with no .gitmodules)
+WORKING/RPPG/
