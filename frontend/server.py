@@ -25,6 +25,7 @@ import mimetypes
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -43,11 +44,87 @@ CANONICAL_RESULT = RESULTS_DIR / "pipeline_result.json"
 
 PORT = int(os.environ.get("FRONTEMD_PORT", "8000"))
 JOB_TTL_SECONDS = 60 * 60
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
+MAX_CONCURRENT_JOBS = 2
+SEQUENCE_TTL_SECONDS = 24 * 60 * 60  # frame_sequences retention
 
 STAGE_TAGS = ("[1/3]", "[2/3]", "[3/3]")
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
+JOB_SLOTS = threading.Semaphore(MAX_CONCURRENT_JOBS)
+
+
+def _looks_like_video(body: bytes) -> bool:
+    """Light container signature check (mp4/mov, avi, webm/mkv).
+
+    Rejects accidental text/HTML/zip uploads up front with a clear
+    error instead of a confusing pipeline failure later.
+    """
+    if len(body) < 12:
+        return False
+    if body[:4] == b"RIFF" and body[8:12] == b"AVI ":
+        return True
+    if body[:4] == b"\x1aE\xdf\xa3":
+        return True  # webm/mkv
+    head = body[:4096]
+    return b"ftyp" in head  # mp4 / mov (isom, avc1, qt, ...)
+
+
+def _video_ext(body: bytes) -> str:
+    if len(body) >= 12 and body[:4] == b"RIFF" and body[8:12] == b"AVI ":
+        return ".avi"
+    if len(body) >= 4 and body[:4] == b"\x1aE\xdf\xa3":
+        return ".webm"
+    return ".mp4"
+
+
+def _safe_stem(name: str, job_id: str) -> str:
+    """Filesystem-safe directory key shared by the frame sequence,
+    the signal dump, and the frontend thumbnail lookup."""
+    stem = re.sub(r"[^A-Za-z0-9._-]", "_", Path(name).stem)[:60] or "video"
+    return f"{job_id[:8]}_{stem}"
+
+
+def _prune_artifacts() -> None:
+    """Bound disk usage: drop stale uploaded videos, old frame
+    sequences, and orphaned signal dumps / job result JSONs."""
+    now = time.time()
+    try:
+        INBOX.mkdir(parents=True, exist_ok=True)
+        for p in INBOX.iterdir():
+            if p.is_file() and now - p.stat().st_mtime > 60 * 60:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    try:
+        frames_root = OUTPUT_ROOT / "frames" / "frame_sequences"
+        if frames_root.is_dir():
+            for seq in frames_root.iterdir():
+                if seq.is_dir() and now - seq.stat().st_mtime > SEQUENCE_TTL_SECONDS:
+                    try:
+                        shutil.rmtree(seq, ignore_errors=True)
+                    except OSError:
+                        pass
+    except OSError:
+        pass
+    for root, pattern in (
+        (RESULTS_DIR, "signal_*.json"),
+        (RESULTS_DIR, "pipeline_result_*.json"),
+    ):
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            for p in root.glob(pattern):
+                if now - p.stat().st_mtime > JOB_TTL_SECONDS:
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+        except OSError:
+            pass
 
 
 def _trim_jobs() -> None:
@@ -96,15 +173,48 @@ def _run_job(job: dict, video_path: Path) -> None:
         if not out_json.exists():
             raise RuntimeError("pipeline produced no result JSON")
         result = json.loads(out_json.read_text(encoding="utf-8"))
-        result["_signal"] = _dump_signal(job, video_path.name)
+        result["video"] = Path(result.get("video", video_path.name)).name
         job["result"] = result
         job["video"] = video_path.name
         job["done"] = True
+        # Verdict first; the optional signal-waveform dump continues in
+        # the background so the result is not delayed by ~30s.
         job["queue"].put(("result", result))
+        _write_canonical(result, signal_rel=None)
+        threading.Thread(
+            target=_signal_dump_worker, args=(job, video_path, result), daemon=True
+        ).start()
     except Exception as exc:  # noqa: BLE001 - surface to the UI
         job["error"] = str(exc)
         job["done"] = True
         job["queue"].put(("error", str(exc)))
+    finally:
+        try:
+            video_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        JOB_SLOTS.release()
+
+
+def _write_canonical(result: dict, signal_rel: str | None) -> None:
+    """Keep the '/api/previous' result file in sync with the last run
+    (including the signal rel once the background dump finishes)."""
+    try:
+        canonical = dict(result)
+        canonical["_signal"] = signal_rel
+        CANONICAL_RESULT.write_text(json.dumps(canonical), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _signal_dump_worker(job: dict, video_path: Path, result: dict) -> None:
+    """Best-effort background signal reconstruction (~30s). Emits a
+    'signal' SSE event with the artifact rel path when ready."""
+    rel = _dump_signal(job, video_path.name)
+    if rel:
+        job["signal"] = rel
+        job["queue"].put(("signal", rel))
+        _write_canonical(result, signal_rel=rel)
 
 
 def _dump_signal(job: dict, video_name: str) -> str | None:
@@ -192,13 +302,50 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0:
             self._json({"error": "empty upload"}, 400)
             return
+        if length > MAX_UPLOAD_BYTES:
+            self._json(
+                {
+                    "error": "file too large",
+                    "message": f"Videos are limited to {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                },
+                413,
+            )
+            return
+        if not JOB_SLOTS.acquire(blocking=False):
+            self._json(
+                {
+                    "error": "busy",
+                    "message": "Another analysis is already running. Wait for it to finish, then retry.",
+                },
+                429,
+            )
+            return
         body = self.rfile.read(length)
+        if not _looks_like_video(body):
+            JOB_SLOTS.release()
+            self._json(
+                {
+                    "error": "unsupported file",
+                    "message": "The uploaded file does not look like a supported video (MP4, MOV, AVI, WebM).",
+                },
+                415,
+            )
+            return
 
         _trim_jobs()
+        _prune_artifacts()
         job_id = uuid.uuid4().hex
         INBOX.mkdir(parents=True, exist_ok=True)
-        video_path = INBOX / f"{job_id}.mp4"
-        video_path.write_bytes(body)
+        # Sanitized filename: the frame-sequence dir, the signal dump and
+        # the frontend thumbnail lookup all key off this name.
+        inbox_name = f"{_safe_stem(self.headers.get('X-Filename', 'video'), job_id)}{_video_ext(body)}"
+        video_path = INBOX / inbox_name
+        try:
+            video_path.write_bytes(body)
+        except OSError:
+            JOB_SLOTS.release()
+            self._json({"error": "could not store upload"}, 500)
+            return
 
         job = {
             "id": job_id,
@@ -208,7 +355,8 @@ class Handler(BaseHTTPRequestHandler):
             "done": False,
             "error": None,
             "result": None,
-            "video": None,
+            "video": video_path.name,
+            "signal": None,
         }
         with JOBS_LOCK:
             JOBS[job_id] = job
@@ -245,11 +393,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"result": None})
             return
         result = json.loads(CANONICAL_RESULT.read_text(encoding="utf-8"))
-        signal = None
-        for sig in RESULTS_DIR.glob("signal_*.json"):
-            signal = f"pipeline/{sig.name}"
-            break
-        result["_signal"] = signal
+        name = Path(result.get("video", ""))
+        if str(name) and (name.is_absolute() or "\\" in str(name)):
+            result["video"] = name.name
         self._json({"result": result})
 
     def _job(self, job_id: str) -> None:
@@ -262,6 +408,7 @@ class Handler(BaseHTTPRequestHandler):
                 "done": job["done"],
                 "error": job["error"],
                 "video": job["video"],
+                "signal": job.get("signal"),
                 "lines": job["lines"][-400:],
                 "result": job["result"],
             }

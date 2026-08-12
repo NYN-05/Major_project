@@ -1632,6 +1632,133 @@ button {
 }
 
 /* ------------------------------------------------------------------ */
+/* video selected (metadata + preview)                                 */
+/* ------------------------------------------------------------------ */
+
+.selected {
+  position: relative;
+  overflow: hidden;
+  margin-top: 26px;
+  padding: 30px;
+  border-radius: calc(var(--radius) + 6px);
+  background: var(--panel);
+  border: 1px solid var(--line-soft);
+  box-shadow: var(--shadow-lift);
+  display: grid;
+  gap: 26px;
+  align-items: center;
+}
+
+.selected-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(480px 260px at 20% 0%, var(--glow-lime), transparent 70%);
+  opacity: 0.35;
+}
+
+.selected-preview {
+  position: relative;
+  justify-self: center;
+  width: 100%;
+  max-width: 420px;
+}
+
+.selected-preview video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: #000;
+  object-fit: contain;
+  border: 1px solid var(--line-soft);
+}
+
+.selected-preview-ph {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+  border: 1px dashed var(--line);
+  background: var(--panel-2);
+}
+
+.selected-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #000;
+  background: var(--quantum);
+  box-shadow: 0 6px 18px -6px var(--glow-lime);
+}
+
+.selected-body {
+  min-width: 0;
+}
+
+.selected-title {
+  margin: 5px 0 6px;
+  font-size: clamp(19px, 3vw, 24px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  word-break: break-all;
+}
+
+.selected-sub {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--dim);
+}
+
+.selected-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin: 20px 0 0;
+}
+
+.sm {
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+}
+
+.sm dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.sm dd {
+  margin: 3px 0 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 760px) {
+  .selected {
+    grid-template-columns: minmax(0, 0.9fr) 1.1fr;
+    gap: 34px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* misc                                                                */
 /* ------------------------------------------------------------------ */
 

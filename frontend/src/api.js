@@ -1,7 +1,15 @@
 const fileUrl = (rel) => `/api/files?rel=${encodeURIComponent(rel)}`;
 
 async function detect(videoFile) {
-  const res = await fetch("/api/detect", { method: "POST", body: videoFile });
+  const res = await fetch("/api/detect", {
+    method: "POST",
+    headers: { "X-Filename": videoFile.name },
+    body: videoFile,
+  });
+  if (res.status === 413 || res.status === 415 || res.status === 429) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `upload rejected (${res.status})`);
+  }
   if (!res.ok) throw new Error(`upload failed (${res.status})`);
   return res.json();
 }

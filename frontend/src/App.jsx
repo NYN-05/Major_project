@@ -4,6 +4,7 @@ import { artifacts, detect, fileUrl, previous, stream } from "./api.js";
 import { useElapsed, useSignalFile, useTheme } from "./hooks.js";
 import Header from "./components/Header.jsx";
 import UploadZone from "./components/UploadZone.jsx";
+import VideoSelected from "./components/VideoSelected.jsx";
 import Pipeline from "./components/Pipeline.jsx";
 import VerdictPanel from "./components/VerdictPanel.jsx";
 import Insights from "./components/Insights.jsx";
@@ -15,13 +16,16 @@ import FrameSamples from "./components/FrameSamples.jsx";
 const stemOf = (name) => (name ? String(name).replace(/\.\w+$/, "") : null);
 
 export default function App() {
-  const [phase, setPhase] = useState("idle"); // idle | running | done | error
+  const [phase, setPhase] = useState("idle"); // idle | selected | running | done | error
+  const [file, setFile] = useState(null);
+  const [videoMeta, setVideoMeta] = useState(null); // local probe: {name,size,duration,width,height}
   const [result, setResult] = useState(null);
   const [stageIdx, setStageIdx] = useState(0);
   const [videoName, setVideoName] = useState(null);
   const [lastElapsed, setLastElapsed] = useState(null);
   const [runError, setRunError] = useState(null);
   const [lines, setLines] = useState([]);
+  const [signalRel, setSignalRel] = useState(null);
   const [theme, setTheme] = useTheme();
   const elapsed = useElapsed(phase === "running");
   const elapsedRef = useRef(0);
@@ -31,22 +35,53 @@ export default function App() {
     previous().then(({ result: prev }) => {
       if (prev) {
         setResult(prev);
-        setVideoName(prev.video);
+        setVideoName(prev.video?.name ?? prev.video);
       }
     });
   }, []);
 
   const reset = () => {
     setPhase("idle");
+    setFile(null);
+    setVideoMeta(null);
     setResult(null);
     setStageIdx(0);
     setVideoName(null);
     setLastElapsed(null);
     setRunError(null);
     setLines([]);
+    setSignalRel(null);
   };
 
-  const run = useCallback((file) => {
+  const pickFile = (f) => {
+    setRunError(null);
+    setFile(f);
+    setSignalRel(null);
+    const meta = { name: f.name, size: f.size, duration: null, width: null, height: null };
+    try {
+      const url = URL.createObjectURL(f);
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.onloadedmetadata = () => {
+        setVideoMeta({
+          name: f.name,
+          size: f.size,
+          duration: Number.isFinite(v.duration) ? v.duration : null,
+          width: v.videoWidth || null,
+          height: v.videoHeight || null,
+        });
+        URL.revokeObjectURL(url);
+      };
+      v.onerror = () => URL.revokeObjectURL(url);
+      v.src = url;
+    } catch {
+      /* metadata is best-effort */
+    }
+    setPhase("selected");
+  };
+
+  const run = useCallback(() => {
+    if (!file) return;
     setPhase("running");
     setResult(null);
     setStageIdx(0);
@@ -54,6 +89,7 @@ export default function App() {
     setLastElapsed(null);
     setRunError(null);
     setLines([]);
+    setSignalRel(null);
     detect(file)
       .then(({ job }) => {
         stream(job, {
@@ -62,6 +98,7 @@ export default function App() {
             const m = l.match(/\[(\d)\/3\]/);
             if (m) setStageIdx(parseInt(m[1], 10));
           },
+          signal: (rel) => setSignalRel(rel),
           result: (res) => {
             setResult(res);
             setStageIdx(3);
@@ -78,13 +115,13 @@ export default function App() {
         setRunError(String(err));
         setPhase("error");
       });
-  }, []);
+  }, [file]);
 
-  const signalRel = result?._signal;
-  const signalData = useSignalFile(fileUrl, signalRel);
+  const signalRel2 = result?._signal ?? signalRel;
+  const signalData = useSignalFile(fileUrl, signalRel2);
 
   const haveResult = Boolean(result) && phase !== "running" && phase !== "error";
-  const stem = stemOf(videoName ?? result?.video);
+  const stem = stemOf(videoName ?? result?.video?.name ?? result?.video);
 
   return (
     <div className="shell">
@@ -109,7 +146,14 @@ export default function App() {
           </motion.div>
         )}
 
-        {phase === "running" || phase === "done" ? (
+        {phase === "selected" ? (
+          <VideoSelected
+            file={file}
+            meta={videoMeta}
+            onStart={run}
+            onChange={() => setPhase("idle")}
+          />
+        ) : phase === "running" || phase === "done" ? (
           <Pipeline
             stageIdx={stageIdx}
             elapsed={elapsed}
@@ -120,14 +164,18 @@ export default function App() {
             resultElapsed={lastElapsed}
           />
         ) : (
-          <UploadZone phase={phase} onFile={run} />
+          <UploadZone phase={phase} onFile={pickFile} />
         )}
 
         {haveResult && (
           <>
             <VerdictPanel result={result} onTryAgain={reset} />
             <Insights result={result} />
-            <SignalViz signalData={signalData} bpm={result?.stages?.rppg?.features?.heart_rate_bpm} sqi={result?.stages?.rppg?.features?.signal_quality_index} />
+            <SignalViz
+              signalData={signalData}
+              bpm={result?.stages?.rppg?.features?.heart_rate_bpm}
+              sqi={result?.stages?.rppg?.features?.signal_quality_index}
+            />
             <QuantumViz result={result} />
             <FileInfo result={result} />
             <FrameSamples result={result} artifacts={artifacts} />
