@@ -1,44 +1,43 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { artifacts, detect, fileUrl, health, previous, stream } from "./api.js";
+import { artifacts, detect, fileUrl, previous, stream } from "./api.js";
+import ProgressBar from "./components/ProgressBar.jsx";
 
 /* ------------------------------------------------------------------ */
 /* constant meta                                                       */
 /* ------------------------------------------------------------------ */
 
-const STAGES = ["01 FRAMES", "02 PHYSIOLOGY", "03 QUANTUM"];
-
-const FEATURE_META = [
-  ["heart_rate_bpm", "Heart rate", "BPM"],
-  ["snr_db", "Signal-to-noise", "dB"],
-  ["prv_std_ms", "Pulse-rate variability", "ms"],
-  ["spectral_entropy", "Spectral entropy", "nats"],
-  ["mad", "Mean absolute deviation", "a.u."],
-  ["signal_quality_index", "Signal quality index", "0–1"],
-  ["cheek_forehead_correlation", "Cheek ↔ forehead correlation", "r"],
-  ["left_right_cheek_correlation", "Left ↔ right cheek correlation", "r"],
+const SIMPLE_STEPS = [
+  ["Checking the video quality", "Splitting the video into frames and keeping only the clear, usable ones."],
+  ["Measuring the pulse from the face", "Tracking tiny skin-color changes — a live person's face shows a very small pulse."],
+  ["Running the final check", "Combining every measurement into a single verdict."],
 ];
 
-const DECISION = {
-  REAL: { word: "Verified", tone: "ok", note: "Physiological signal consistent with a live subject." },
-  FAKE: { word: "Rejected", tone: "bad", note: "Physiological evidence inconsistent with a live subject." },
-  UNCERTAIN: { word: "Needs review", tone: "warn", note: "Below the confidence floor. Escalate for manual review." },
+const PLAIN = {
+  REAL: {
+    word: "Looks authentic",
+    icon: "✓",
+    tone: "ok",
+    note: "This video shows a real, live person. The natural pulse of the face matches a genuine recording.",
+  },
+  FAKE: {
+    word: "Likely AI-generated",
+    icon: "✗",
+    tone: "bad",
+    note: "This video does not show the natural pulse of a live person — typical of AI-generated or manipulated footage.",
+  },
+  UNCERTAIN: {
+    word: "Can't decide — needs a human check",
+    icon: "?",
+    tone: "warn",
+    note: "The signal was too weak for a confident decision. A manual review is recommended.",
+  },
 };
+
+const confWord = (c) => (c >= 0.6 ? "High confidence" : c >= 0.3 ? "Moderate confidence" : "Low confidence");
 
 /* ------------------------------------------------------------------ */
 /* hooks                                                               */
 /* ------------------------------------------------------------------ */
-
-function usePrefersReducedMotion() {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReduced(mq.matches);
-    const cb = (e) => setReduced(e.matches);
-    mq.addEventListener("change", cb);
-    return () => mq.removeEventListener("change", cb);
-  }, []);
-  return reduced;
-}
 
 function useElapsed(active) {
   const [elapsed, setElapsed] = useState(0);
@@ -49,6 +48,47 @@ function useElapsed(active) {
     return () => clearInterval(id);
   }, [active]);
   return elapsed;
+}
+
+function useTheme() {
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem("rppgqc.theme");
+      if (saved === "light" || saved === "dark") return saved;
+    } catch {
+      /* storage unavailable */
+    }
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    try {
+      localStorage.setItem("rppgqc.theme", theme);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [theme]);
+
+  return [theme, setTheme];
+}
+
+function useThumbs(videoStem) {
+  const [thumbs, setThumbs] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    if (!videoStem) {
+      setThumbs([]);
+      return undefined;
+    }
+    artifacts(`frames/frame_sequences/${videoStem}/frames`).then(({ files }) => {
+      if (alive) setThumbs(files.slice(0, 12));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [videoStem]);
+  return thumbs;
 }
 
 const fmtClock = (s) => {
@@ -64,338 +104,203 @@ const fmtVal = (v, digits = 3) => {
 };
 
 /* ------------------------------------------------------------------ */
-/* waveform                                                            */
+/* simple view                                                         */
 /* ------------------------------------------------------------------ */
 
-function Waveform({ signal, caption }) {
-  const ref = useRef(null);
-  const reduced = usePrefersReducedMotion();
-
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    const ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, w, h);
-
-    ctx.strokeStyle = "rgba(74, 102, 136, 0.22)";
-    ctx.lineWidth = 1;
-    for (let x = 0; x <= w; x += 26) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
-      ctx.stroke();
-    }
-    for (let y = 0; y <= h; y += 26) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-    }
-
-    const data = Array.isArray(signal) ? signal : [];
-    if (data.length === 0) {
-      ctx.strokeStyle = "rgba(132, 150, 172, 0.5)";
-      ctx.setLineDash([4, 6]);
-      ctx.beginPath();
-      ctx.moveTo(0, h / 2);
-      ctx.lineTo(w, h / 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      return;
-    }
-
-    const finite = data.filter((v) => typeof v === "number" && Number.isFinite(v));
-    const lo = Math.min(...finite);
-    const hi = Math.max(...finite);
-    const mid = (lo + hi) / 2;
-    const half = Math.max((hi - lo) / 2, 1e-9);
-    const pad = 10;
-    const ys = data.map((v) =>
-      typeof v === "number" && Number.isFinite(v)
-        ? h / 2 + ((v - mid) / half) * (h / 2 - pad)
-        : null
-    );
-
-    const drawTo = (frac) => {
-      const count = Math.max(1, Math.floor((ys.length - 1) * frac));
-      ctx.strokeStyle = "#F05050";
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      let started = false;
-      for (let i = 0; i <= count; i += 1) {
-        const y = ys[i];
-        if (y === null) {
-          started = false;
-          continue;
-        }
-        const x = ys.length > 1 ? (i / (ys.length - 1)) * w : w / 2;
-        if (!started) {
-          ctx.moveTo(x, y);
-          started = true;
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-      ctx.stroke();
-    };
-
-    if (reduced) {
-      drawTo(1);
-      return;
-    }
-    let raf;
-    const t0 = performance.now();
-    const dur = 1200;
-    const step = (t) => {
-      const p = Math.min(1, (t - t0) / dur);
-      const ease = 1 - Math.pow(1 - p, 3);
-      ctx.clearRect(0, 0, w, h);
-      for (let x = 0; x <= w; x += 26) {
-        ctx.strokeStyle = "rgba(74, 102, 136, 0.22)";
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-      }
-      for (let y = 0; y <= h; y += 26) {
-        ctx.strokeStyle = "rgba(74, 102, 136, 0.22)";
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-      }
-      drawTo(ease);
-      if (p < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [signal, reduced]);
-
+function VideoStrip({ videoName, meta, elapsed }) {
+  if (!videoName) return null;
+  const parts = [];
+  if (meta?.duration) parts.push(fmtClock(meta.duration));
+  if (meta?.size) parts.push(`${(meta.size / 1048576).toFixed(1)} MB`);
+  if (elapsed != null) parts.push(`analyzed in ${fmtClock(elapsed)}`);
   return (
-    <figure className="wave">
-      <canvas ref={ref} className="wave-canvas" />
-      <figcaption className="wave-cap">{caption}</figcaption>
-    </figure>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* verdict rig                                                         */
-/* ------------------------------------------------------------------ */
-
-function VerdictRig({ result, signalData }) {
-  const label = result?.verdict?.label ?? "UNCERTAIN";
-  const dec = DECISION[label] ?? DECISION.UNCERTAIN;
-  const confidence = result?.verdict?.confidence;
-  const probReal = result?.stages?.quantum?.prob_real;
-  const reason = result?.verdict?.reason;
-
-  return (
-    <section className="rig" aria-label="verdict">
-      <div className="rig-verdict">
-        <span className="eyebrow mono">FINAL DECISION</span>
-        <h2 className={`verdict-word tone-${dec.tone}`}>{dec.word}</h2>
-        {confidence !== undefined && confidence !== null && (
-          <p className="verdict-conf mono">
-            confidence {fmtVal(confidence, 4)} · P(real) {fmtVal(probReal, 4)}
-          </p>
-        )}
-        <p className="verdict-note">{reason || dec.note}</p>
-      </div>
-
-      <div className="rig-signal">
-        <Waveform
-          signal={signalData?.signal}
-          caption={
-            signalData
-              ? `∿ combined rPPG pulse · POS · ${signalData.fps ?? "—"} fps · ${signalData.n ?? "—"} usable frames`
-              : "∿ waveform unavailable — pulse trace not archived for this run"
-          }
-        />
-        {probReal !== undefined && (
-          <div className="gauge">
-            <div className="gauge-scale">
-              <div className="gauge-fill" style={{ width: `${Math.max(0, Math.min(1, probReal)) * 100}%` }} />
-              <span className="tick tick-l" style={{ left: "30%" }} />
-              <span className="tick tick-r" style={{ left: "70%" }} />
-            </div>
-            <div className="gauge-labels mono">
-              <span>FAKE</span>
-              <span style={{ left: "30%" }}>0.30</span>
-              <span style={{ left: "70%" }}>0.70</span>
-              <span>REAL</span>
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* evidence cards                                                      */
-/* ------------------------------------------------------------------ */
-
-function Card({ no, title, children, wide }) {
-  return (
-    <section className={`card${wide ? " card-wide" : ""}`}>
-      <header className="card-head">
-        <span className="card-no mono">{no}</span>
-        <h3 className="card-title">{title}</h3>
-      </header>
-      <div className="card-body">{children}</div>
-    </section>
-  );
-}
-
-function Stat({ k, v }) {
-  return (
-    <div className="stat">
-      <span className="stat-k mono">{k}</span>
-      <span className="stat-v">{v}</span>
+    <div className="vid-strip">
+      <span className="vid-name">{videoName}</span>
+      {parts.map((p) => (
+        <span key={p} className="vid-meta mono">
+          {p}
+        </span>
+      ))}
     </div>
   );
 }
 
-function FramesCard({ frames, videoStem }) {
-  const [thumbs, setThumbs] = useState([]);
-
-  useEffect(() => {
-    let alive = true;
-    if (!videoStem) {
-      setThumbs([]);
-      return undefined;
-    }
-    artifacts(`frames/frame_sequences/${videoStem}/frames`).then(({ files }) => {
-      if (alive) setThumbs(files.slice(0, 12));
-    });
-    return () => {
-      alive = false;
-    };
-  }, [videoStem]);
-
-  if (!frames || frames.status !== "success") {
-    return (
-      <Card no="01" title="Frames">
-        <p className="empty-note">No frame-stage evidence for this result.</p>
-      </Card>
-    );
-  }
-  const s = frames.stats ?? {};
-  const rejections = s.rejections ?? {};
-  const reasons = Object.entries(rejections);
+function SimpleVerdict({ result, onTryAgain }) {
+  const label = result?.verdict?.label ?? "UNCERTAIN";
+  const p = PLAIN[label] ?? PLAIN.UNCERTAIN;
+  const conf = result?.verdict?.confidence;
+  const probReal = result?.stages?.quantum?.prob_real;
+  const score = probReal ?? conf;
 
   return (
-    <Card no="01" title="Frames">
-      <div className="stat-grid">
-        <Stat k="accepted" v={`${s.accepted_frames ?? 0} / ${s.sampled_frames ?? 0}`} />
-        <Stat k="mean quality" v={fmtVal(s.mean_quality_score, 3)} />
-        <Stat k="temporal coverage" v={`${fmtVal((s.temporal_coverage_ratio ?? 0) * 100, 0)}%`} />
+    <section className="simple-verdict" aria-label="verification result">
+      <div className={`sv-badge sv-${p.tone}`} aria-hidden="true">
+        {p.icon}
       </div>
-      {reasons.length > 0 && (
-        <div className="chips">
-          {reasons.map(([k, v]) => (
-            <span key={k} className="chip chip-warn mono">
-              {k} ×{v}
-            </span>
-          ))}
+      <div className="sv-main">
+        <span className="sv-eyebrow">Verification result</span>
+        <h2 className={`sv-word tone-${p.tone}`}>{p.word}</h2>
+        <p className="sv-note">{p.note}</p>
+        {conf != null && (
+          <p className="sv-conf">
+            {confWord(conf)}
+            {score != null && (
+              <span className="sv-conf-num mono"> · live-signal score {fmtVal(score, 3)}</span>
+            )}
+          </p>
+        )}
+        <div className="sv-actions">
+          <button className="btn btn-primary" onClick={onTryAgain}>
+            Analyze another video
+          </button>
         </div>
-      )}
-      {thumbs.length > 0 ? (
-        <div className="thumbs">
+      </div>
+    </section>
+  );
+}
+
+function Checklist({ result }) {
+  const frames = result?.stages?.frames;
+  const rppg = result?.stages?.rppg;
+  const quantum = result?.stages?.quantum;
+  const xc = result?.stages?.rppg_crosscheck;
+  const label = result?.verdict?.label;
+
+  const items = [];
+
+  if (frames?.status === "success") {
+    const a = frames.stats?.accepted_frames ?? 0;
+    const s = frames.stats?.sampled_frames ?? 0;
+    items.push({
+      ok: a >= Math.max(1, s * 0.5) ? "ok" : "warn",
+      title: "The video was clear enough to analyze",
+      detail: `${a} of ${s} sampled frames passed the quality check`,
+    });
+  } else {
+    items.push({
+      ok: "skip",
+      title: "Video quality check",
+      detail: "Quality details are not available for this run",
+    });
+  }
+
+  if (rppg?.features) {
+    items.push({
+      ok: "ok",
+      title: "A pulse was measured from the face",
+      detail: `≈ ${Math.round(rppg.features.heart_rate_bpm ?? 0)} beats per minute across ${rppg.n_frames_usable} frames`,
+    });
+  } else {
+    items.push({
+      ok: "bad",
+      title: "No pulse could be measured from the face",
+      detail: "The video may be too short, too dark, or the face was not clearly visible",
+    });
+  }
+
+  if (quantum) {
+    const pr = quantum.prob_real ?? 0.5;
+    items.push({
+      ok: label === "REAL" ? "ok" : label === "FAKE" ? "bad" : "warn",
+      title:
+        label === "REAL"
+          ? "The pulse pattern matches a live recording"
+          : label === "FAKE"
+            ? "The pulse pattern does not match a live recording"
+            : "The pulse pattern is too close to call",
+      detail: `final score ${fmtVal(pr, 3)} — a score of 0.70 or higher points to a real person`,
+    });
+  }
+
+  if (xc?.verdict) {
+    items.push({
+      ok: xc.verdict === "DEEPFAKE" ? "bad" : "ok",
+      title:
+        xc.verdict === "DEEPFAKE"
+          ? "The machine-learning cross-check flagged the video"
+          : "The machine-learning cross-check found no signs of tampering",
+      detail: `independent model confidence ${fmtVal(xc.probability, 3)}`,
+    });
+  } else {
+    items.push({
+      ok: "skip",
+      title: "Machine-learning cross-check",
+      detail: "Not available for this run",
+    });
+  }
+
+  return (
+    <section className="card">
+      <header className="card-head">
+        <h3 className="card-title">What we checked</h3>
+      </header>
+      <div className="checklist-body">
+        {items.map((it, i) => (
+          <div key={i} className={`check-item check-${it.ok}`}>
+            <span className="check-mark" aria-hidden="true">
+              {it.ok === "ok" ? "✓" : it.ok === "bad" ? "✗" : it.ok === "warn" ? "!" : "–"}
+            </span>
+            <div>
+              <p className="check-title">{it.title}</p>
+              <p className="check-detail">{it.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SampleFrames({ videoStem }) {
+  const thumbs = useThumbs(videoStem);
+  if (!thumbs || thumbs.length === 0) return null;
+  return (
+    <section className="card card-wide">
+      <header className="card-head">
+        <h3 className="card-title">Sample frames from your video</h3>
+      </header>
+      <div className="card-body">
+        <div className="samples">
           {thumbs.map((f) => (
             <img key={f.rel} src={fileUrl(f.rel)} alt={f.name} loading="lazy" />
           ))}
         </div>
-      ) : (
-        <p className="empty-note">Accepted frames not on disk for this run.</p>
-      )}
-    </Card>
+        <p className="samples-cap mono">frames used for the analysis · {thumbs.length} of the stored frames shown</p>
+      </div>
+    </section>
   );
 }
 
-function PhysiologyCard({ rppg, hasPlot, plotRel }) {
-  if (!rppg || !rppg.features) {
-    return (
-      <Card no="02" title="Physiology">
-        <p className="empty-note">No physiological evidence — insufficient usable frames.</p>
-      </Card>
-    );
-  }
-  const feats = rppg.features;
+function FriendlyProgress({ stageIdx, elapsed, videoName }) {
+  const active = Math.min(stageIdx, 2);
+  const barValue = stageIdx === 0 ? null : Math.round((stageIdx / 3) * 100);
   return (
-    <Card no="02" title="Physiology">
-      <div className="stat-grid">
-        <Stat k="input mode" v={rppg.input_mode === "stage1_frames" ? "stage-1 frames" : "direct video"} />
-        <Stat k="usable frames" v={`${rppg.n_frames_usable}/${rppg.n_frames_total}`} />
-        <Stat k="sampling" v={`${fmtVal(rppg.fps_used, 1)} fps`} />
+    <section className="bay bay-running" role="status" aria-live="polite">
+      <div className="run-head">
+        <span className="live-dot" aria-hidden="true" />
+        <span className="fstatus-head">Analyzing… {fmtClock(elapsed)}</span>
       </div>
-      <dl className="feat">
-        {FEATURE_META.map(([key, name, unit]) => (
-          <div key={key} className="feat-row">
-            <dt>{name}</dt>
-            <dd className="mono">
-              {fmtVal(feats[key])}
-              <span className="feat-unit">{unit}</span>
-            </dd>
-            <span className="feat-key mono">{key}</span>
-          </div>
-        ))}
-      </dl>
-      {hasPlot && (
-        <img className="plot" src={fileUrl(plotRel)} alt="rPPG diagnostic plot" loading="lazy" />
-      )}
-    </Card>
-  );
-}
-
-function QuantumCard({ quantum, plots, rppgCrosscheck }) {
-  if (!quantum) {
-    return (
-      <Card no="03" title="Quantum">
-        <p className="empty-note">No quantum-stage evidence for this result.</p>
-      </Card>
-    );
-  }
-  return (
-    <Card no="03" title="Quantum">
-      <div className="stat-grid">
-        <Stat k="P(real)" v={fmtVal(quantum.prob_real, 4)} />
-        <Stat k="verdict" v={quantum.verdict} />
-        <Stat k="confidence" v={fmtVal(quantum.confidence, 4)} />
-      </div>
-      {Array.isArray(quantum.selected_features) && quantum.selected_features.length > 0 && (
-        <div className="chips">
-          {quantum.selected_features.map((f) => (
-            <span key={f} className="chip chip-quantum mono">
-              {f}
+      <ProgressBar
+        value={barValue}
+        pendingLabel="Working"
+        completeLabel="Analysis complete"
+        ariaLabel={videoName ? `Checking ${videoName}` : "Analysis progress"}
+        className="pb-inline"
+      />
+      <ol className="fsteps">
+        {SIMPLE_STEPS.map(([title, sub], i) => (
+          <li key={title} className={`fstep${i < active ? " done" : ""}${i === active ? " active" : ""}`}>
+            <span className="fstep-mark" aria-hidden="true">
+              {i < active ? "✓" : i === active ? "▸" : "·"}
             </span>
-          ))}
-        </div>
-      )}
-      {rppgCrosscheck && rppgCrosscheck.verdict && (
-        <p className="cross mono">
-          cross-check · random forest →{" "}
-          <b className={rppgCrosscheck.verdict === "DEEPFAKE" ? "tone-bad" : ""}>
-            {rppgCrosscheck.verdict}
-          </b>{" "}
-          ({fmtVal(rppgCrosscheck.probability, 4)})
-        </p>
-      )}
-      {plots.length > 0 && (
-        <div className="plots">
-          {plots.map((p) => (
-            <img key={p.rel} className="plot" src={fileUrl(p.rel)} alt={p.name} loading="lazy" />
-          ))}
-        </div>
-      )}
-    </Card>
+            <div>
+              <p className="fstep-title">{title}</p>
+              <p className="fstep-sub">{sub}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
@@ -403,15 +308,9 @@ function QuantumCard({ quantum, plots, rppgCrosscheck }) {
 /* upload bay + progress                                               */
 /* ------------------------------------------------------------------ */
 
-function UploadBay({ phase, lines, stageIdx, elapsed, onFile, onCancel }) {
+function UploadBay({ phase, stageIdx, elapsed, videoName, onFile }) {
   const [drag, setDrag] = useState(false);
   const inputRef = useRef(null);
-  const consoleRef = useRef(null);
-
-  useEffect(() => {
-    const el = consoleRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [lines]);
 
   const pick = (files) => {
     const f = files?.[0];
@@ -419,35 +318,10 @@ function UploadBay({ phase, lines, stageIdx, elapsed, onFile, onCancel }) {
   };
 
   if (phase === "running") {
-    return (
-      <section className="bay bay-running">
-        <div className="run-head">
-          <span className="live-dot" aria-hidden="true" />
-          <span className="mono run-title">ANALYSIS IN PROGRESS — {fmtClock(elapsed)}</span>
-        </div>
-        <div className="rail" role="status" aria-live="polite">
-          {STAGES.map((name, i) => (
-            <span
-              key={name}
-              className={`rail-step mono${i < stageIdx ? " done" : ""}${i === stageIdx ? " active" : ""}`}
-            >
-              <span className="rail-dot" />
-              {name}
-            </span>
-          ))}
-        </div>
-        <div className="console mono" ref={consoleRef} aria-label="pipeline log">
-          {lines.slice(-10).map((l, i) => (
-            <div key={i} className={`console-line${l.includes("[") ? " bright" : ""}`}>
-              {l}
-            </div>
-          ))}
-          <div className="console-line bright caret">▌</div>
-        </div>
-      </section>
-    );
+    return <FriendlyProgress stageIdx={stageIdx} elapsed={elapsed} videoName={videoName} />;
   }
 
+  const isError = phase === "error";
   return (
     <section
       className={`bay${drag ? " bay-drag" : ""}`}
@@ -472,16 +346,18 @@ function UploadBay({ phase, lines, stageIdx, elapsed, onFile, onCancel }) {
       <span className="bay-glyph" aria-hidden="true">
         ∿
       </span>
-      <h2 className="bay-title">{phase === "error" ? "Analysis failed" : "Drop a KYC video to begin"}</h2>
+      <h2 className="bay-title">
+        {isError ? "Something went wrong" : "Upload a video to check if it's real or AI-generated"}
+      </h2>
       <p className="bay-sub">
-        {phase === "error"
-          ? "The last run errored on the server. Check the backend console, then try again."
-          : "mp4 · avi · mov — sampled at 10 fps, scored across the three stages, processed entirely on this machine."}
+        {isError
+          ? "The analysis server hit an error. Try again, or check the server console for details."
+          : "Works best with short selfie-style or KYC videos. Everything runs on this machine — nothing is uploaded."}
       </p>
       <button className="btn btn-primary" onClick={() => inputRef.current?.click()}>
-        Choose video
+        {isError ? "Try again" : "Choose a video"}
       </button>
-      <p className="bay-hint mono">or drag the file onto this panel</p>
+      <p className="bay-hint mono">or drag and drop a video here</p>
     </section>
   );
 }
@@ -493,16 +369,17 @@ function UploadBay({ phase, lines, stageIdx, elapsed, onFile, onCancel }) {
 export default function App() {
   const [phase, setPhase] = useState("idle"); // idle | running | done | error
   const [result, setResult] = useState(null);
-  const [signalData, setSignalData] = useState(null);
-  const [lines, setLines] = useState([]);
   const [stageIdx, setStageIdx] = useState(0);
   const [videoName, setVideoName] = useState(null);
+  const [videoMeta, setVideoMeta] = useState(null);
+  const [lastElapsed, setLastElapsed] = useState(null);
   const [runError, setRunError] = useState(null);
-  const [healthInfo, setHealth] = useState(null);
+  const [theme, setTheme] = useTheme();
   const elapsed = useElapsed(phase === "running");
+  const elapsedRef = useRef(0);
+  elapsedRef.current = elapsed;
 
   useEffect(() => {
-    health().then(setHealth);
     previous().then(({ result: prev }) => {
       if (prev) {
         setResult(prev);
@@ -511,38 +388,40 @@ export default function App() {
     });
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    const sig = result?._signal;
-    if (!sig) {
-      setSignalData(null);
-      return undefined;
-    }
-    fetch(`/api/files?rel=${encodeURIComponent(sig)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (alive) setSignalData(d);
-      })
-      .catch(() => {
-        if (alive) setSignalData(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [result]);
+  const reset = () => {
+    setPhase("idle");
+    setResult(null);
+    setStageIdx(0);
+    setVideoName(null);
+    setVideoMeta(null);
+    setLastElapsed(null);
+    setRunError(null);
+  };
 
   const run = useCallback((file) => {
     setPhase("running");
     setResult(null);
-    setSignalData(null);
-    setLines([]);
     setStageIdx(0);
     setVideoName(file.name);
+    setVideoMeta({ size: file.size, duration: 0 });
+    setLastElapsed(null);
     setRunError(null);
+    try {
+      const url = URL.createObjectURL(file);
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.onloadedmetadata = () => {
+        setVideoMeta((m) => (m ? { ...m, duration: v.duration } : m));
+        URL.revokeObjectURL(url);
+      };
+      v.onerror = () => URL.revokeObjectURL(url);
+      v.src = url;
+    } catch {
+      /* duration is a nice-to-have; ignore failure */
+    }
     detect(file)
       .then(({ job }) => {
         stream(job, {
-          line: (l) => setLines((prev) => [...prev.slice(-250), l]),
           stage: (l) => {
             const m = l.match(/\[(\d)\/3\]/);
             if (m) setStageIdx(parseInt(m[1], 10));
@@ -551,7 +430,7 @@ export default function App() {
             setResult(res);
             setStageIdx(3);
             setPhase("done");
-            health().then(setHealth);
+            setLastElapsed(elapsedRef.current);
           },
           error: (msg) => {
             setRunError(msg);
@@ -565,13 +444,8 @@ export default function App() {
       });
   }, []);
 
-  const highlights = healthInfo?.artifacts?.quantum_plots ?? [];
-  const quantumPlots = highlights.map((n) => ({ name: n, rel: `quantum/${n}` }));
-  const rppgPlotRel = healthInfo?.artifacts?.rppg_png ? "rppg/rppg_output.png" : null;
   const videoStem = result?.video ? result.video.replace(/\.\w+$/, "") : null;
-
-  const haveResult = phase === "done" && result;
-  const showEvidence = haveResult || phase === "idle";
+  const haveResult = Boolean(result) && phase !== "running" && phase !== "error";
 
   return (
     <div className="shell">
@@ -582,14 +456,22 @@ export default function App() {
           </span>
           <div>
             <h1>
-              rPPG·QC <span className="brand-amp">∇</span> QUANTUM
+              rPPG·QC <span className="brand-amp">Verifier</span>
             </h1>
-            <p className="mono">DEEPFAKE VERIFIER — KYC</p>
+            <p>Deepfake verification for identity checks</p>
           </div>
         </div>
-        <div className="topbar-right mono">
+        <div className="topbar-right">
           <span className="ok-dot" aria-hidden="true" />
-          LOCAL PROCESSING · VIDEO NEVER LEAVES THIS MACHINE
+          Your video never leaves this machine
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          >
+            {theme === "dark" ? "Light mode" : "Dark mode"}
+          </button>
         </div>
       </header>
 
@@ -598,42 +480,24 @@ export default function App() {
 
         <UploadBay
           phase={phase}
-          lines={lines}
           stageIdx={stageIdx}
           elapsed={elapsed}
+          videoName={videoName}
           onFile={run}
         />
 
-        {haveResult && <VerdictRig result={result} signalData={signalData} />}
-
-        {showEvidence && (
-          <div className="cards">
-            <FramesCard frames={result?.stages?.frames} videoStem={videoStem} />
-            <PhysiologyCard
-              rppg={result?.stages?.rppg}
-              hasPlot={Boolean(rppgPlotRel)}
-              plotRel={rppgPlotRel || ""}
-            />
-            <QuantumCard
-              quantum={result?.stages?.quantum}
-              plots={quantumPlots}
-              rppgCrosscheck={result?.stages?.rppg_crosscheck}
-            />
-          </div>
-        )}
-
-        {!showEvidence && (
-          <section className="card card-wide">
-            <p className="empty-note">
-              No evidence on file. Run an analysis to generate the dossier below.
-            </p>
-          </section>
+        {haveResult && (
+          <>
+            <VideoStrip videoName={videoName} meta={videoMeta} elapsed={lastElapsed} />
+            <SimpleVerdict result={result} onTryAgain={reset} />
+            <Checklist result={result} />
+            <SampleFrames videoStem={videoStem} />
+          </>
         )}
       </main>
 
-      <footer className="foot mono">
-        <span>FRAMES → rPPG PULSE → QAOA SUBSET → HYBRID VQC → P(REAL)</span>
-        <span>REAL ≥ 0.70 · FAKE ≤ 0.30 · ELSE UNCERTAIN</span>
+      <footer className="foot">
+        <span>Verified locally — the video never leaves this machine.</span>
       </footer>
     </div>
   );
