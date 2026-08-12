@@ -210,21 +210,36 @@ def _write_canonical(result: dict, signal_rel: str | None) -> None:
 def _signal_dump_worker(job: dict, video_path: Path, result: dict) -> None:
     """Best-effort background signal reconstruction (~30s). Emits a
     'signal' SSE event with the artifact rel path when ready."""
-    rel = _dump_signal(job, video_path.name)
-    if rel:
-        job["signal"] = rel
-        job["queue"].put(("signal", rel))
-        _write_canonical(result, signal_rel=rel)
+    try:
+        rel = _dump_signal(job, video_path.name)
+        if rel:
+            job["signal"] = rel
+            job["queue"].put(("signal", rel))
+            _write_canonical(result, signal_rel=rel)
+        else:
+            # Log failure for debugging
+            with open(RESULTS_DIR / f"signal_debug_{job['id']}.log", "w") as f:
+                f.write(f"Signal dump failed for {video_path.name}\n")
+    except Exception as e:
+        with open(RESULTS_DIR / f"signal_debug_{job['id']}.log", "w") as f:
+            f.write(f"Signal dump exception: {e}\n")
 
 
 def _dump_signal(job: dict, video_name: str) -> str | None:
     """Reuse the stage-1 accepted frames to reconstruct the real pulse
     waveform for the verdict rig (best-effort; ~30s extra)."""
+    # video_name is the sanitized inbox filename (e.g., "abc12345_id0_0003.mp4")
+    # The frame sequence directory uses the same stem.
     stem = Path(video_name).stem
     frames_dir = OUTPUT_ROOT / "frames" / "frame_sequences" / stem / "frames"
     metadata = OUTPUT_ROOT / "frames" / "frame_sequences" / stem / "frame_metadata.jsonl"
     if not frames_dir.is_dir():
-        return None
+        # Fallback: try without job prefix (for backward compat)
+        fallback_stem = stem.split("_", 1)[-1] if "_" in stem else stem
+        frames_dir = OUTPUT_ROOT / "frames" / "frame_sequences" / fallback_stem / "frames"
+        metadata = OUTPUT_ROOT / "frames" / "frame_sequences" / fallback_stem / "frame_metadata.jsonl"
+        if not frames_dir.is_dir():
+            return None
     sig_file = RESULTS_DIR / f"signal_{job['id']}.json"
     cmd = [
         sys.executable,
@@ -237,7 +252,7 @@ def _dump_signal(job: dict, video_name: str) -> str | None:
         str(sig_file),
     ]
     try:
-        subprocess.run(cmd, cwd=str(WORKING), timeout=300, capture_output=True, text=True)
+        subprocess.run(cmd, cwd=str(WORKING), timeout=120, capture_output=True, text=True)
     except (subprocess.TimeoutExpired, OSError):
         return None
     if sig_file.exists():

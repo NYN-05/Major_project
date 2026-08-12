@@ -4,7 +4,7 @@ Deepfake-video detection for KYC using rPPG (physiological evidence) + hybrid qu
 
 ## Layout
 
-All active code lives under `WORKING/`; the repo root holds docs/PDFs and README. Single git repo (no nested repos). `FF++/` is the gitignored dataset.
+All active code lives under `WORKING/` and `frontend/`; the repo root holds docs/PDFs and README. Single git repo (no nested repos). `FF++/` is the gitignored dataset.
 
 ```
 WORKING/
@@ -17,10 +17,16 @@ WORKING/
     rppg/       stage 2: dataset_features.csv, rppg_classifier.pkl + metadata, plots
     quantum/    stage 3: data.npz, qaoa_selection.json, feature_scaler.json, hybrid_vqc.pt, metrics, plots
     pipeline/   run_pipeline.py result JSON
+
+frontend/
+  server.py   stdlib-only API: upload, SSE progress, artifact serving, concurrency cap, validation
+  src/        React + Vite frontend (components/, hooks.js, api.js, styles.css)
+  dump_signal.py  reconstructs rPPG waveform from stage-1 frames for UI visualization
 ```
 
-## Commands (all from `WORKING/`)
+## Commands
 
+### From `WORKING/`
 - `python -m quantum.pipeline --all` — full quantum flow: build real dataset, QAOA selection (8→6), train VQC, evaluate, baselines. Regenerates `output/quantum/*` (`data.npz`, `qaoa_selection.json`, `feature_scaler.json`, `hybrid_vqc.pt`, metrics, plots).
 - `python run_pipeline.py --source path/video.mp4 [--method POS|CHROM] [--out result.json]` — end-to-end inference. Requires the quantum artifacts above.
 - Rebuild rPPG training data: `python rppg-pipeline/extract_dataset_features.py` from `WORKING/RPPG/` (writes `output/rppg/dataset_features.csv`), then rerun `python -m quantum.pipeline --all`.
@@ -28,7 +34,26 @@ WORKING/
 
 The `quantum.*` imports and the `sys.path` insertions in `run_pipeline.py` assume the working directory is `WORKING/`. Do not run from the repo root.
 
-## Verified constraints (do not break)
+### From `frontend/`
+- `python server.py` — starts API on `http://127.0.0.1:8000` (port via `FRONTEMD_PORT` env)
+- `npm run dev` — starts React dev server on `http://localhost:5173` (proxies `/api` to backend)
+- `npm run build` — production build to `dist/`
+
+## API Contract (frontend/server.py)
+
+```
+POST /api/detect          upload video (raw body + X-Filename header) -> {job: <id>}
+GET  /api/jobs/<id>       {done, error, video, signal, lines[-400:], result}
+GET  /api/jobs/<id>/events  SSE: line / stage / result / signal / error
+GET  /api/previous        last canonical pipeline result (with _signal)
+GET  /api/health          {ok, platform, running, has_previous, sequences, artifacts}
+GET  /api/artifacts?dir=  list files under output/<rel>
+GET  /api/files?rel=      serve artifact file (path traversal protected)
+```
+
+Upload limits: 200 MB max; magic-byte validation (MP4/MOV ftyp, AVI RIFF, WebM EBML). Concurrency: max 2 jobs (429 on overflow). Jobs TTL: 1h; frame sequences: 24h.
+
+## Verified Constraints (do not break)
 
 - **No synthetic data.** The quantum layer consumes only the real rPPG feature table `output/rppg/dataset_features.csv` (currently 18 labeled rows). Never reintroduce a generator or a transform/bridge layer.
 - **Feature contract:** `FEATURE_NAMES` in `quantum/config.py` must stay identical in name AND order to `RPPGFeatures.feature_names()` in `RPPG/rppg/features.py` (duplicated on purpose; `data.py`, `qaoa.py`, and `pipeline.py` all index by it). Keep the two lists in sync.
@@ -43,8 +68,29 @@ The `quantum.*` imports and the `sys.path` insertions in `run_pipeline.py` assum
 - Small training set (10 train rows) makes QAOA mutual-information weights degenerate (`"success": false`, mostly-zero weights in `qaoa_selection.json`). Expected — data-quantity issue, not a code bug.
 - rPPG needs MediaPipe Face Landmarker; the model auto-downloads on first run (internet required). In `frame/`, only `yolov8n-face-lindevs.pt` auto-downloads; missing other presets raise `FileNotFoundError`.
 
+## Optimizations (completed)
+
+- **POS rPPG vectorization** (`WORKING/RPPG/rppg/signal_extraction.py`): `sliding_window_view` + batched matmul + `np.add.at` overlap-add — bit-identical to original loop, removes Python-level window iteration.
+- **Shared Welch PSD** (`WORKING/RPPG/rppg/features.py`): single periodogram for HR, SNR, entropy, SQI — 3 fewer `scipy.signal.welch` calls per video.
+- **Cached filter/detrend** (`WORKING/RPPG/rppg/preprocessing.py`): `@lru_cache` on Butterworth coefficients + detrend sparse matrix.
+- **Skin-mask hoist** (`WORKING/RPPG/rppg/face_roi.py`): compute YCrCb+inRange once/frame instead of 3×.
+- **Skip discarded quality work** (`WORKING/RPPG/rppg/pipeline.py`): stage-1 path skips Laplacian/brightness (overwritten by `face.found` anyway).
+- **Quantum model cache** (`WORKING/quantum/vqc.py`): `HybridModel` cached by `(n_features, ckpt_mtime, size)` — reuses loaded weights across server requests.
+- **Video metadata probe** (`WORKING/run_pipeline.py`): single `cv2.VideoCapture` open emits `video_meta` (name, size, duration, fps, resolution, frame_count) — no fabricated values.
+- **Server hardening** (`frontend/server.py`): size/magic validation, concurrency cap (2), result-first SSE + async `signal` event, TTL cleanup, sanitized inbox filenames (`{job8}_{stem}.ext`) for thumbnail consistency.
+
+## Frontend State Machine
+
+`idle` → `selected` (preview + metadata + Start) → `running` (7-stage pipeline + live panel + creeping progress + continuous sheen) → `done` (pipeline persists with 100% bar + result strip; dashboard: Verdict radial gauge, Insights 6 metrics, Signal canvas, Quantum flow, FileInfo, FrameSamples) → `error` (inline banner)
+
+Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-motion`.
+
 ## Verification
 
-No test suite, no CI, no lint config in the repo. Verify changes by running `python -m quantum.pipeline --all` (or at least `--build-data --select --train`) and `python run_pipeline.py --source <some video> --method POS`.
+- **Numerical equivalence:** POS vectorization bit-identical to original loop (max |diff| = 0.0 across 7 (T,fs) pairs). Full pipeline verdict: `prob_real=0.6359 → UNCERTAIN, confidence=0.2718` — matches historical result.
+- **E2E:** `idle → selected → running → done` with signal canvas, frame thumbnails (5 frames), theme toggle, sequential rerun. Invalid file → 415 friendly error. Responsive: 1920→375px no overflow.
+- **No JS errors.** Console 404s = missing frame thumbnails for stale runs (gitignored).
+
+Run: `python -m quantum.pipeline --all` (or `--build-data --select --train`) and `python run_pipeline.py --source <video> --method POS` from `WORKING/`. From `frontend/`: `python server.py` + `npm run dev`.
 
 `Docs/projec_audit.md` predates the real-data refactor; its "bridged bug" finding is already fixed in `run_pipeline.py` — ignore stale recommendations in it.

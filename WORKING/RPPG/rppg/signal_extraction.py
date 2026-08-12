@@ -111,7 +111,10 @@ def pos_method(rgb_window: np.ndarray, fs: float, window_sec: float = 1.6) -> np
     # Vectorized form of the original per-window loop (identical math):
     # sliding windows -> temporal normalization -> projection ->
     # per-window alpha weighting -> overlap-add.
+    # sliding_window_view with axis=0 gives (n_windows, 3, win_len);
+    # transpose to (n_windows, win_len, 3) for the original algorithm.
     windows = np.lib.stride_tricks.sliding_window_view(rgb, win_len, axis=0)
+    windows = windows.transpose(0, 2, 1)  # (n_windows, win_len, 3)
     means = windows.mean(axis=1)
     means = np.where(means < 1e-6, 1e-6, means)
     segments = windows / means[:, None, :]

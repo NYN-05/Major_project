@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { artifacts, detect, fileUrl, previous, stream } from "./api.js";
+import { AlertTriangle } from "lucide-react";
+import { detect, fileUrl, previous, stream } from "./api.js";
 import { useElapsed, useSignalFile, useTheme } from "./hooks.js";
 import Header from "./components/Header.jsx";
 import UploadZone from "./components/UploadZone.jsx";
 import VideoSelected from "./components/VideoSelected.jsx";
-import Pipeline from "./components/Pipeline.jsx";
-import VerdictPanel from "./components/VerdictPanel.jsx";
-import Insights from "./components/Insights.jsx";
-import SignalViz from "./components/SignalViz.jsx";
-import QuantumViz from "./components/QuantumViz.jsx";
-import FileInfo from "./components/FileInfo.jsx";
-import FrameSamples from "./components/FrameSamples.jsx";
-
-const stemOf = (name) => (name ? String(name).replace(/\.\w+$/, "") : null);
+import ProcessingView from "./components/ProcessingView.jsx";
+import VerdictHeader from "./components/VerdictHeader.jsx";
+import VerdictCard from "./components/VerdictCard.jsx";
+import KeyMetrics from "./components/KeyMetrics.jsx";
+import SignalPanel from "./components/SignalPanel.jsx";
+import QuantumFlow from "./components/QuantumFlow.jsx";
+import CrossCheck from "./components/CrossCheck.jsx";
+import FrameGallery from "./components/FrameGallery.jsx";
+import TechnicalDetails from "./components/TechnicalDetails.jsx";
+import { artifacts } from "./api.js";
 
 export default function App() {
   const [phase, setPhase] = useState("idle"); // idle | selected | running | done | error
@@ -36,6 +38,7 @@ export default function App() {
       if (prev) {
         setResult(prev);
         setVideoName(prev.video?.name ?? prev.video);
+        setPhase("done");
       }
     });
   }, []);
@@ -120,29 +123,20 @@ export default function App() {
   const signalRel2 = result?._signal ?? signalRel;
   const signalData = useSignalFile(fileUrl, signalRel2);
 
-  const haveResult = Boolean(result) && phase !== "running" && phase !== "error";
-  const stem = stemOf(videoName ?? result?.video?.name ?? result?.video);
-
   return (
     <div className="shell">
-      <div className="bg" aria-hidden="true">
-        <div className="bg-grid" />
-        <div className="bg-orb bg-orb-a" />
-        <div className="bg-orb bg-orb-b" />
-        <div className="bg-orb bg-orb-c" />
-      </div>
-
       <Header theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} />
 
       <main>
         {phase === "error" && (
           <motion.div
-            className="error-banner mono"
+            className="error-banner"
             role="alert"
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            {runError}
+            <AlertTriangle size={15} aria-hidden="true" />
+            <span>{runError}</span>
           </motion.div>
         )}
 
@@ -153,38 +147,35 @@ export default function App() {
             onStart={run}
             onChange={() => setPhase("idle")}
           />
-        ) : phase === "running" || phase === "done" ? (
-          <Pipeline
+        ) : phase === "running" ? (
+          <ProcessingView
             stageIdx={stageIdx}
             elapsed={elapsed}
             videoName={videoName}
             lines={lines}
-            phase={phase}
-            result={result}
-            resultElapsed={lastElapsed}
           />
+        ) : phase === "done" ? (
+          <div className="results">
+            <VerdictHeader result={result} videoMeta={videoMeta} resultElapsed={lastElapsed} />
+            <div className="result-top">
+              <VerdictCard result={result} onTryAgain={reset} />
+              <KeyMetrics result={result} />
+            </div>
+            <div className="row-2">
+              <SignalPanel signalData={signalData} result={result} />
+              <QuantumFlow result={result} />
+            </div>
+            <CrossCheck result={result} />
+            <FrameGallery result={result} artifacts={artifacts} />
+            <TechnicalDetails result={result} videoMeta={videoMeta} />
+          </div>
         ) : (
           <UploadZone phase={phase} onFile={pickFile} />
-        )}
-
-        {haveResult && (
-          <>
-            <VerdictPanel result={result} onTryAgain={reset} />
-            <Insights result={result} />
-            <SignalViz
-              signalData={signalData}
-              bpm={result?.stages?.rppg?.features?.heart_rate_bpm}
-              sqi={result?.stages?.rppg?.features?.signal_quality_index}
-            />
-            <QuantumViz result={result} />
-            <FileInfo result={result} />
-            <FrameSamples result={result} artifacts={artifacts} />
-          </>
         )}
       </main>
 
       <footer className="foot">
-        <span>Verified locally — the video never leaves this machine.</span>
+        <span>Verified locally — the video never leaves this machine</span>
       </footer>
     </div>
   );

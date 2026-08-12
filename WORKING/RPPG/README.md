@@ -1,200 +1,251 @@
-# rPPG Pipeline for Low-Resolution KYC Deepfake Detection
+# rPPG Physiological Feature Extraction (Stage 2)
 
-An end-to-end remote photoplethysmography (rPPG) system for detecting deepfake video in low-resolution KYC-style footage.
+**Component 2** of the deepfake-verification system under `WORKING/`:
+`frame` (stage 1) -> `RPPG/` (this directory, stage 2) -> `quantum/` (stage 3).
 
-The project is organized as a two-stage pipeline:
+Extracts 8 physiological features from facial video via remote photoplethysmography (rPPG).
+The feature table `output/rppg/dataset_features.csv` is the **direct data source** for the quantum
+decision layer (`WORKING/quantum/`): it consumes the 8 rPPG features as-is (no synthetic data),
+flips the label convention (CSV 1 = fake -> quantum 0 = fake), and builds its
+training/eval splits from this table.
 
-1. Extract physiological liveness evidence from video frames.
-2. Train a lightweight classifier on those rPPG features to predict real vs deepfake.
+## Project Structure
 
-The implementation uses landmark-based facial regions of interest, POS/CHROM pulse reconstruction, signal cleaning, and a feature-based classifier instead of a naive green-channel baseline.
-
-> **Downstream integration**: `dataset_features.csv` is the direct data source for the quantum decision layer
-> (`WORKING/quantum/`): it consumes the 8 rPPG features as-is (no synthetic data), flips the label convention
-> (CSV 1 = fake -> quantum 0 = fake), and builds its training/eval splits from this table.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    A[Input video] --> B[Frame sampling]
-    B --> C[Face landmark detection]
-    C --> D[Frame quality checks]
-    D --> E[ROI extraction\nleft cheek, right cheek, forehead]
-    E --> F[rPPG reconstruction\nPOS or CHROM]
-    F --> G[Signal cleaning\ndetrend + bandpass + normalize]
-    G --> H[Feature extraction\nHR, SNR, PRV, entropy, SQI, correlations]
-    H --> I[Classifier training / inference]
-    I --> J[Prediction\nReal or Deepfake]
 ```
-
-## Repository Layout
-
-```text
-.
-├── README.md
+WORKING/RPPG/
+├── rppg/                      # Core rPPG library
+│   ├── __init__.py
+│   ├── face_roi.py           # MediaPipe face landmarks -> ROI extraction (cheeks, forehead)
+│   ├── pipeline.py           # RPPGPipeline: video/frames -> features + signals
+│   ├── signal_extraction.py  # POS/CHROM pulse reconstruction (vectorized)
+│   ├── preprocessing.py      # Detrend, bandpass, normalize (cached filters)
+│   ├── features.py           # 8-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations)
+│   └── model_utils.py        # rPPG RandomForest classifier helpers (side path)
+├── rppg-pipeline/            # Training & demo scripts
+│   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/
+│   ├── train_classifier.py         # Train rPPG RandomForest (side path)
+│   ├── run_on_video.py             # Single video inference
+│   ├── batch_run.py                # Batch processing
+│   ├── run_live_webcam.py          # Webcam demo
+│   ├── streamlit_app.py            # Streamlit UI
+│   ├── debug_run.py                # Debug utilities
+│   ├── _check_video.py             # Video validation
+│   ├── _make_test_video.py         # Synthetic test video generator
+│   └── retrain_dfdc.py             # DFDC retraining script
 ├── requirements.txt
-├── archive/
-│   └── DFDC_Dataset/
-│       ├── Fake/
-│       └── Real/
-├── dataset_features.csv
-├── rppg/
-│   ├── face_roi.py
-│   ├── preprocessing.py
-│   ├── signal_extraction.py
-│   ├── features.py
-│   └── pipeline.py
-└── rppg-pipeline/
-    ├── _check_video.py
-    ├── _make_test_video.py
-    ├── batch_run.py
-    ├── debug_run.py
-    ├── extract_dataset_features.py
-    ├── run_live_webcam.py
-    ├── run_on_video.py
-    ├── streamlit_app.py
-    └── train_classifier.py
+└── README.md
 ```
 
-## What The Pipeline Does
+## Core Pipeline (`rppg/pipeline.py`)
 
-The rPPG pipeline turns each video into a compact physiological feature vector:
+### `RPPGPipeline` Class
 
-- Heart rate in BPM
-- Signal-to-noise ratio in dB
-- Pulse rate variability in ms
-- Spectral entropy
-- Mean absolute deviation
-- Signal quality index
-- Cheek-to-forehead correlation
-- Left-to-right cheek correlation
+```python
+pipeline = RPPGPipeline(
+    method="POS",              # "POS" or "CHROM"
+    target_fps=None,           # Resample to this FPS (None = native)
+    blur_threshold=15.0,       # Laplacian variance gate
+    brightness_range=(25, 230),# Gray mean gate
+    low_hz=0.7, high_hz=4.0,   # Physiological band (Hz)
+    min_usable_frames=48,      # Minimum frames for feature extraction
+    roi_weights=(0.35, 0.35, 0.30)  # Left cheek, right cheek, forehead
+)
+```
 
-Those features are then used by a classifier to estimate whether the video is likely real or deepfake.
+### Two Entry Points
 
-## Data Sources
+| Method | Input | Use Case |
+|--------|-------|----------|
+| `process_video(video_path)` | Raw video file | Standalone scripts, direct video read |
+| `process_frames(frames_dir, metadata_path, fps)` | Stage-1 accepted frames + JSONL | **Called by `run_pipeline.py`** (stage-1 handoff) |
 
-The current training workflow supports the new dataset layout:
+**Stage-1 handoff path** (used by `run_pipeline.py`):
+- Receives accepted JPEGs from `output/frames/frame_sequences/<video>/frames/`
+- Receives `frame_metadata.jsonl` with per-frame timestamps
+- Runs at stage-1 sample rate (10 fps)
+- **Skips blur/brightness re-gating** (stage 1 already did this)
+- Still runs MediaPipe per frame; frames with no face → interpolated
 
-- `archive/DFDC_Dataset/Fake`
-- `archive/DFDC_Dataset/Real`
+**Fallback**: If stage-1 frames unavailable, falls back to `process_video()`.
 
-The extractor also keeps compatibility with the older `archive (1)` CSV-based dataset if it exists.
+### Output: `RPPGResult` Dataclass
 
-## Installation
+| Field | Type | Description |
+|-------|------|-------------|
+| `fps` | float | Effective sampling rate |
+| `n_frames_total` | int | Total frames processed |
+| `n_frames_usable` | int | Frames with face detected |
+| `features` | `RPPGFeatures \| None` | **8-feature vector (or None if < 48 usable frames)** |
+| `combined_signal` | `np.ndarray \| None` | Cleaned combined pulse waveform |
+| `left_cheek_signal` | `np.ndarray \| None` | Cleaned left cheek pulse |
+| `right_cheek_signal` | `np.ndarray \| None` | Cleaned right cheek pulse |
+| `forehead_signal` | `np.ndarray \| None` | Cleaned forehead pulse |
+| `quality_log` | `List[FrameQuality]` | Per-frame quality records |
+| `warnings` | `List[str]` | Runtime warnings |
+
+### 8 Physiological Features (`rppg/features.py`)
+
+| Feature | Description | Units/Range |
+|---------|-------------|-------------|
+| `heart_rate_bpm` | Dominant pulse frequency from PSD peak | ~40-180 BPM |
+| `snr_db` | Signal-to-noise ratio (HR band vs rest) | dB (higher = cleaner) |
+| `prv_std_ms` | Pulse rate variability (std of inter-beat intervals) | ms |
+| `spectral_entropy` | Normalized Shannon entropy of in-band PSD | 0-1 (lower = more periodic) |
+| `mad` | Mean absolute deviation of waveform | Amplitude units |
+| `signal_quality_index` | Beat regularity + spectral concentration | 0-1 |
+| `cheek_forehead_correlation` | Pearson r between cheek & forehead pulses | -1 to 1 |
+| `left_right_cheek_correlation` | Pearson r between left & right cheek pulses | -1 to 1 |
+
+**Feature order is fixed** - must match `FEATURE_NAMES` in `quantum/config.py` and `RPPGFeatures.feature_names()`.
+
+### Failure Mode
+
+Returns `features=None` when `n_frames_usable < min_usable_frames` (48).
+`run_pipeline.py` then emits `INCONCLUSIVE` verdict and exits with code 3.
+
+## Data Generation
+
+### Build Training Feature Table
 
 ```bash
-pip install -r requirements.txt
+# From WORKING/RPPG/
+python rppg-pipeline/extract_dataset_features.py \
+  --method POS \
+  --target-fps 15 \
+  --max-per-class 50   # Optional: limit for smoke test
 ```
 
-## First-Run Face Model
+Reads videos from:
+- `archive/DFDC_Dataset/Fake/`
+- `archive/DFDC_Dataset/Real/`
 
-This project uses MediaPipe's Face Landmarker Tasks API. On first run it may download a small model file automatically and cache it locally.
+Writes: `WORKING/output/rppg/dataset_features.csv` (relative to `WORKING/`)
 
-If the machine has no internet access, place the model manually or provide a custom path through `FaceROIExtractor`.
-
-## Quick Start
-
-### 1. Extract rPPG features
-
-```bash
-python rppg-pipeline/extract_dataset_features.py
-```
-
-Useful options:
-
-- `--method POS` or `--method CHROM`
-- `--target-fps 15`
-- `--max-per-class 50` for a faster smoke test
-
-This writes `output/rppg/dataset_features.csv` (relative to `WORKING/`).
-
-### 2. Train the classifier
+### Train rPPG Classifier (Side Path - Not Used for Final Verdict)
 
 ```bash
 python rppg-pipeline/train_classifier.py
 ```
 
-This saves (to `output/rppg/`):
+Saves to `WORKING/output/rppg/`:
+- `rppg_classifier.pkl` - RandomForest model
+- `rppg_classifier_metadata.json` - Training summary, column metadata
 
-- `rppg_classifier.pkl`
-- `rppg_classifier_metadata.json`
+**Label convention**: CSV uses `1 = fake, 0 = real`. This is flipped in quantum layer.
 
-### 3. Run the demo app
+## Run Inference
 
-```bash
-python -m streamlit run rppg-pipeline/streamlit_app.py
-```
-
-The app opens a web UI where you can upload a video and get a real/deepfake prediction.
-
-## Command-Line Usage
-
-### Analyze a single video
+### Single Video (Direct Video Read)
 
 ```bash
 python rppg-pipeline/run_on_video.py path/to/video.mp4 --method POS --plot
 ```
 
-### Run batch processing
+### Batch Processing
 
 ```bash
 python rppg-pipeline/batch_run.py
 ```
 
-### Test the webcam path
+### Webcam Demo
 
 ```bash
 python rppg-pipeline/run_live_webcam.py
 ```
 
-## Model Training Notes
+### Streamlit App
 
-The trainer uses a stronger baseline than the original version:
+```bash
+streamlit run rppg-pipeline/streamlit_app.py
+```
 
-- median imputation for missing values
-- class-balanced RandomForest
-- stratified train/test split when possible
-- cross-validated balanced accuracy when there are enough samples
+## Key Optimizations (Completed)
 
-This is intentionally simple and interpretable so that feature quality, not model complexity, remains the main signal.
+- **POS vectorization** (`signal_extraction.py`): `sliding_window_view` + batched matmul + `np.add.at` overlap-add — bit-identical to original loop, removes Python-level window iteration
+- **Shared Welch PSD** (`features.py`): Single periodogram for HR, SNR, entropy, SQI — 3 fewer `scipy.signal.welch` calls per video
+- **Cached filter/detrend** (`preprocessing.py`): `@lru_cache` on Butterworth coefficients + detrend sparse matrix
+- **Skin-mask hoist** (`face_roi.py`): Compute YCrCb+inRange once/frame instead of 3×
+- **Skip discarded quality work** (`pipeline.py`): Stage-1 path skips Laplacian/brightness (overwritten by `face.found` anyway)
 
-## Why This Design Works
+## Install
 
-- Landmark-based facial ROIs are more stable than bounding boxes, especially when faces are small in frame.
-- POS and CHROM are more robust than a raw RGB average under motion and compression artifacts.
-- Physiological correlations across cheeks and forehead help distinguish real biological signal from synthetic face generation.
-- The pipeline returns `features=None` when a clip is too weak to trust, which avoids forcing a bad prediction.
+```bash
+pip install -r requirements.txt
+```
+
+### First-Run Face Model
+
+Uses MediaPipe's Face Landmarker Tasks API. On first run it downloads a small model file automatically and caches it locally. Internet required on first run.
+
+If no internet access, place the model manually or provide a custom path through `FaceROIExtractor`.
+
+## MediaPipe Face Landmarker
+
+The `FaceROIExtractor` in `face_roi.py` uses MediaPipe to detect 468 facial landmarks, then extracts three ROIs:
+- **Left cheek**: Landmarks around left cheek region
+- **Right cheek**: Landmarks around right cheek region
+- **Forehead**: Landmarks above eyebrows
+
+Per-ROI mean RGB traces are accumulated, then fed to POS/CHROM for pulse reconstruction.
+
+## Signal Extraction Methods
+
+### POS (Plane-Orthogonal-to-Skin)
+- Projects RGB into a plane orthogonal to the skin-tone direction
+- More robust to illumination changes
+- Default method
+
+### CHROM (Chrominance-based)
+- Uses chrominance ratio (R-G, R-B) for pulse extraction
+- Alternative when POS struggles
+
+Both implemented in `signal_extraction.py` with vectorized sliding-window processing.
+
+## Feature Computation Details
+
+All spectral features share **one Welch periodogram** per video:
+- `heart_rate_bpm`: Peak frequency in 0.7-4.0 Hz band × 60
+- `snr_db`: Power at HR fundamental + 1st harmonic vs rest of band
+- `spectral_entropy`: Normalized Shannon entropy of in-band PSD
+- `signal_quality_index`: Beat regularity (peak spacing) + spectral concentration
+
+Time-domain features:
+- `prv_std_ms`: Std of inter-beat intervals from peak detection
+- `mad`: Mean absolute deviation of cleaned waveform
+- Correlations: Pearson r between per-ROI cleaned signals
+
+NaN features are filled with physiologically neutral fallbacks (HR=72, SNR=0, etc.).
+
+## Output Files (in `WORKING/output/rppg/`)
+
+| File | Description |
+|------|-------------|
+| `dataset_features.csv` | 8 features + label per video (1=fake, 0=real) |
+| `rppg_classifier.pkl` | Trained RandomForest (side path) |
+| `rppg_classifier_metadata.json` | Training summary, feature columns, metrics |
+| `plots/` | Diagnostic plots (PSD, waveforms, feature distributions) |
 
 ## Validation Strategy
 
-Before using the pipeline as a research result, validate the rPPG stage on ground-truth datasets such as:
+Before using as research result, validate rPPG stage on ground-truth datasets:
 
-- UBFC-rPPG: https://sites.google.com/view/ybenezeth/ubfcrppg
-- PURE: https://www.tu-ilmenau.de/en/university/departments/department-of-computer-science-and-automation/profile/institutes-and-groups/institute-for-computer-and-systems-engineering/group-for-neuroinformatics-and-cognitive-robotics/data-sets-code/pulse-rate-detection-dataset-pure
+- **UBFC-rPPG**: https://sites.google.com/view/ybenezeth/ubfcrppg
+- **PURE**: https://www.tu-ilmenau.de/.../pulse-rate-detection-dataset-pure
 
-Measure heart-rate error against the provided contact-PPG reference and report MAE/RMSE before relying on the classifier for conclusions.
+Measure heart-rate error against contact-PPG reference; report MAE/RMSE.
 
 ## Limitations
 
-- Strong occlusion, masks, or very poor lighting can produce unreliable features.
-- Very low frame rates reduce the usable heart-rate range.
-- Heavy compression can distort skin-tone cues and weaken rPPG extraction.
-- The classifier is only as good as the extracted features and training data quality.
-
-## Output Files
-
-- `dataset_features.csv` - extracted feature table
-- `rppg_classifier.pkl` - trained model
-- `rppg_classifier_metadata.json` - training summary and column metadata
+- Strong occlusion, masks, or very poor lighting → unreliable features
+- Very low frame rates reduce usable heart-rate range
+- Heavy compression distorts skin-tone cues, weakens rPPG
+- Classifier only as good as extracted features and training data quality
+- Small training set (18 rows) makes QAOA weights degenerate — data-quantity issue, not code bug
 
 ## Recommended Workflow
 
-1. Add new videos to `archive/DFDC_Dataset/Fake` and `archive/DFDC_Dataset/Real`.
-2. Regenerate features with `extract_dataset_features.py`.
-3. Retrain the classifier with `train_classifier.py`.
-4. Launch the Streamlit app and test predictions on unseen videos.
-
-## Project Goal
-
-The goal of this repository is not just to classify videos, but to expose a reproducible physiological signal pipeline that is easy to inspect, train, and extend for low-resolution deepfake detection.
+1. Add new videos to `archive/DFDC_Dataset/Fake` and `archive/DFDC_Dataset/Real`
+2. Regenerate features: `python rppg-pipeline/extract_dataset_features.py`
+3. Retrain classifier (optional): `python rppg-pipeline/train_classifier.py`
+4. Rerun quantum pipeline: `python -m quantum.pipeline --all` (from `WORKING/`)
+5. Test end-to-end: `python run_pipeline.py --source <video> --method POS`

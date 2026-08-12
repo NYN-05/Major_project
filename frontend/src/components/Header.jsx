@@ -5,9 +5,9 @@ export default function Header({ theme, onToggleTheme }) {
   return (
     <motion.header
       className="topbar"
-      initial={{ opacity: 0, y: -14 }}
+      initial={{ opacity: 0, y: -12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="brand">
         <div className="brand-tile" aria-hidden="true">
@@ -15,7 +15,7 @@ export default function Header({ theme, onToggleTheme }) {
             <path
               d="M1 12 C4 3, 7 21, 10 12 S16 3, 19 12 S25 21, 28 12 S31 4, 33 10"
               stroke="currentColor"
-              strokeWidth="1.6"
+              strokeWidth="1.7"
               strokeLinecap="round"
             />
           </svg>
@@ -28,15 +28,15 @@ export default function Header({ theme, onToggleTheme }) {
         </div>
       </div>
 
-      <div className="topbar-right">
+      <div className="topbar-actions">
         <div className="sec-badge" role="status">
           <span className="sec-dot" aria-hidden="true" />
-          <Lock size={12} aria-hidden="true" />
+          <Lock size={11} aria-hidden="true" />
           <span>Video stays on this machine</span>
         </div>
         <button
           type="button"
-          className="theme-toggle"
+          className="icon-btn theme-toggle"
           onClick={onToggleTheme}
           aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
           title={theme === "dark" ? "Light mode" : "Dark mode"}

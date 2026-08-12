@@ -45,38 +45,30 @@ export default function UploadZone({ phase, onFile }) {
         hidden
         onChange={(e) => pick(e.target.files)}
       />
-      <div className="upload-border" aria-hidden="true" />
 
-      <div className="upload-core" aria-hidden="true">
-        <span className="pulse-ring pulse-ring-1" />
-        <span className="pulse-ring pulse-ring-2" />
-        <span className="pulse-ring pulse-ring-3" />
-        <div className="upload-glyph">
-          <svg className="upload-wave" viewBox="0 0 120 40" fill="none">
-            <path
-              d="M2 20 C 10 6, 18 34, 26 20 S 42 6, 50 20 S 66 34, 74 20 S 90 6, 98 20 S 112 28, 118 18"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            />
-          </svg>
-          <span className="upload-core-dot" />
-          <span className="scan-line" />
-        </div>
+      <div className="upload-glyph" aria-hidden="true">
+        <svg viewBox="0 0 120 40" fill="none">
+          <path
+            d="M2 20 C 10 6, 18 34, 26 20 S 42 6, 50 20 S 66 34, 74 20 S 90 6, 98 20 S 112 28, 118 18"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </svg>
       </div>
 
       <motion.h2
         className="upload-title"
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2, duration: 0.5 }}
+        transition={{ delay: 0.15, duration: 0.5 }}
       >
         {isError ? "Something went wrong" : "Verify a video is real or AI-generated"}
       </motion.h2>
       <p className="upload-sub">
         {isError
           ? "The analysis server hit an error on the last run. Try again, or check the server console."
-          : "Upload a short selfie-style or KYC video. The system measures the subtle pulse of the face to decide."}
+          : "Upload a short selfie-style or KYC video. The system measures the subtle pulse of the face — then a hybrid quantum classifier issues the verdict."}
       </p>
 
       <div className="upload-actions">
@@ -94,7 +86,7 @@ export default function UploadZone({ phase, onFile }) {
 
       <p className="upload-hint">or drag and drop a video here</p>
       <p className="upload-fmts mono">
-        MP4 · AVI · MOV <span className="upload-fmts-dot" /> samples ~10 fps during analysis
+        MP4 · AVI · MOV <span className="upload-fmts-dot" /> sampled at ~10 fps during analysis · max 200 MB
       </p>
     </motion.section>
   );

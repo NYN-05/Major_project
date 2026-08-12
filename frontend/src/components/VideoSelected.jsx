@@ -29,8 +29,6 @@ export default function VideoSelected({ file, meta, onStart, onChange }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="selected-glow" aria-hidden="true" />
-
       <div className="selected-preview">
         {previewUrl ? (
           <video src={previewUrl} controls muted playsInline aria-label="selected video preview" />
@@ -46,10 +44,10 @@ export default function VideoSelected({ file, meta, onStart, onChange }) {
       </div>
 
       <div className="selected-body">
-        <span className="sv-eyebrow">Video selected</span>
+        <span className="eyebrow">Video selected</span>
         <h2 className="selected-title">{file.name}</h2>
         <p className="selected-sub">
-          Everything runs locally on this machine — nothing is uploaded anywhere.
+          Everything runs locally on this machine — the file is never uploaded anywhere.
         </p>
 
         <dl className="selected-meta">
@@ -64,7 +62,7 @@ export default function VideoSelected({ file, meta, onStart, onChange }) {
           ))}
         </dl>
 
-        <div className="sv-actions">
+        <div className="actions">
           <motion.button
             type="button"
             className="btn btn-primary"
