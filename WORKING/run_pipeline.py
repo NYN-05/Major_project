@@ -183,8 +183,11 @@ def rppg_classifier_crosscheck(vector: np.ndarray) -> dict:
     opposite of the quantum stage where LABEL_REAL=1)."""
     if not RPPG_CLASSIFIER.exists():
         return {"skipped": "rppg_classifier.pkl not found"}
-    with open(RPPG_CLASSIFIER, "rb") as fh:
-        clf = pickle.load(fh)
+    try:
+        with open(RPPG_CLASSIFIER, "rb") as fh:
+            clf = pickle.load(fh)
+    except (pickle.UnpicklingError, AttributeError, ImportError, ModuleNotFoundError) as exc:
+        return {"skipped": f"rppg_classifier.pkl could not be loaded: {exc}"}
     x = vector.reshape(1, -1)
     proba = clf.predict_proba(x)[0]
     pred = int(clf.predict(x)[0])
