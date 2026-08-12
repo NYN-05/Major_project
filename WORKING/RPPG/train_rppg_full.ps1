@@ -1,10 +1,12 @@
 # train_rppg_full.ps1 - run existing rPPG extract + train scripts end-to-end
 # Usage:
-#   .\train_rppg_full.ps1                        full run (all 3293 DFDC videos, ~2.5 h)
+#   .\train_rppg_full.ps1                        full run (all 3293 DFDC videos)
 #   .\train_rppg_full.ps1 -MaxPerClass 20        smoke test (20 per class)
+#   .\train_rppg_full.ps1 -Workers 8             parallel extraction (default = all CPU cores)
 #   .\train_rppg_full.ps1 -Force                 kill any stale extract process and restart
 param(
     [int]$MaxPerClass = 0,
+    [int]$Workers = 0,
     [switch]$Force
 )
 
@@ -14,7 +16,7 @@ $RPPG  = 'C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\RPPG'
 $PIPE  = Join-Path $RPPG 'rppg-pipeline'
 $OUT   = 'C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\output\rppg'
 $CSV   = Join-Path $OUT 'dataset_features.csv'
-$STDERR_LOG = Join-Path $OUT 'extract_stderr.log'
+$STDERR_LOG = Join-Path $OUT ("extract_stderr_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
 
 # --- guard against duplicate runs -------------------------------------
 $existing = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
@@ -38,6 +40,7 @@ Set-Location -LiteralPath $RPPG
 Write-Host '[1/3] Extracting rPPG features from DFDC_Dataset ...'
 $extractArgs = @('--method', 'POS')
 if ($MaxPerClass -gt 0) { $extractArgs += @('--max-per-class', "$MaxPerClass") }
+if ($Workers -gt 0) { $extractArgs += @('--workers', "$Workers") }
 $extractArgs += @('--output', $CSV)
 
 # stderr (MediaPipe/TFLite noise) goes to a log so the console stays readable

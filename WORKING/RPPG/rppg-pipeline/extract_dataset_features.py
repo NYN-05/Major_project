@@ -201,12 +201,11 @@ def main() -> None:
                     features_list.append(entry)
                     stats["processed"] += 1
                 if stats["processed"] > 0 and stats["processed"] % 100 == 0:
-                    rate = stats["processed"] / (time.time() - t_start)
-                    remain = int((stats["processed"] + stats["failed"] + stats["no_features"]) / rate) if rate > 0 else 0
+                    done = stats["processed"] + stats["failed"] + stats["no_features"]
+                    rate = done / (time.time() - t_start)
+                    remain = int((len(items) - done) / rate) if rate > 0 else 0
                     print(f"    ... {stats['processed']} ok / {stats['failed']} err / {stats['no_features']} no-feat | "
                           f"{rate:.2f} vid/s | ETA ~{remain/60:.0f} min")
-    # NOTE: only the initializer pipeline processes all legacy CSV samples when
-    # run sequentially; the parallel branch uses the same items list above.
 
     if not features_list:
         print("No features extracted from any videos.")

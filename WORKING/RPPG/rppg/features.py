@@ -78,10 +78,16 @@ def estimate_heart_rate(
     fs: float,
     low_hz: float = 0.7,
     high_hz: float = 4.0,
+    psd: Optional[tuple] = None,
 ) -> float:
     """Heart rate (BPM) estimated as the dominant frequency in the
-    plausible HR band of the power spectral density."""
-    freqs, psd = _welch_psd(trace, fs)
+    plausible HR band of the power spectral density.
+
+    `psd` may carry a precomputed `(freqs, psd)` pair (shared across
+    features in `compute_features`) to avoid recomputing the same
+    periodogram four times per video.
+    """
+    freqs, psd = psd if psd is not None else _welch_psd(trace, fs)
     band = (freqs >= low_hz) & (freqs <= high_hz)
     if not band.any():
         return float("nan")
@@ -95,6 +101,7 @@ def estimate_snr(
     low_hz: float = 0.7,
     high_hz: float = 4.0,
     harmonic_width_hz: float = 0.2,
+    psd: Optional[tuple] = None,
 ) -> float:
     """
     SNR (dB) between power at the estimated HR fundamental (+ first
@@ -103,7 +110,7 @@ def estimate_snr(
     genuine faces typically yield higher SNR than manipulated/flat
     deepfake regions under rPPG extraction.
     """
-    freqs, psd = _welch_psd(trace, fs)
+    freqs, psd = psd if psd is not None else _welch_psd(trace, fs)
     band_mask = (freqs >= low_hz) & (freqs <= high_hz)
     if not band_mask.any() or psd[band_mask].sum() <= 0:
         return float("nan")
@@ -130,8 +137,7 @@ def estimate_prv(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: flo
     unnaturally low variability (overly regular) or erratic,
     non-physiological variability.
     """
-    min_distance = max(1, int(fs * 60.0 / (high_hz * 60.0)))  # rough floor
-    # distance ~ min plausible interval between beats at high_hz BPM cap
+    # find_peaks enforces its own minimum inter-peak distance
     peaks, _ = signal.find_peaks(trace, distance=max(1, int(fs / (high_hz))))
     if len(peaks) < 3:
         return float("nan")
@@ -148,14 +154,14 @@ def estimate_prv(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: flo
     return float(np.std(ibi_ms))
 
 
-def spectral_entropy(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0) -> float:
+def spectral_entropy(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0, psd: Optional[tuple] = None) -> float:
     """
     Shannon entropy of the normalized power spectral density within
     the physiological band. Genuine physiological signals tend to
     concentrate energy near the HR fundamental (lower entropy);
     noisy or fabricated signals tend to be flatter (higher entropy).
     """
-    freqs, psd = _welch_psd(trace, fs)
+    freqs, psd = psd if psd is not None else _welch_psd(trace, fs)
     band = (freqs >= low_hz) & (freqs <= high_hz)
     p = psd[band]
     if p.sum() <= 0:
@@ -171,7 +177,7 @@ def mean_absolute_deviation(trace: np.ndarray) -> float:
     return float(np.mean(np.abs(trace - np.mean(trace))))
 
 
-def signal_quality_index(trace: np.ndarray, fs: float) -> float:
+def signal_quality_index(trace: np.ndarray, fs: float, psd: Optional[tuple] = None) -> float:
     """
     Pulse-signal quality score in [0, 1], combining:
 
@@ -202,7 +208,7 @@ def signal_quality_index(trace: np.ndarray, fs: float) -> float:
         regularity = float(plausible)
 
     # --- Spectral-concentration component ------------------------------
-    freqs, psd = _welch_psd(trace, fs)
+    freqs, psd = psd if psd is not None else _welch_psd(trace, fs)
     band = (freqs >= 0.7) & (freqs <= 4.0)
     if band.any() and psd[band].sum() > 1e-12:
         f_dom = freqs[band][np.argmax(psd[band])]
@@ -247,12 +253,16 @@ def compute_features(
     window given the combined pulse signal and (optionally) the
     individual per-ROI signals for correlation features.
     """
-    hr = estimate_heart_rate(combined_signal, fs, low_hz, high_hz)
-    snr = estimate_snr(combined_signal, fs, low_hz, high_hz)
+    # One periodogram shared by all spectral features (HR, SNR, entropy,
+    # quality index) instead of four identical Welch computations.
+    shared_psd = _welch_psd(combined_signal, fs)
+
+    hr = estimate_heart_rate(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
+    snr = estimate_snr(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
     prv = estimate_prv(combined_signal, fs, low_hz, high_hz)
-    ent = spectral_entropy(combined_signal, fs, low_hz, high_hz)
+    ent = spectral_entropy(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
     mad = mean_absolute_deviation(combined_signal)
-    sqi = signal_quality_index(combined_signal, fs)
+    sqi = signal_quality_index(combined_signal, fs, psd=shared_psd)
 
     cheek_corr_vals = [
         region_correlation(left_cheek_signal, forehead_signal),

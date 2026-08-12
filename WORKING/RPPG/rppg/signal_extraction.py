@@ -103,23 +103,33 @@ def pos_method(rgb_window: np.ndarray, fs: float, window_sec: float = 1.6) -> np
     # (fixed matrix from Wang et al., derived analytically).
     P = np.array([[0, 1, -1], [-2, 1, 1]], dtype=np.float64)
 
-    for start in range(0, t_len - win_len + 1):
-        end = start + win_len
-        segment = rgb[start:end]
-        seg_n = _normalize_temporal(segment)
+    n_windows = t_len - win_len + 1
+    if n_windows <= 0:
+        weight_sum[weight_sum == 0] = 1.0
+        return S / weight_sum
 
-        projected = seg_n @ P.T  # (win_len, 2) -> [S1, S2]
-        s1, s2 = projected[:, 0], projected[:, 1]
+    # Vectorized form of the original per-window loop (identical math):
+    # sliding windows -> temporal normalization -> projection ->
+    # per-window alpha weighting -> overlap-add.
+    windows = np.lib.stride_tricks.sliding_window_view(rgb, win_len, axis=0)
+    means = windows.mean(axis=1)
+    means = np.where(means < 1e-6, 1e-6, means)
+    segments = windows / means[:, None, :]
 
-        std1 = s1.std()
-        std2 = s2.std()
-        alpha = std1 / std2 if std2 > 1e-8 else 0.0
+    projected = segments @ P.T  # (n_windows, win_len, 2) -> [S1, S2]
+    s1 = projected[..., 0]
+    s2 = projected[..., 1]
 
-        h = s1 + alpha * s2
-        h = h - h.mean()
+    std1 = s1.std(axis=1)
+    std2 = s2.std(axis=1)
+    alpha = np.where(std2 > 1e-8, std1 / std2, 0.0)
 
-        S[start:end] += h
-        weight_sum[start:end] += 1.0
+    h = s1 + alpha[:, None] * s2
+    h = h - h.mean(axis=1)[:, None]
+
+    idx = np.arange(n_windows)[:, None] + np.arange(win_len)[None, :]
+    np.add.at(S, idx, h)
+    np.add.at(weight_sum, idx, 1.0)
 
     weight_sum[weight_sum == 0] = 1.0
     return S / weight_sum

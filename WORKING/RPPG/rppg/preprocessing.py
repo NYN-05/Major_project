@@ -6,6 +6,7 @@ traces: detrending, bandpass filtering, normalization, and simple
 frame-quality-driven interpolation for dropped/occluded frames.
 """
 
+from functools import lru_cache
 from typing import Optional
 
 import numpy as np
@@ -53,13 +54,19 @@ def detrend_tarvainen(trace: np.ndarray, lam: float = 300.0) -> np.ndarray:
     if n < 3:
         return trace - np.mean(trace)
 
-    identity = sparse.eye(n, format="csc")
-    d2 = sparse.diags(
-        [1.0, -2.0, 1.0], [0, 1, 2], shape=(n - 2, n), format="csc"
-    )
-    regularized = (identity + (lam ** 2) * (d2.T @ d2)).tocsc()
+    regularized = _detrend_matrix(n, lam)
     trend = spsolve(regularized, trace)
     return trace - trend
+
+
+@lru_cache(maxsize=16)
+def _detrend_matrix(n: int, lam: float):
+    """Smoothness-priors regularization matrix (identical for any trace
+    of the same length), built once and reused across the per-ROI and
+    combined signals of a video."""
+    identity = sparse.eye(n, format="csc")
+    d2 = sparse.diags([1.0, -2.0, 1.0], [0, 1, 2], shape=(n - 2, n), format="csc")
+    return (identity + (lam ** 2) * (d2.T @ d2)).tocsc()
 
 
 def bandpass_filter(
@@ -84,12 +91,19 @@ def bandpass_filter(
     if low >= high:
         raise ValueError("Invalid filter band for given sampling rate.")
 
-    b, a = signal.butter(order, [low, high], btype="band")
+    b, a = _bandpass_coefficients(order, fs, low, high)
     padlen = 3 * max(len(a), len(b))
     if len(trace) <= padlen:
         # Too short to filtfilt safely; fall back to lfilter.
         return signal.lfilter(b, a, trace)
     return signal.filtfilt(b, a, trace)
+
+
+@lru_cache(maxsize=16)
+def _bandpass_coefficients(order: int, fs: float, low: float, high: float):
+    """Butterworth coefficients — identical for all signals of a video,
+    so the design is computed once instead of once per ROI signal."""
+    return signal.butter(order, [low, high], btype="band")
 
 
 def zscore_normalize(trace: np.ndarray) -> np.ndarray:
