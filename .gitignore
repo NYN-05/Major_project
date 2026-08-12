@@ -22,3 +22,11 @@ WORKING/frame/weights/yolov9e-face-lindevs.pt
 
 # Regenerated pipeline output (any directory named "output" at any level)
 output/
+
+# Node/Vite build output
+frontend/dist/
+
+# Frontend manifests are needed for the build; the global *.json rule
+# above must not swallow them.
+!frontend/package.json
+!frontend/package-lock.json
