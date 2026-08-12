@@ -76,6 +76,15 @@ export default function ProgressBar({
               }}
             />
           )}
+          {!indeterminate && !reduced && (
+            <motion.span
+              aria-hidden
+              className="pb-sheen"
+              initial={{ x: "-60%" }}
+              animate={{ x: "160%" }}
+              transition={{ duration: 1.6, ease: "easeInOut", repeat: Infinity }}
+            />
+          )}
         </div>
       </div>
 
