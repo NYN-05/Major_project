@@ -36,6 +36,10 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _output_dir() -> Path:
+    return _repo_root().parent / "output" / "rppg"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the rPPG deepfake classifier.")
     parser.add_argument("--features-csv", default=None, help="Path to dataset_features.csv")
@@ -43,10 +47,11 @@ def main() -> None:
     parser.add_argument("--metadata-out", default=None, help="Optional JSON file for training metadata")
     args = parser.parse_args()
 
-    root = _repo_root()
-    features_csv = Path(args.features_csv) if args.features_csv else root / "dataset_features.csv"
-    model_path = Path(args.model_out) if args.model_out else root / "rppg_classifier.pkl"
-    metadata_path = Path(args.metadata_out) if args.metadata_out else root / "rppg_classifier_metadata.json"
+    out_dir = _output_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    features_csv = Path(args.features_csv) if args.features_csv else out_dir / "dataset_features.csv"
+    model_path = Path(args.model_out) if args.model_out else out_dir / "rppg_classifier.pkl"
+    metadata_path = Path(args.metadata_out) if args.metadata_out else out_dir / "rppg_classifier_metadata.json"
 
     if not features_csv.exists():
         print(f"Error: {features_csv} not found. Run extract_dataset_features.py first.")

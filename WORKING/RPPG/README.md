@@ -107,7 +107,7 @@ Useful options:
 - `--target-fps 15`
 - `--max-per-class 50` for a faster smoke test
 
-This writes `dataset_features.csv` at the repository root.
+This writes `output/rppg/dataset_features.csv` (relative to `WORKING/`).
 
 ### 2. Train the classifier
 
@@ -115,7 +115,7 @@ This writes `dataset_features.csv` at the repository root.
 python rppg-pipeline/train_classifier.py
 ```
 
-This saves:
+This saves (to `output/rppg/`):
 
 - `rppg_classifier.pkl`
 - `rppg_classifier_metadata.json`

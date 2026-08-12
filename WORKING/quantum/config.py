@@ -29,8 +29,9 @@ FEATURE_MEANINGS = {
 }
 
 QUANTUM_ROOT = Path(__file__).resolve().parent
-OUTPUT_DIR = QUANTUM_ROOT / "output"
-DOCS_DIR = QUANTUM_ROOT / "docs"
+WORKING_ROOT = QUANTUM_ROOT.parent
+OUTPUT_DIR = WORKING_ROOT / "output" / "quantum"
+DOCS_DIR = OUTPUT_DIR
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class DataConfig:
     train_ratio: float = 0.6
     val_ratio: float = 0.2
     csv_file: Path = field(
-        default_factory=lambda: QUANTUM_ROOT.parent / "RPPG" / "dataset_features.csv"
+        default_factory=lambda: WORKING_ROOT / "output" / "rppg" / "dataset_features.csv"
     )
     data_file: Path = field(default_factory=lambda: OUTPUT_DIR / "data.npz")
 

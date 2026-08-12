@@ -12,6 +12,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+WORKING_ROOT = Path(__file__).resolve().parents[2]
+GLOBAL_OUTPUT = WORKING_ROOT / "output" / "frames"
+
 from app.config import MODEL_WEIGHTS, build_config
 from app.detector import FaceDetector, annotate_frame, crop_faces
 from app.processing import FrameIngestor, FrameQualityAssessor, StorageManager
@@ -76,7 +79,7 @@ def parse_args():
     parser.add_argument("--imgsz", type=int, default=320, help="Model inference image size")
     parser.add_argument("--device", default="auto", help="Inference device: auto, cpu, 0, 1, gpu, cuda")
     parser.add_argument("--half", action="store_true", help="Use half precision on CUDA")
-    parser.add_argument("--output-root", default="output", help="Root output folder")
+    parser.add_argument("--output-root", default=str(GLOBAL_OUTPUT / "annotated"), help="Root output folder")
     parser.add_argument("--display", action="store_true", help="Display annotated frames in a window")
     parser.add_argument("--save-metadata", action="store_true", help="Write JSONL metadata per frame")
     parser.add_argument("--max-io-workers", type=int, default=4, help="Background workers for storage I/O")
@@ -186,7 +189,11 @@ def parse_extract_args():
     parser = argparse.ArgumentParser(description="Extract ordered video frames with sampling and quality assessment.")
     parser.add_argument("--source", default=None, help="Single video path")
     parser.add_argument("--input-dir", default=None, help="Directory containing videos")
-    parser.add_argument("--output-root", default="output/frame_sequences", help="Root folder for extracted sequences")
+    parser.add_argument(
+        "--output-root",
+        default=str(GLOBAL_OUTPUT / "frame_sequences"),
+        help="Root folder for extracted sequences",
+    )
     parser.add_argument("--sample-fps", type=float, default=10.0, help="Project-standard frame sampling FPS")
     parser.add_argument("--min-seq-len", type=int, default=64, help="Minimum accepted frames for temporal modeling")
 
@@ -219,28 +226,28 @@ def parse_extract_args():
     )
     parser.add_argument(
         "--sampling-note-file",
-        default="Docs/frame_sampling_rate_comparison.md",
+        default=str(GLOBAL_OUTPUT / "docs" / "frame_sampling_rate_comparison.md"),
         help="Path for sampling-rate comparison note",
     )
     parser.add_argument(
         "--quality-checklist-file",
-        default="Docs/frame_quality_checklist.md",
+        default=str(GLOBAL_OUTPUT / "docs" / "frame_quality_checklist.md"),
         help="Path for frame-quality checklist sheet",
     )
     parser.add_argument(
         "--quality-report-file",
-        default="Docs/frame_quality_examples_report.md",
+        default=str(GLOBAL_OUTPUT / "docs" / "frame_quality_examples_report.md"),
         help="Path for quality examples report",
     )
 
     parser.add_argument(
         "--extraction-log",
-        default="output/frame_extraction_log.jsonl",
+        default=str(GLOBAL_OUTPUT / "frame_extraction_log.jsonl"),
         help="Extraction success/failure log file",
     )
     parser.add_argument(
         "--summary-file",
-        default="output/frame_extraction_summary.json",
+        default=str(GLOBAL_OUTPUT / "frame_extraction_summary.json"),
         help="Aggregate extraction summary file",
     )
     parser.add_argument(
@@ -569,13 +576,13 @@ def run_frame_sampling_quality_layer(
     use_half: bool,
     sample_fps: float = 10.0,
     min_seq_len: int = 64,
-    output_root: str = "output/frame_sequences",
-    extraction_log: str = "output/frame_extraction_log.jsonl",
-    summary_file: str = "output/frame_extraction_summary.json",
+    output_root: str = None,
+    extraction_log: str = None,
+    summary_file: str = None,
     compare_rates: str = "5,10,15",
-    sampling_note_file: str = "Docs/frame_sampling_rate_comparison.md",
-    quality_checklist_file: str = "Docs/frame_quality_checklist.md",
-    quality_report_file: str = "Docs/frame_quality_examples_report.md",
+    sampling_note_file: str = None,
+    quality_checklist_file: str = None,
+    quality_report_file: str = None,
     blur_threshold: float = 8.0,
     dark_threshold: float = 45.0,
     bright_threshold: float = 220.0,
@@ -607,9 +614,12 @@ def run_frame_sampling_quality_layer(
         min_face_area_ratio=min_face_area_ratio,
     )
 
-    output_root_path = Path(output_root)
-    log_path = Path(extraction_log)
-    summary_path = Path(summary_file)
+    output_root_path = Path(output_root) if output_root else GLOBAL_OUTPUT / "frame_sequences"
+    log_path = Path(extraction_log) if extraction_log else GLOBAL_OUTPUT / "frame_extraction_log.jsonl"
+    summary_path = Path(summary_file) if summary_file else GLOBAL_OUTPUT / "frame_extraction_summary.json"
+    sampling_note_path = Path(sampling_note_file) if sampling_note_file else GLOBAL_OUTPUT / "docs" / "frame_sampling_rate_comparison.md"
+    quality_checklist_path = Path(quality_checklist_file) if quality_checklist_file else GLOBAL_OUTPUT / "docs" / "frame_quality_checklist.md"
+    quality_report_path = Path(quality_report_file) if quality_report_file else GLOBAL_OUTPUT / "docs" / "frame_quality_examples_report.md"
 
     comparison_rates = [float(v.strip()) for v in compare_rates.split(",") if v.strip()]
     comparison_rows: list[dict] = []
@@ -642,18 +652,18 @@ def run_frame_sampling_quality_layer(
     summary_path.write_text(json.dumps(all_summaries, indent=2), encoding="utf-8")
 
     write_sampling_note(
-        note_path=Path(sampling_note_file),
+        note_path=sampling_note_path,
         comparison_rows=comparison_rows,
         standard_rate=sample_fps,
         min_seq_len=min_seq_len,
     )
     write_quality_checklist(
-        path=Path(quality_checklist_file),
+        path=quality_checklist_path,
         blur_threshold=blur_threshold,
         dark_threshold=dark_threshold,
         bright_threshold=bright_threshold,
     )
-    write_quality_examples_report(Path(quality_report_file), all_summaries)
+    write_quality_examples_report(quality_report_path, all_summaries)
 
     success_count = sum(1 for row in all_summaries if row.get("status") == "success")
     return {

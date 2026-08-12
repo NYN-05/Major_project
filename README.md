@@ -30,7 +30,7 @@ frames  ->  rPPG  ->  quantum  ->  final verdict (REAL / FAKE / UNCERTAIN)
 | `WORKING/RPPG/` | Component 2 - rPPG signal extraction + feature engineering, classifier |
 | `WORKING/quantum/` | Component 3 - QAOA feature selection + hybrid Variational Quantum Classifier (PennyLane + PyTorch) + classical baselines |
 | `WORKING/run_pipeline.py` | End-to-end runner: frames -> rPPG -> quantum -> verdict |
-| `WORKING/output/` | Pipeline/quantum artifacts (results, plots, checkpoints) |
+| `WORKING/output/` | Global regenerated-artifacts root: `frames/`, `rppg/`, `quantum/`, `pipeline/` |
 | `Docs/` | Project docs, report drafts, research papers |
 | `FF++/` | FaceForensics++ dataset (gitignored) |
 
@@ -52,11 +52,11 @@ python app/extract_frames.py --source test.mp4 --sample-fps 10 --save-quality-ex
 POS/CHROM pulse reconstruction from facial ROIs (left cheek, right cheek, forehead)
 and an 8-feature physiological vector per video: heart rate, SNR, PRV, spectral
 entropy, MAD, signal quality index, and inter-region correlations. Features are
-persisted with labels (1 = fake, 0 = real) in `dataset_features.csv`, which is the
-direct data source for the quantum layer.
+persisted with labels (1 = fake, 0 = real) in `WORKING/output/rppg/dataset_features.csv`,
+which is the direct data source for the quantum layer.
 
 ```bash
-python rppg-pipeline/extract_dataset_features.py   # rebuild dataset_features.csv
+python rppg-pipeline/extract_dataset_features.py   # rebuild output/rppg/dataset_features.csv
 ```
 
 ### 3. Quantum Model (`WORKING/quantum/`)
@@ -65,8 +65,8 @@ Hybrid classical-quantum decision stage built with PennyLane + PyTorch. It consu
 the rPPG 8-feature vector **directly** (same names/order as `RPPGFeatures.feature_names()`);
 no synthetic data is generated anywhere in the pipeline.
 
-- **Data** - `data.py` builds `output/data.npz` from the real labeled rPPG feature
-  table `RPPG/dataset_features.csv` (rPPG label 1 = fake is flipped to the quantum
+- **Data** - `data.py` builds `output/quantum/data.npz` from the real labeled rPPG feature
+  table `output/rppg/dataset_features.csv` (rPPG label 1 = fake is flipped to the quantum
   convention LABEL_REAL = 1, LABEL_FAKE = 0) with a stratified train/val/test split
 - **QAOA feature selection** - `qaoa.py` selects the most informative rPPG features
   using a cost Hamiltonian (mutual information weights + correlation redundancy

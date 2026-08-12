@@ -187,14 +187,14 @@ Extract sampled frames, apply quality filtering, and generate quality reports.
 python app/extract_frames.py --source test.mp4 --sample-fps 10 --save-quality-examples
 ```
 
-This command produces:
-- Ordered extracted frame sequence per video: output/frame_sequences/<video_name>/frames/
-- Frame metadata with quality flags: output/frame_sequences/<video_name>/frame_metadata.jsonl
-- Extraction success/failure log: output/frame_extraction_log.jsonl
-- Frame count and sequence readiness summary: output/frame_extraction_summary.json
-- Sampling-rate comparison note: Docs/frame_sampling_rate_comparison.md
-- Frame-quality checklist sheet: Docs/frame_quality_checklist.md
-- Good vs bad frame marking report: Docs/frame_quality_examples_report.md
+This command produces (under `WORKING/output/frames/`):
+- Ordered extracted frame sequence per video: frame_sequences/<video_name>/frames/
+- Frame metadata with quality flags: frame_sequences/<video_name>/frame_metadata.jsonl
+- Extraction success/failure log: frame_extraction_log.jsonl
+- Frame count and sequence readiness summary: frame_extraction_summary.json
+- Sampling-rate comparison note: docs/frame_sampling_rate_comparison.md
+- Frame-quality checklist sheet: docs/frame_quality_checklist.md
+- Good vs bad frame marking report: docs/frame_quality_examples_report.md
 
 ## Main Options
 
@@ -205,7 +205,7 @@ This command produces:
 - --imgsz: inference image size (default: 320)
 - --device: auto, cpu, gpu, cuda, or explicit index like 0 (default: auto)
 - --half: enable FP16 inference on CUDA
-- --output-root: root output folder (default: output)
+- --output-root: root output folder (default: WORKING/output/frames/annotated)
 - --display: show live annotated window
 - --save-metadata: write one JSONL record per frame
 - --max-io-workers: storage thread pool size (default: 4)

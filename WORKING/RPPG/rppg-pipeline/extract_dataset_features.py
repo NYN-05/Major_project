@@ -30,6 +30,10 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _output_dir() -> Path:
+    return _repo_root().parent / "output" / "rppg"
+
+
 def _iter_video_files(folder: Path) -> Iterable[Path]:
     for path in sorted(folder.rglob("*")):
         if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS:
@@ -101,7 +105,8 @@ def main() -> None:
         return
 
     root = _repo_root()
-    out_csv_path = Path(args.output) if args.output else root / "dataset_features.csv"
+    out_csv_path = Path(args.output) if args.output else _output_dir() / "dataset_features.csv"
+    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     pipeline = RPPGPipeline(
         method=args.method,

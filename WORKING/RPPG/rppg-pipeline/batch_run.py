@@ -13,8 +13,11 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from rppg import RPPGPipeline
 
-VIDEO_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'archive (1)', 'video')
-OUT_CSV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'batch_results.csv')
+RPPG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUTPUT_DIR = os.path.join(os.path.dirname(RPPG_ROOT), 'output', 'rppg')
+
+VIDEO_DIR = os.path.join(RPPG_ROOT, 'archive (1)', 'video')
+OUT_CSV = os.path.join(OUTPUT_DIR, 'batch_results.csv')
 
 
 def save_diagnostic_plot(result, out_path):
@@ -48,6 +51,7 @@ def save_diagnostic_plot(result, out_path):
 
 
 def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     files = [f for f in os.listdir(VIDEO_DIR) if f.lower().endswith(('.mp4', '.mov', '.avi', '.mkv'))]
     files.sort()
     rows = []
@@ -68,7 +72,7 @@ def main():
                'n_frames_total': res.n_frames_total, 'n_frames_usable': res.n_frames_usable}
         if res.features is not None:
             row.update(res.features.to_dict())
-            plot_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), f'rppg_{os.path.splitext(fname)[0]}.png')
+            plot_path = os.path.join(OUTPUT_DIR, f'rppg_{os.path.splitext(fname)[0]}.png')
             try:
                 save_diagnostic_plot(res, plot_path)
                 row['plot'] = os.path.basename(plot_path)

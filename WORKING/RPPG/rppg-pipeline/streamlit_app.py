@@ -116,7 +116,9 @@ if run:
             st.json(feat)
             
             # --- Integration of Classifier ---
-            model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "rppg_classifier.pkl")
+            model_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "output", "rppg", "rppg_classifier.pkl")
             if os.path.exists(model_path):
                 st.subheader("Deepfake Detection Result")
                 try:

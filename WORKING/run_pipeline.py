@@ -40,6 +40,8 @@ WORKING = Path(__file__).resolve().parent
 FRAME_ROOT = WORKING / "frame"
 RPPG_ROOT = WORKING / "RPPG"
 OUTPUT_ROOT = WORKING / "output" / "pipeline"
+FRAMES_OUTPUT = WORKING / "output" / "frames"
+RPPG_OUTPUT = WORKING / "output" / "rppg"
 
 for _root in (FRAME_ROOT, RPPG_ROOT, WORKING):
     if str(_root) not in sys.path:
@@ -51,7 +53,7 @@ from rppg import RPPGPipeline  # stage 2
 from quantum.pipeline import predict_features  # stage 3
 
 FRAME_WEIGHTS = FRAME_ROOT / "weights" / "yolov8n-face-lindevs.pt"
-RPPG_CLASSIFIER = RPPG_ROOT / "rppg_classifier.pkl"
+RPPG_CLASSIFIER = RPPG_OUTPUT / "rppg_classifier.pkl"
 
 VERDICT_INCONCLUSIVE = "INCONCLUSIVE"
 
@@ -61,7 +63,7 @@ VERDICT_INCONCLUSIVE = "INCONCLUSIVE"
 # ---------------------------------------------------------------------------
 
 def run_frames_stage(video_path: Path) -> tuple[dict, dict, dict]:
-    docs_dir = OUTPUT_ROOT / "frame_docs"
+    docs_dir = FRAMES_OUTPUT / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     layer_result = run_frame_sampling_quality_layer(
         source=str(video_path),
@@ -71,9 +73,9 @@ def run_frames_stage(video_path: Path) -> tuple[dict, dict, dict]:
         device="auto",
         use_half=False,
         sample_fps=10.0,
-        output_root=str(OUTPUT_ROOT / "frame_sequences"),
-        extraction_log=str(OUTPUT_ROOT / "frame_extraction_log.jsonl"),
-        summary_file=str(OUTPUT_ROOT / "frame_extraction_summary.json"),
+        output_root=str(FRAMES_OUTPUT / "frame_sequences"),
+        extraction_log=str(FRAMES_OUTPUT / "frame_extraction_log.jsonl"),
+        summary_file=str(FRAMES_OUTPUT / "frame_extraction_summary.json"),
         compare_rates="5,10,15",
         sampling_note_file=str(docs_dir / "frame_sampling_rate_comparison.md"),
         quality_checklist_file=str(docs_dir / "frame_quality_checklist.md"),

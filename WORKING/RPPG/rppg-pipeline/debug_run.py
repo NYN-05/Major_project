@@ -1,7 +1,10 @@
+import os
 import sys
 import cv2
 import numpy as np
 from rppg.face_roi import FaceROIExtractor
+
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "output", "rppg")
 
 
 def main(path):
@@ -75,7 +78,8 @@ def main(path):
                     vis[rois.right_cheek > 0] = (0, 255, 0)
                 if rois.forehead is not None:
                     vis[rois.forehead > 0] = (255, 0, 0)
-                outp = f"debug_frame_{idx}.png"
+                outp = os.path.join(OUTPUT_DIR, f"debug_frame_{idx}.png")
+                os.makedirs(OUTPUT_DIR, exist_ok=True)
                 cv2.imwrite(outp, vis)
                 print("Wrote", outp)
                 saved += 1

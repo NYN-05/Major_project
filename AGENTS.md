@@ -12,28 +12,33 @@ WORKING/
   RPPG/     stage 2: MediaPipe face ROIs -> POS/CHROM pulse -> 8 physiological features (+ rppg-pipeline/, requirements.txt)
   quantum/  stage 3: QAOA feature selection -> hybrid VQC -> P(real) -> verdict (run via `python -m quantum.pipeline`)
   run_pipeline.py  end-to-end orchestrator: frames -> rPPG -> quantum -> verdict
+  output/   global regenerated-artifacts root (all `output/` dirs untracked)
+    frames/     stage 1: frame_sequences/, frame_extraction_*.json(l), docs/
+    rppg/       stage 2: dataset_features.csv, rppg_classifier.pkl + metadata, plots
+    quantum/    stage 3: data.npz, qaoa_selection.json, feature_scaler.json, hybrid_vqc.pt, metrics, plots
+    pipeline/   run_pipeline.py result JSON
 ```
 
 ## Commands (all from `WORKING/`)
 
-- `python -m quantum.pipeline --all` — full quantum flow: build real dataset, QAOA selection (8→6), train VQC, evaluate, baselines. Regenerates `quantum/output/*` (`data.npz`, `qaoa_selection.json`, `hybrid_vqc.pt`, metrics, plots).
+- `python -m quantum.pipeline --all` — full quantum flow: build real dataset, QAOA selection (8→6), train VQC, evaluate, baselines. Regenerates `output/quantum/*` (`data.npz`, `qaoa_selection.json`, `feature_scaler.json`, `hybrid_vqc.pt`, metrics, plots).
 - `python run_pipeline.py --source path/video.mp4 [--method POS|CHROM] [--out result.json]` — end-to-end inference. Requires the quantum artifacts above.
-- Rebuild rPPG training data: `python rppg-pipeline/extract_dataset_features.py` from `WORKING/RPPG/` (writes `dataset_features.csv`), then rerun `python -m quantum.pipeline --all`.
+- Rebuild rPPG training data: `python rppg-pipeline/extract_dataset_features.py` from `WORKING/RPPG/` (writes `output/rppg/dataset_features.csv`), then rerun `python -m quantum.pipeline --all`.
 - Standalone frame stage: `python app/main.py --source test.mp4 --save-metadata` from `WORKING/frame/`.
 
 The `quantum.*` imports and the `sys.path` insertions in `run_pipeline.py` assume the working directory is `WORKING/`. Do not run from the repo root.
 
 ## Verified constraints (do not break)
 
-- **No synthetic data.** The quantum layer consumes only the real rPPG feature table `RPPG/dataset_features.csv` (currently 18 labeled rows). Never reintroduce a generator or a transform/bridge layer.
+- **No synthetic data.** The quantum layer consumes only the real rPPG feature table `output/rppg/dataset_features.csv` (currently 18 labeled rows). Never reintroduce a generator or a transform/bridge layer.
 - **Feature contract:** `FEATURE_NAMES` in `quantum/config.py` must stay identical in name AND order to `RPPGFeatures.feature_names()` in `RPPG/rppg/features.py` (duplicated on purpose; `data.py`, `qaoa.py`, and `pipeline.py` all index by it). Keep the two lists in sync.
 - **Label conventions differ per stage — do not unify:**
   - rPPG CSV: `1 = fake, 0 = real`
   - quantum: `LABEL_REAL = 1`, `LABEL_FAKE = 0`; `quantum/data.py` flips (`y = 1 - csv_label`)
   - rPPG RandomForest cross-check in `run_pipeline.py`: `1 = DEEPFAKE`
-- **Gitignored artifacts:** `*.csv`, `*.json`, `*.pkl`, `*.mp4`, and all `output/` dirs are untracked — `dataset_features.csv`, `quantum/output/*`, and the trained models will not appear in `git status`. Regenerating them is normal.
+- **Gitignored artifacts:** `*.csv`, `*.json`, `*.pkl`, `*.mp4`, and all `output/` dirs are untracked — `dataset_features.csv`, `output/quantum/*`, and the trained models will not appear in `git status`. Regenerating them is normal.
 - **rPPG returns `features=None`** when usable frames < `min_usable_frames` (48); `run_pipeline.py` then emits INCONCLUSIVE and exits 3. New code must handle `None`.
-- **Stage 1 feeds stage 2.** `run_pipeline.py` hands the frame stage's accepted JPEGs (`output/pipeline/frame_sequences/<video>/frames/`) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (10 fps). rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling (INCONCLUSIVE, exit 3) is unchanged. If stage 1 fails or yields no frames, `run_pipeline.py` falls back to `RPPGPipeline.process_video()` (direct video read; `input_mode` in the result JSON records which path ran). Standalone RPPG scripts keep using `process_video`.
+- **Stage 1 feeds stage 2.** `run_pipeline.py` hands the frame stage's accepted JPEGs (`output/frames/frame_sequences/<video>/frames/`) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (10 fps). rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling (INCONCLUSIVE, exit 3) is unchanged. If stage 1 fails or yields no frames, `run_pipeline.py` falls back to `RPPGPipeline.process_video()` (direct video read; `input_mode` in the result JSON records which path ran). Standalone RPPG scripts keep using `process_video`.
 - RandomForest cross-check is an optional side path; the final verdict comes exclusively from the quantum stage.
 - Small training set (10 train rows) makes QAOA mutual-information weights degenerate (`"success": false`, mostly-zero weights in `qaoa_selection.json`). Expected — data-quantity issue, not a code bug.
 - rPPG needs MediaPipe Face Landmarker; the model auto-downloads on first run (internet required). In `frame/`, only `yolov8n-face-lindevs.pt` auto-downloads; missing other presets raise `FileNotFoundError`.

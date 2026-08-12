@@ -2,7 +2,7 @@
 Real rPPG dataset for the quantum layer (no synthetic data).
 
 Reads the labelled feature table produced by the rPPG pipeline
-(RPPG/dataset_features.csv), converts its labels onto the quantum
+(WORKING/output/rppg/dataset_features.csv), converts its labels onto the quantum
 convention (CSV: 1 = deepfake, 0 = real; quantum: LABEL_REAL = 1,
 LABEL_FAKE = 0), and stores a subject-grouped train/val/test split as
 data.npz for QAOA selection, VQC training, and evaluation.

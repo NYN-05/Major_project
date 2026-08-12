@@ -23,6 +23,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rppg import RPPGPipeline
 
+OUTPUT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "output", "rppg",
+)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Run rPPG feature extraction on a video.")
@@ -32,7 +37,7 @@ def main():
     parser.add_argument("--fps", type=float, default=None,
                          help="Force a target sampling fps (default: use video's native fps)")
     parser.add_argument("--plot", action="store_true", help="Save a diagnostic plot")
-    parser.add_argument("--out", default="rppg_output.png", help="Path for diagnostic plot")
+    parser.add_argument("--out", default=os.path.join(OUTPUT_DIR, "rppg_output.png"), help="Path for diagnostic plot")
     args = parser.parse_args()
 
     pipeline = RPPGPipeline(method=args.method, target_fps=args.fps)
@@ -89,6 +94,7 @@ def _save_diagnostic_plot(result, out_path):
     axes[1].legend()
 
     fig.tight_layout()
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     fig.savefig(out_path, dpi=150)
 
 
