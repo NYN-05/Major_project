@@ -60,7 +60,7 @@ VERDICT_INCONCLUSIVE = "INCONCLUSIVE"
 # Stage 1: frames
 # ---------------------------------------------------------------------------
 
-def run_frames_stage(video_path: Path) -> tuple[dict, dict]:
+def run_frames_stage(video_path: Path) -> tuple[dict, dict, dict]:
     docs_dir = OUTPUT_ROOT / "frame_docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     layer_result = run_frame_sampling_quality_layer(
@@ -91,8 +91,13 @@ def run_frames_stage(video_path: Path) -> tuple[dict, dict]:
     layer_status = layer_result.get("status", "unknown")
     if not target:
         reason = layer_result.get("reason", "no per-video summary produced")
-        return {"status": "skipped" if layer_status == "skipped" else "failure", "reason": reason}, frame_stats_from_summary({})
-    return {"status": "success", "layer_status": layer_status}, frame_stats_from_summary(target)
+        return {"status": "skipped" if layer_status == "skipped" else "failure", "reason": reason}, frame_stats_from_summary({}), {}
+    handoff = {
+        "frames_dir": target.get("frames_dir", ""),
+        "metadata_file": target.get("metadata_file", ""),
+        "fps": float(target.get("sample_fps", 10.0)),
+    }
+    return {"status": "success", "layer_status": layer_status}, frame_stats_from_summary(target), handoff
 
 
 def frame_stats_from_summary(summary: dict) -> dict:
@@ -136,11 +141,32 @@ def frame_stats_from_summary(summary: dict) -> dict:
 # Stage 2: rPPG
 # ---------------------------------------------------------------------------
 
-def run_rppg_stage(video_path: Path, method: str = "POS") -> tuple[dict, np.ndarray | None]:
+def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None = None) -> tuple[dict, np.ndarray | None]:
+    """rPPG feature extraction. Uses the stage-1 accepted frames when the
+    frame layer produced them (input_mode=stage1_frames); otherwise falls
+    back to reading the video directly (input_mode=video_direct)."""
     pipeline = RPPGPipeline(method=method)
-    result = pipeline.process_video(str(video_path))
+    input_mode = "video_direct"
+    if handoff:
+        frames_dir = handoff.get("frames_dir", "")
+        if frames_dir and Path(frames_dir).is_dir():
+            try:
+                result = pipeline.process_frames(
+                    frames_dir,
+                    metadata_path=handoff.get("metadata_file"),
+                    fps=float(handoff.get("fps", 10.0)),
+                )
+                input_mode = "stage1_frames"
+            except IOError as exc:
+                print(f"      [warn] stage-1 frame handoff failed ({exc}); falling back to video read")
+                result = pipeline.process_video(str(video_path))
+        else:
+            result = pipeline.process_video(str(video_path))
+    else:
+        result = pipeline.process_video(str(video_path))
     payload = {
         "method": method,
+        "input_mode": input_mode,
         "fps_used": float(result.fps),
         "n_frames_total": int(result.n_frames_total),
         "n_frames_usable": int(result.n_frames_usable),
@@ -206,7 +232,7 @@ def main() -> int:
     result = {"video": str(video_path), "timestamp": datetime.now().isoformat(), "stages": {}}
 
     print(f"[1/3] FRAMES stage  : {video_path.name}")
-    frames_stage, frame_stats = run_frames_stage(video_path)
+    frames_stage, frame_stats, frame_handoff = run_frames_stage(video_path)
     result["stages"]["frames"] = {**frames_stage, "stats": frame_stats}
     print(
         f"      accepted/sampled = {frame_stats['accepted_frames']}/{frame_stats['sampled_frames']} "
@@ -214,7 +240,7 @@ def main() -> int:
     )
 
     print(f"[2/3] RPPG stage    : method={args.method}")
-    rppg_stage, vector = run_rppg_stage(video_path, args.method)
+    rppg_stage, vector = run_rppg_stage(video_path, args.method, frame_handoff)
     result["stages"]["rppg"] = rppg_stage
     if vector is None:
         result["verdict"] = {
@@ -225,7 +251,8 @@ def main() -> int:
         _finish(result, args.out, exit_code=3)
         return 3
     print(
-        f"      usable = {rppg_stage['n_frames_usable']}/{rppg_stage['n_frames_total']} "
+        f"      input={rppg_stage['input_mode']} "
+        f"usable = {rppg_stage['n_frames_usable']}/{rppg_stage['n_frames_total']} "
         f"HR = {rppg_stage['features']['heart_rate_bpm']:.1f} BPM"
     )
     result["stages"]["rppg_crosscheck"] = rppg_classifier_crosscheck(vector)

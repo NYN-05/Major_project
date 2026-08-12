@@ -16,7 +16,10 @@ Stages
 7. Feature computation (features.py)
 """
 
+import json
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Optional
 
 import cv2
@@ -26,6 +29,13 @@ from .face_roi import FaceROIExtractor
 from .preprocessing import clean_signal
 from .signal_extraction import extract_pulse_signal, combine_roi_signals
 from .features import compute_features, RPPGFeatures
+
+_FRAME_RE = re.compile(r"frame_(\d+)_t(\d+)\.jpg")
+
+
+def _frame_sort_key(path: Path) -> int:
+    match = _FRAME_RE.search(path.name)
+    return int(match.group(1)) if match else -1
 
 
 @dataclass
@@ -172,6 +182,81 @@ class RPPGPipeline:
 
         cap.release()
 
+        return self._finalize(left_trace, right_trace, forehead_trace, fps, warnings, quality_log)
+
+    def process_frames(
+        self,
+        frames_dir: str,
+        metadata_path: Optional[str] = None,
+        fps: float = 10.0,
+    ) -> RPPGResult:
+        """
+        Process accepted frames produced by the stage-1 frame layer.
+
+        The frames already passed the frame stage's quality gate (YOLO face
+        detection + blur/brightness checks), so no quality re-gating happens
+        here; MediaPipe still runs per frame to build the ROI traces, and
+        frames where MediaPipe finds no face are treated as unusable
+        (interpolated over downstream).
+        """
+        frames_root = Path(frames_dir)
+        frame_paths = sorted(frames_root.glob("*.jpg"), key=_frame_sort_key)
+        if not frame_paths:
+            raise IOError(f"No stage-1 frames found in: {frames_dir}")
+
+        source_ids: dict[int, int] = {}
+        if metadata_path is not None and Path(metadata_path).exists():
+            for line in Path(metadata_path).read_text(encoding="utf-8").splitlines():
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                frame_id = record.get("frame_id", -1)
+                source_id = record.get("source_frame_id", -1)
+                if isinstance(frame_id, int) and isinstance(source_id, int):
+                    source_ids[frame_id] = source_id
+
+        warnings: List[str] = []
+        quality_log: List[FrameQuality] = []
+
+        left_trace, right_trace, forehead_trace = [], [], []
+
+        with FaceROIExtractor() as extractor:
+            for path in frame_paths:
+                frame = cv2.imread(str(path))
+                if frame is None:
+                    warnings.append(f"Unreadable stage-1 frame skipped: {path.name}")
+                    continue
+                frame_id = _frame_sort_key(path)
+                source_idx = source_ids.get(frame_id, frame_id)
+                face = extractor.detect(frame, source_idx)
+                q = self._assess_frame(frame, source_idx, face.found)
+                q.is_usable = face.found  # blur/brightness already gated by stage 1
+                quality_log.append(q)
+
+                if face.found:
+                    rois = extractor.extract_rois(frame, face)
+                    left_trace.append(extractor.mean_rgb(frame, rois.left_cheek))
+                    right_trace.append(extractor.mean_rgb(frame, rois.right_cheek))
+                    forehead_trace.append(extractor.mean_rgb(frame, rois.forehead))
+                else:
+                    left_trace.append(None)
+                    right_trace.append(None)
+                    forehead_trace.append(None)
+
+        return self._finalize(left_trace, right_trace, forehead_trace, fps, warnings, quality_log)
+
+    # -- shared signal/feature tail ---------------------------------------
+
+    def _finalize(
+        self,
+        left_trace: List[Optional[np.ndarray]],
+        right_trace: List[Optional[np.ndarray]],
+        forehead_trace: List[Optional[np.ndarray]],
+        fps: float,
+        warnings: List[str],
+        quality_log: List[FrameQuality],
+    ) -> RPPGResult:
         n_total = len(quality_log)
         n_usable = sum(1 for q in quality_log if q.is_usable)
 
