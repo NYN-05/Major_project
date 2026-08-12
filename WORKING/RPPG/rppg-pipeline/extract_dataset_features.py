@@ -11,8 +11,10 @@ Outputs a CSV file dataset_features.csv for training the classifier.
 from __future__ import annotations
 
 import argparse
+import multiprocessing as mp
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
@@ -20,10 +22,43 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rppg import RPPGPipeline
+from rppg import RPPGPipeline  # noqa: E402
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
+_WORKER: dict = {}
+
+
+def _init_worker(method: str, target_fps: Optional[float], blur_threshold: float, min_usable_frames: int) -> None:
+    """Per-process initializer: creates one RPPGPipeline per worker."""
+    _WORKER["pipeline"] = RPPGPipeline(
+        method=method,
+        target_fps=target_fps,
+        blur_threshold=blur_threshold,
+        min_usable_frames=min_usable_frames,
+    )
+
+
+def _process_one(item: Tuple[int, Path, str, Path]) -> dict:
+    """Process a single video inside a worker process. Returns a feature
+    dict, or a dict with an 'error'/'no_features' marker."""
+    label, video_path, source, root = item
+    entry: dict = {"label": label, "video_path": str(video_path), "source": source}
+    try:
+        result = _WORKER["pipeline"].process_video(str(video_path))
+    except Exception as exc:  # noqa: BLE001 - record and continue
+        entry["error"] = f"{type(exc).__name__}: {exc}"
+        return entry
+    if result.features is None:
+        entry["no_features"] = True
+        entry["usable_frames"] = result.n_frames_usable
+        return entry
+    feat = result.features.to_dict()
+    feat["label"] = label
+    feat["video_path"] = str(video_path.relative_to(root)) if video_path.is_relative_to(root) else str(video_path)
+    feat["source"] = source
+    return feat
 
 
 def _repo_root() -> Path:
@@ -97,6 +132,7 @@ def main() -> None:
     parser.add_argument("--min-usable-frames", type=int, default=48, help="Minimum usable frames required per clip")
     parser.add_argument("--max-per-class", type=int, default=None, help="Optional cap for each label when extracting features")
     parser.add_argument("--output", default=None, help="Optional output CSV path")
+    parser.add_argument("--workers", type=int, default=1, help="Number of parallel worker processes (0 = all CPU cores)")
     args = parser.parse_args()
 
     samples = collect_samples(max_per_class=args.max_per_class)
@@ -108,32 +144,69 @@ def main() -> None:
     out_csv_path = Path(args.output) if args.output else _output_dir() / "dataset_features.csv"
     out_csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    pipeline = RPPGPipeline(
-        method=args.method,
-        target_fps=args.target_fps,
-        blur_threshold=args.blur_threshold,
-        min_usable_frames=args.min_usable_frames,
-    )
+    if args.workers == 0:
+        n_workers = max(1, os.cpu_count() or 1)
+    else:
+        n_workers = args.workers
+
+    items = [(label, video_path, source, root) for label, video_path, source in samples]
 
     features_list = []
-    for label, video_path, source in samples:
-        label_name = "Fake" if label == 1 else "Real"
-        print(f"Processing {label_name}: {video_path}")
-        try:
-            result = pipeline.process_video(str(video_path))
-        except Exception as exc:
-            print(f"  -> Error processing {video_path.name}: {exc}")
-            continue
+    stats = {"processed": 0, "no_features": 0, "failed": 0}
+    t_start = time.time()
 
-        if result.features is None:
-            print("  -> Failed to extract features (insufficient frames or no face).")
-            continue
-
-        feat_dict = result.features.to_dict()
-        feat_dict["label"] = label
-        feat_dict["video_path"] = str(video_path.relative_to(root)) if video_path.is_relative_to(root) else str(video_path)
-        feat_dict["source"] = source
-        features_list.append(feat_dict)
+    if n_workers <= 1:
+        pipeline = RPPGPipeline(
+            method=args.method,
+            target_fps=args.target_fps,
+            blur_threshold=args.blur_threshold,
+            min_usable_frames=args.min_usable_frames,
+        )
+        for label, video_path, source in samples:
+            label_name = "Fake" if label == 1 else "Real"
+            print(f"Processing {label_name}: {video_path}")
+            try:
+                result = pipeline.process_video(str(video_path))
+            except Exception as exc:
+                print(f"  -> Error processing {video_path.name}: {exc}")
+                stats["failed"] += 1
+                continue
+            if result.features is None:
+                print("  -> Failed to extract features (insufficient frames or no face).")
+                stats["no_features"] += 1
+                continue
+            feat_dict = result.features.to_dict()
+            feat_dict["label"] = label
+            feat_dict["video_path"] = str(video_path.relative_to(root)) if video_path.is_relative_to(root) else str(video_path)
+            feat_dict["source"] = source
+            features_list.append(feat_dict)
+            stats["processed"] += 1
+    else:
+        print(f"Extracting with {n_workers} parallel workers ...")
+        with mp.Pool(
+            n_workers,
+            initializer=_init_worker,
+            initargs=(args.method, args.target_fps, args.blur_threshold, args.min_usable_frames),
+        ) as pool:
+            for entry in pool.imap_unordered(_process_one, items, chunksize=1):
+                error = entry.pop("error", None)
+                no_features = entry.pop("no_features", None)
+                if error:
+                    stats["failed"] += 1
+                    print(f"  -> Error processing {Path(entry['video_path']).name}: {error}")
+                elif no_features:
+                    stats["no_features"] += 1
+                    print(f"  -> Failed to extract features: {Path(entry['video_path']).name} (usable={entry.get('usable_frames')})")
+                else:
+                    features_list.append(entry)
+                    stats["processed"] += 1
+                if stats["processed"] > 0 and stats["processed"] % 100 == 0:
+                    rate = stats["processed"] / (time.time() - t_start)
+                    remain = int((stats["processed"] + stats["failed"] + stats["no_features"]) / rate) if rate > 0 else 0
+                    print(f"    ... {stats['processed']} ok / {stats['failed']} err / {stats['no_features']} no-feat | "
+                          f"{rate:.2f} vid/s | ETA ~{remain/60:.0f} min")
+    # NOTE: only the initializer pipeline processes all legacy CSV samples when
+    # run sequentially; the parallel branch uses the same items list above.
 
     if not features_list:
         print("No features extracted from any videos.")
