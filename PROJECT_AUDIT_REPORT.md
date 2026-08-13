@@ -1,315 +1,209 @@
-# Project Audit Report
+# Project Audit Report — Full-Project Review
 
 Deepfake-video detection for KYC — rPPG physiological evidence + hybrid quantum-classical ML.
 
-- Date: 2026-08-13
-- Scope: all tracked code under `WORKING/`, `frontend/`, root docs; runtime artifacts under `WORKING/output/`; git history.
-- Method: source review of every tracked module, numerical reproduction of suspected defects, artifact inspection, git-history diffs, measured benchmarks.
-- Convention: **[confirmed]** = reproduced/verified directly; **[potential]** = inferred, needs verification; **[doc]** = documentation-only claim.
+- Date: 2026-08-13 (second, exhaustive pass)
+- Scope: every tracked file in `WORKING/` (frame stage, RPPG stage, quantum stage, `run_pipeline.py`), `frontend/` (server.py, React app), root docs (README, AGENTS.md, .gitignore, requirements, SKILL.md, result.json), `Docs/`, and runtime artifacts (`WORKING/output/`).
+- Method: full source review of all 35 tracked `.py` modules, numerical verification of suspected defects, artifact inspection (CSV, JSON, pkl, checkpoints, plots), git inventory (`git ls-files`), measured timings.
+- Conventions: **[confirmed]** = verified directly in code/artifacts; **[potential]** = plausible, needs further verification; **[doc]** = documentation claim only.
+- Severity scale: **Critical** (data integrity / security / silent wrong output) · **High** (crash paths, misleading public claims) · **Medium** (fragility, dead config, drift) · **Low** (cosmetic / hygiene).
 
 ---
 
-## Post-audit resolution (same day)
+## Post-audit resolution (earlier same day — history, do not re-report as open)
 
-All P1 correctness items from §13 are **fixed, re-verified, and regression-guarded**:
+The previous audit found two QAOA-layer defects and other issues; all were fixed, re-verified, and regression-guarded in commit `a11f06e`:
 
-| §13 item | Status |
+| Item | Status |
 |---|---|
-| 4. QAOA beta mixer (§6.1) | Fixed in `qaoa.py` (`_precompute_gates` returns `(cost_gates, mixer_gates)`; mixer driven by `beta`). Guarded by `test_beta_alive`. |
-| 5. Hamiltonian verification (§6.2) | Fixed in `_cost_terms` (linear terms now include the `-(1/4)Σ_{j≠i} q_ij` contribution from expanding `(1-Z_i)(1-Z_j)/4`); `verify_hamiltonian` checks 20+ bitstrings; `pipeline.py` hard-asserts `error < 1e-6`. Max error on real data: 7.1e-15. |
-| 6. Test suite | Added `WORKING/quantum/tests.py` (5 checks, no pytest) — `python -m quantum.tests` from `WORKING/`, all pass. |
-| 7. `face_roi.py` false-accept | Centered-bbox fallback now returns `found=False` (frame rejected → `features=None` → INCONCLUSIVE). |
-| 9. `server.py` | CORS restricted to localhost origins (evil-origin POST → 403), uploads streamed to disk (64 KB chunks), 30-min job timeout with worker kill, `FRONTEND_PORT` honored (typo'd `FRONTEMD_PORT` kept as fallback). |
-| 10. `plots.py` lazy sklearn | `sklearn.metrics` import moved inside the plot functions. |
+| QAOA beta-mixer regression (mixer driven by `gamma`) | Fixed: `_precompute_gates` returns `(cost_gates, mixer_gates)`; mixer driven by `beta`. Guarded by `test_beta_alive` in `quantum/tests.py`. |
+| Hamiltonian ≠ classical cost (silent, err ≈ 1.94) | Fixed: `_cost_terms` now includes the `-(1/4)Σ_{j≠i} q_ij` linear term from `(1-Z_i)(1-Z_j)/4`; `verify_hamiltonian` checks all-zeros/all-ones/single-bit/random bitstrings; `pipeline.py` hard-asserts `error < 1e-6`. Max verified error: 7.1e-15. |
+| No test suite | `WORKING/quantum/tests.py` added (5 checks, no pytest). `python -m quantum.tests` — all pass. |
+| `face_roi.py` centered-bbox false-accept | Fallback now returns `found=False` (frame rejected → `features=None` → INCONCLUSIVE). |
+| `server.py` hardening | CORS allowlist (localhost:5173/8000, 127.0.0.1:5173/8000); evil-origin POST → 403; uploads streamed in 64 KB chunks with 4 KB magic-check prefix; 30-min job timeout with `proc.kill()`; `FRONTEND_PORT` honored (`FRONTEMD_PORT` deprecated fallback). |
+| `plots.py` eager sklearn | sklearn import moved inside plot functions (lazy). |
 
-**New canonical numbers (post-fix, seed 44, 2026-08-13):** QAOA selection `[hr_half_diff, cheek_forehead_correlation, left_right_cheek_correlation, mad, heart_rate_bpm, spectral_entropy]` (chosen restart seed 43, cost 0.3950); ECE 0.1052 (was 0.2478); acc/f1 unchanged at 0.6667/0.8000. E2E verdict `prob_real=0.6155 → UNCERTAIN, confidence=0.2311`. All audit "before" numbers in §6/§9/Appendix B remain as historical record.
-
-Also verified: port 8000 was held by a stale pre-hardening server instance during the first smoke test — kill lingering `python server.py` processes before retesting.
+**Canonical post-fix numbers:** QAOA selection `[hr_half_diff, cheek_forehead_correlation, left_right_cheek_correlation, mad, heart_rate_bpm, spectral_entropy]` (chosen restart seed 43, cost 0.3950); ECE 0.1052 (was 0.2478); acc 0.6667 / F1 0.8000 / AUC 0.5000; E2E verdict `prob_real=0.6155 → UNCERTAIN, confidence=0.2311` (84/84 usable frames).
 
 ---
 
 ## 1. Executive Summary
 
-The project is a well-engineered three-stage research prototype: stage 1 samples frames and gates quality (YOLO), stage 2 derives 10 physiological features from facial regions via POS/CHROM rPPG (MediaPipe), stage 3 performs QAOA feature selection and a hybrid quantum-classical VQC verdict with REAL/FAKE/UNCERTAIN bins. The pipeline is deterministic, reproducible, and fast (~29 s end-to-end for the quantum layer; recent work cut it from ~81 s).
+The project is a cleanly separated, deterministic three-stage prototype whose documented engineering claims (structure, reproducibility, degradation behavior, no synthetic data) hold up under full review. The quantum-layer correctness fixes from the morning audit are verified in place with regression guards.
 
-The audit found **two confirmed defects in the QAOA selection layer**, one of which is a regression introduced by the recent optimization refactor:
+This second, exhaustive pass found **no new critical defects**, but it did confirm:
 
-1. **[confirmed, regression]** The QAOA ansatz no longer uses the `beta` parameters at all — the X-mixer gates are driven by `gamma`. Beta slots are dead parameters (verified: perturbing `beta` leaves the circuit output bit-identical). This changed the feature-selection outcome vs. the pre-refactor run.
-2. **[confirmed, pre-existing]** The encoded Hamiltonian does not match the classical cost function it claims to implement (`verify_hamiltonian` error ≈ 1.94, silently non-zero and not gated).
+1. **A silent data-integrity flaw at inference** (High): degenerate rPPG signals are *fabricated* into plausible-looking feature vectors instead of being rejected (`features.py::_fill_nan_with_median`).
+2. **An unguarded crash path in the rPPG cross-check** (High): a stale or single-class `rppg_classifier.pkl` crashes `run_pipeline.py` after the rPPG stage (`predict_proba[0][1]` outside any try/except), killing server jobs.
+3. **Public documentation that describes a system that does not exist** (High): the root `README.md` documents an FF++-trained model (469 clips, acc 0.564, AUC 0.640) and calls the actual DFDC data "false-positive noise" — while the real trained model uses exactly 16 DFDC rows.
+4. **Dataset-quality observations** (Medium): all 16 labeled rows have *negative* SNR; HR features are quantized to a coarse ~24.3 BPM grid; the train set is 10 rows. Metrics are indicative only.
+5. **Widespread "8 features" → 10-feature documentation drift** across code, README, frontend UI (Medium/Low).
+6. **Broken documented commands**: `app/main.py` and `app/extract_frames.py` do not exist; README and AGENTS.md point at them.
+7. **Hygiene issues**: ~10 MB of binaries + 60 PDFs + duplicated docs committed to git; dead config (`DataConfig.train_ratio`); a dependency (`xgboost`) used unconditionally by `--all` but present in no requirements file.
 
-Beyond these, the dominant limitation is **data scale**: the entire training set is 16 labeled DFDC videos (9 real / 7 fake). Reported metrics (acc 0.67, f1 0.80, AUC 0.50, ECE 0.248; XGBoost baseline 1.0) are not statistically meaningful, and the README's claim of 469 FF++ train clips is false — FF++ data is not used anywhere.
-
-Security is appropriate for a local demo tool (no auth, open artifact serving, 200 MB in-memory uploads) but would need real hardening before any multi-user KYC deployment.
-
-**No project tests, CI, or linters exist** — the two quantum defects above would have been caught by ~10 lines of assertions.
-
----
-
-## 2. Project Overview
-
-### Architecture
-
-```
-Input KYC video
-  → Stage 1 (WORKING/frame): sample 10 fps → YOLO face detect → blur/dark/bright/face-size/pose gates
-  → Stage 2 (WORKING/RPPG): MediaPipe Face Landmarker ROIs (forehead, L/R cheek) → POS/CHROM pulse → 10 physiological features
-  → Stage 3 (WORKING/quantum): QAOA selects 6 of 10 features → hybrid VQC (angle embedding, torch head) → P(real) → REAL / FAKE / UNCERTAIN
-```
-
-Orchestrated by `WORKING/run_pipeline.py`, exposed via `frontend/server.py` (stdlib HTTP + SSE) driving a React/Vite UI.
-
-### Data flow
-
-- `WORKING/output/rppg/dataset_features.csv` — **16 rows** (9 label `0` real, 7 label `1` fake), all from `archive/DFDC_Dataset`. This is the only labeled data consumed.
-- `quantum/data.py` splits 16 rows → 10 train / 3 val / 3 test (stratified, seed 44), writes `output/quantum/data.npz`.
-- QAOA selection on the train rows → `qaoa_selection.json` (current selection: `cheek_forehead_correlation`, `left_right_cheek_correlation`, `mad`, `heart_rate_bpm`, `prv_std_ms`, `spectral_entropy`).
-- VQC trained on the 6 selected features → `hybrid_vqc.pt`; `run_pipeline.py` scores incoming videos through the same path.
-
-### Repo inventory
-
-- 150 tracked files; ~5,785 lines of tracked Python across `WORKING/` (frame ~2,000, RPPG ~2,000, quantum ~1,000, run_pipeline ~500) plus `frontend/server.py` (466) and ~1,500 lines of React.
-- 13 commits on `main` (2026-08-12 → 2026-08-13). Working tree clean except `WORKING/quantum/evaluation.py` (ProcessPoolExecutor CV change, not yet committed).
+Strengths confirmed: deterministic seeds and split logic, correct `features=None`/INCONCLUSIVE degradation, stage-1→stage-2 handoff with fallback, server hardening, no synthetic data, and effective numerics (vectorized POS, shared Welch PSD, cached filters, lazy heavy imports).
 
 ---
 
-## 3. Strengths
+## 2. Repo Inventory (verified)
 
-**[confirmed]**
-
-- **Clean stage separation with a single orchestrator.** `run_pipeline.py` is the only entry point for inference; it records `input_mode` (frame-driven vs. direct video) and degrades gracefully: if stage 1 yields no frames it falls back to `RPPGPipeline.process_video()`. `features=None` (usable frames < 48) → INCONCLUSIVE + exit 3, documented and handled.
-- **Deterministic, reproducible pipeline.** Fixed seeds (44), fixed hyperparameters, restart aggregation — full `--all` run reproduced bit-identical metrics across runs.
-- **rPPG implementation quality.** POS/CHROM extraction is clean and numerically verified (vectorized POS bit-identical to the original loop, max |diff| = 0.0 across 7 (T, fs) pairs). Shared Welch PSD, cached filter coefficients, hoisted skin-mask — sensible micro-optimizations.
-- **Recent performance work is real.** Full quantum flow 81.1 s → 28.8 s (−65%). QAOA: lightning.qubit + precomputed gates (18 ms/call), 4 parallel COBYLA restarts via `ProcessPoolExecutor` (~15 s vs ~37 s sequential). Imports 22 s → ~6.5–9.5 s. VQC trains on CUDA (15.2 s). Inference 32 ms cached.
-- **"No synthetic data" discipline.** The quantum layer consumes only the real feature table; no generators/bridge layers exist. This is the right call for credibility and is enforced as a documented constraint.
-- **Label-convention hazards are documented** (rPPG 1=fake vs quantum 1=real vs RF 1=DEEPFAKE) instead of silently unified — an intentional, documented design decision.
-- **Frontend hardening.** Magic-byte upload validation, 200 MB cap, concurrency cap (2) with 429, job TTL (1 h) + frame-sequence TTL (24 h), sanitized inbox filenames, result-first SSE (client renders verdict before the heavy `signal` artifact is ready), path-traversal guard on `/api/files`.
-- **Frontend code quality.** Well-structured React (12 small components, clean hooks), theme persistence with `prefers-reduced-motion` respect, responsive (verified 1920→375 px), no console errors in E2E.
-- **Docs that are genuinely useful** (`WORKING/frame/README.md` output contract, `frontend/README.md` API contract, `AGENTS.md` verified constraints) — see §12 for the stale items.
+- 146 tracked files: 60 PDF, 35 `.py`, 15 `.jsx`, 14 `.md`, 7 PNG, 5 TXT, 4 `.js`, 3 DOCX, 2 `.pt`, 2 JSON, 1 CSS, 1 `.ps1`, 1 `.gitignore`, 1 HTML, 1 MP4.
+- No untracked non-ignored files (`git status` clean after `a11f06e`).
+- Python LOC (tracked): frame stage ~2,000; RPPG ~2,000; quantum ~1,200; `run_pipeline.py` 294; `frontend/server.py` 510; React ~1,700.
+- Line counts of key modules: `frame/app/pipeline.py` 770, `RPPG/rppg/pipeline.py` ~330, `RPPG/rppg/face_roi.py` 411, `quantum/qaoa.py` 256, `quantum/evaluation.py` 236, `quantum/vqc.py` 233, `quantum/data.py` 261, `frontend/server.py` 510.
+- Tracked binaries (bloat): `WORKING/frame/weights/yolov8n-face-lindevs.pt` (6,281,321 B), `yolov9t-face-lindevs.pt`, `WORKING/frame/test.mp4` (1,890,734 B); 60 PDFs under `Docs/maj_proj_report_sem_6/`; duplicated `implementation_work_division_checklist.{pdf,txt}` and `project_system_document.{pdf,txt}` at repo root AND `WORKING/frame/Docs/`.
+- `frontend/package-lock.json` is tracked (deps pinned); `package.json` name is `frontemd` (typo).
 
 ---
 
-## 4. Bottlenecks
+## 3. Confirmed Findings — High
 
-1. **[confirmed] Data — the binding constraint.** 16 labeled rows. QAOA MI-weights degenerate (`"success": false`, mostly-zero weights — expected at this size), XGBoost baseline reaches acc = 1.0 (overfit), AUC = 0.50. No metric in the project generalizes. Everything else is secondary.
-2. **[confirmed] rPPG stage latency.** MediaPipe Face Landmarker runs per frame at 10 fps sampling with no GPU path and no frame-pacing parallelism. For a 2-minute KYC video (~1,200 frames) this is the dominant wall-clock cost in `run_pipeline.py` (the ~29 s figure above is quantum-layer only).
-3. **[confirmed] Serial bottleneck in inference.** `run_pipeline.py` is single-process; the frontend caps concurrency at 2 and each job holds a slot for the full run. No per-stage caching (e.g., frame extraction is redone on every run).
-4. **[confirmed] Import cost.** `import quantum.pipeline` ≈ 6.5–9.5 s (torch 5.9 s, pennylane 2.3 s, sklearn ~2.4 s via `plots.py`). Felt on every server start and every QAOA spawn (mitigated by lazy xgboost + `ProcessPoolExecutor`).
-5. **[confirmed] Feature-table regeneration requires manual orchestration.** Adding data = extract → train RF → rerun `--all`; no single command, no caching of the extract step (MediaPipe re-download/re-run per video).
+### H1. Degenerate signals are silently converted into "average human" features (silent wrong evidence)
+- **Files:** `WORKING/RPPG/rppg/features.py:334-354` (`_fill_nan_with_median`), consumed by `RPPG/rppg/pipeline.py::_finalize` and `run_pipeline.py`.
+- **Evidence:** The fallback table is hardcoded: NaN `heart_rate_bpm → 72.0`, `spectral_entropy → 0.5`, `peak_prominence → 1.0`, `snr_db → 0.0`, etc. A totally flat/degenerate pulse (e.g., no face ROI signal, static scene, heavily compressed face) therefore produces the feature vector of a *plausible healthy person* (HR 72 BPM, mid entropy) instead of being rejected. `signal_quality_index → 0.0` is the only honest "bad" feature, and nothing consumes it to reject the clip. The quantum layer's plausibility filter (`quantum/data.py:89-98`) only drops non-finite values, which can no longer occur after filling.
+- **Consequence:** At inference, garbage input can score as "likely real" (or fake) on fabricated physiology — precisely the failure mode the system claims to detect. At training time it would inject fake-neutral rows.
+- **Fix:** treat low-SQI/NaN-heavy signals as `features=None` (INCONCLUSIVE) at the pipeline level, or add a `degenerate_signal` flag carried through `run_pipeline.py`; at minimum, log a warning when >2 fallbacks fire.
 
----
+### H2. rPPG cross-check crash path: stale/single-class classifier kills the pipeline
+- **Files:** `WORKING/run_pipeline.py:183-198`; enabler `WORKING/RPPG/rppg-pipeline/retrain_dfdc.py:194-204`.
+- **Evidence:** `pickle.load` is wrapped, but `clf.predict_proba(x)[0]` and `clf.predict(x)[0]` are not. `retrain_dfdc.py` writes `rppg_classifier.pkl` **incrementally** — a checkpoint is saved after every 10 processed videos (default), which can be trained on a single class (e.g., first 10 sorted clips all Fake). sklearn `RandomForestClassifier.predict_proba` on a single-class fit returns a 1-column array → `proba[1]` raises `IndexError`. A stale pkl with a different feature count raises `ValueError`. Either crashes `run_pipeline.py` after the rPPG stage → server job ends in error.
+- **Consequence:** One bad checkpoint (or an old pkl left in `output/rppg/`) breaks every subsequent run. The cross-check is informational; it must never be able to kill the job.
+- **Fix:** wrap the predict/proba calls in try/except and emit `{"skipped": ...}`; validate `clf.n_features_in_ == 10` and `clf.n_classes_ == 2` before use.
 
-## 5. Limitations
-
-**[confirmed] unless noted**
-
-- **Dataset:** 16 DFDC videos; no FF++ data despite README claims; no frame-level labels; no test-timer/compression/identity-swap variety beyond what DFDC provides; no provenance columns beyond `source` string.
-- **Metrics meaningless at this scale:** acc 0.6667, f1 0.8000, AUC 0.5000, ECE 0.2478, and baselines (RF/XGBoost acc 1.0) — no split size is adequate to claim detection capability.
-- **QAOA selection is non-deterministic in outcome space:** COBYLA restarts from random initial angles; identical seed gives identical results, but the selected feature set changed between refactors (see §6.1) and is sensitive to the ansatz implementation.
-- **`features=None` gating:** videos with < 48 usable frames (short clips, heavy occlusion, small faces) are INCONCLUSIVE (exit 3) by design.
-- **Face-landmark dependency:** MediaPipe Face Landmarker model auto-downloads from Google storage on first use (internet required, no pinned hash).
-- **Local-only deployment model:** in-memory job store, no persistence, no auth (see §10–11).
-- **`lightning.gpu` / cuQuantum unavailable on Windows** (no `custatevec` wheels) — CPU SIMD is the ceiling for the QAOA stage; only the torch head of the VQC uses the GPU.
+### H3. README documents a model that does not exist
+- **Files:** `README.md:118-123` ("Current trained model": 469 FF++ clips, test acc 0.564, AUC 0.640, ECE 0.073, GaussianNB 0.621) and `README.md:166` ("currently an FF++-sourced table of 669 labeled clips; the DFDC row subset is false-positive noise and excluded").
+- **Evidence:** The actual training table is `WORKING/output/rppg/dataset_features.csv` — 16 rows, all `archive/DFDC_Dataset` (9 real / 7 fake). FF++ is gitignored, not used (`--include-ffpp` defaults off), and no 469/669-clip artifacts exist in `output/quantum/` metrics. The README's "Verified Constraints" section also claims the official FF++ split path is active; `data.py::_split_by_source` is dead code for the current data.
+- **Consequence:** Anyone evaluating the project from the README gets a completely wrong picture of the deployed model and its validity. The §H1/H2 issues compound this.
+- **Fix:** rewrite the Data/Model/Constraints sections to the 16-row DFDC reality (AGENTS.md already reflects it; README was not updated).
 
 ---
 
-## 6. Failure Points
+## 4. Confirmed Findings — Medium
 
-### 6.1 QAOA `beta` mixer regression — [confirmed]
+### M1. Broken documented commands
+- `README.md:51-53` and `AGENTS.md` instruct `python app/main.py --source test.mp4 --save-metadata` and `python app/extract_frames.py ...`. Neither file exists (`WORKING/frame/app/` contains only `config.py, detector.py, pipeline.py, processing.py`; verified via `git ls-files`). Both commands fail with `ModuleNotFoundError`.
+- The real entry point is `python app/pipeline.py --source ...` (`extract` mode via `--input-dir`/`--sample-fps` flags). Fix the docs (or add shim modules).
 
-**Location:** `WORKING/quantum/qaoa.py`, `_precompute_gates()` / `_apply_qaoa()` (introduced by the precompute-gates optimization in commit `e74fbc8`).
+### M2. "8 features" → 10-feature drift (confirmed, 8 sites)
+- The feature contract is 10 features (both `FEATURE_NAMES` and `RPPGFeatures.feature_names()` verified identical). Stale "8" claims remain in:
+  - `WORKING/run_pipeline.py:13` (docstring), `WORKING/quantum/pipeline.py:50` ("keyed by the 8 rPPG feature names"),
+  - `WORKING/RPPG/README.md:6`, `WORKING/RPPG/rppg-pipeline/retrain_dfdc.py:8` ("the 8 rPPG features"),
+  - `frontend/src/lib.js:43` (pipeline step "Measuring 8 physiological features") and `lib.js:116` (QAOA glossary "from the 8 extracted ones"),
+  - `frontend/src/components/QuantumFlow.jsx:7` ("8 features") and `:88` ("Six of the eight rPPG features").
+- Additionally `frontend/src/lib.js:132-141` `FEATURE_LABELS` lists only **8 of 10** features — `hr_half_diff` and `peak_prominence` (both selected by QAOA and displayed nowhere) are missing from the Insights panel; `lib.js:123` describes MAD as "derivative magnitude approach" while `features.py:182` computes plain mean absolute deviation.
+- Fix: sweep `8`→`10` and add the two missing labels (the QAOA "Selected by QAOA" tags in `QuantumFlow.jsx` already fall back to raw names for them).
 
-**What happens:** `_apply_qaoa` unpacks `gamma, beta` per layer but only `gamma` is used. The X-mixer rotations that `_precompute_gates` adds (with coefficient c=1.0) are appended to the cost-gate list and therefore also driven by `gamma`. `beta` never reaches the circuit.
+### M3. Dead/misleading split configuration
+- `quantum/config.py:43` declares `DataConfig.train_ratio = 0.6`, which is **never read**; `quantum/data.py:130-131` computes `test_c = round(per_class * val_ratio)` — the test ratio is the val ratio, there is no `test_ratio` field. Changing `train_ratio` silently does nothing; the split is train = remainder, val = test = 0.2.
+- Fix: remove `train_ratio`, add `test_ratio` (or document that val and test share the ratio).
 
-**Numerical proof** (run against the real code):
+### M4. `predict_features` has no artifact-consistency validation
+- `WORKING/quantum/pipeline.py::predict_features` applies saved QAOA indices, a saved scaler, and a saved checkpoint independently. If artifacts are rebuilt out of sync (e.g., new `--select` run + old checkpoint, or a checkpoint from a different feature count), inference fails with opaque shape errors deep inside torch/sklearn instead of a clear message. The stale "8 rPPG feature names" docstring (`pipeline.py:50`) makes this worse.
+- Fix: at load time assert `scaler.mean_.shape == (len(FEATURE_NAMES),)`, `selection indices < 10`, and `checkpoint input dim == len(selection)`; raise a descriptive error.
 
-| experiment | original ansatz (git fc61a54) | current code |
-|---|---|---|
-| cost at fixed params | 11.5206 | 13.1548 |
-| cost after perturbing **only beta slots** | 4.2043 (beta works) | **13.1548 (bit-identical — beta dead)** |
+### M5. Fallback docstring/code mismatch + `-inf` SNR edge
+- `features.py:334-354` docstring claims "per-feature median of non-NaN values" — the code only uses hardcoded constants (median is never computed).
+- `estimate_snr` returns `-inf` when signal power is zero (`features.py:134`); `np.isnan(-inf)` is `False`, so the fallback does not replace it — `-inf` propagates to the CSV (silently dropped by `data.py`'s isfinite filter) or, at inference, into the scaler → NaN probability. Confirm the scaler/`predict_features` behavior for non-finite inputs (see P3).
 
-**Consequences:**
-- Half the variational parameters are dead; the effective search space is halved and the ansatz is a non-standard evolution (two sequences of the same rotation type).
-- The selection outcome changed vs. pre-refactor: was `[snr_db, signal_quality_index, peak_prominence, prv_std_ms, spectral_entropy, heart_rate_bpm]`; now `[cheek_forehead_correlation, left_right_cheek_correlation, mad, heart_rate_bpm, prv_std_ms, spectral_entropy]`. Both results are "plausible", which is why the regression went unnoticed — only reproducibility tests on the ansatz would have caught it.
+### M6. Timestamp-based frame sampling can silently collapse to 1 frame
+- `WORKING/frame/app/processing.py:100-126`: when `sample_fps` is set, sampling keys off `CAP_PROP_POS_MSEC`. For containers/codecs where OpenCV reports `POS_MSEC == 0` for every frame, only the first frame passes (`0 >= next_target(0)`, then `next_target=100` never reached) → stage 1 yields 1 frame → rPPG `features=None` → INCONCLUSIVE, with the root cause invisible in logs.
+- Fix: detect `all(timestamp == 0)` and fall back to stride-based sampling (`(source_frame_id-1) % step == 0`) with a warning.
 
-**Fix:** in `_apply_qaoa`, apply the precomputed cost gates with `gamma` and a separately-precomputed X-mixer gate list with `beta` (still reusing the precompute speedup). Then re-run `--all` and record the new selection as canonical.
+### M7. Extraction workers hide crash diagnostics (and can hang the pool)
+- `extract_dataset_features.py:40-58` and `probe_features.py:40-47` redirect worker `stderr` to NUL (`os.dup2`). Any worker crash prints nothing; with `mp.Pool.imap_unordered`, a hard worker death can hang the parent indefinitely (no timeout). `chunksize=1` maximizes pickle round-trips.
+- Fix: send `traceback.format_exc()` back in the result dict; add a parent-side deadline (e.g., `pool.imap_unordered(...)` + `multiprocessing` timeout or a watchdog).
 
-### 6.2 Quantum Hamiltonian ≠ classical cost — [confirmed, pre-existing]
+### M8. Dataset-cap selection is biased and CSV order is non-deterministic
+- `extract_dataset_features.py:110-116`: `sorted(...)[:max_per_class]` takes the alphabetically-first N files — with DFDC's random 10-char IDs this is effectively an arbitrary but *reproducible* subset; with any named layout (FF++ `id0_id1_…`) it systematically selects the first actor pairs.
+- `extract_dataset_features.py:234` uses `imap_unordered` → CSV row order varies between extraction runs; `data.py` group iteration order (dict insertion = first-seen order) then feeds `rng.shuffle(mixed)` — so **regenerating the CSV can change the train/val/test assignment even with the same seed** (same groups, different order). Within a fixed CSV, the split is deterministic.
+- Fix: seed a random subset for caps; write the CSV sorted by `video_path`.
 
-**Location:** `WORKING/quantum/qaoa.py`, `_cost_terms()` vs `_classical_cost()`; `verify_hamiltonian` prints a number but never fails.
+### M9. Dataset quality observations (verified from the CSV)
+- All 16 rows have **negative SNR** (`-1.37 … -8.13 dB`) — the pulse is buried in noise across the entire training set; the signal is weak evidence.
+- HR and `hr_half_diff` values lie on a coarse grid (multiples of ≈24.32 BPM; HR ∈ {48.6, 60.8, 72.97, 85.1, 121.6, 133.8, 145.9}) — coarse PSD binning on short clips limits physiological precision. `hr_half_diff` multiples of 24.32 also make HR-difference features nearly quantized constants.
+- Training size: 10 train rows (5 real / 5 fake). Metrics (acc 0.6667, F1 0.8000, AUC 0.5000) are not statistically meaningful; the report should state this explicitly.
 
-**Evidence:** bitstring all-ones → quantum 6.4092 vs classical 7.3493 (err 0.9401); all-zeros → 19.5599 vs 18.0000 (err 1.5599); pipeline printed max err ≈ 1.94e+00. The hand-derived (1−Z)/2 substitution in `_cost_terms` does not reproduce the classical objective.
+### M10. `--all` crashes on fresh environments (missing xgboost)
+- `quantum/evaluation.py:222` imports `XGBClassifier` inside `run_baselines` **without a try/except**, and xgboost appears in **no** requirements file (root, frame, or RPPG). On a host without xgboost, `python -m quantum.pipeline --all` fails at the baselines step after all training work is done.
+- Fix: add `xgboost>=2.0.0` to root requirements, or wrap in try/except and skip the XGBoost baseline.
 
-**Consequences:** QAOA optimizes a *different* pseudo-boolean objective than documented. It is still structurally reasonable (MI term + redundancy penalty + cardinality penalty), so the selection is not garbage — but it is not the objective the paper/README describes, and the silent verify gate gives false confidence.
-
-**Fix:** either correct the Hamiltonian derivation and make `verify_hamiltonian` a hard assertion over a batch of bitstrings (needs ≤ 2ⁿ ≤ 1024 evals for n=10; all-zero/all-ones alone catch this), or drop the Hamiltonian-verification claim and document that QAOA minimizes the encoded quadratic form directly.
-
-### 6.3 Stale/false claims about the dataset — [confirmed, doc]
-
-- `README.md` claims 469 FF++ train clips / 669 labeled clips — **no FF++ data is used**; the real table is 16 DFDC rows.
-- `AGENTS.md` says "18 labeled rows" — actual: **16** (9 real, 7 fake).
-- `WORKING/run_pipeline.py` docstring: "8-feature vector" — actual contract is **10 features** (both `quantum/config.py` and `RPPG/rppg/features.py`).
-- `AGENTS.md` "Optimizations" lists a **`video_meta` probe in `run_pipeline.py` that does not exist** (no `VideoCapture` in the file at all — the claim is fabricated).
-
-### 6.4 Frame-stage robustness — [confirmed]
-
-- `WORKING/frame/app/pipeline.py` dispatches on CLI flags (`--source` vs `--input-dir` vs `--compare-rates`...) with no error path for ambiguous combinations; failures surface as confusing partial artifacts.
-- `app/main.py` ("legacy entry") also triggers `extract_frames` — two entry points doing overlapping work.
-- YOLO weights auto-download from GitHub without a pinned hash; other presets raise `FileNotFoundError` (documented).
-
-### 6.5 rPPG feature extraction tooling — [confirmed]
-
-- `WORKING/RPPG/rppg-pipeline/extract_dataset_features.py`: redirects stderr to `NUL` (crash diagnostics swallowed), uses `multiprocessing.Pool` which can hang permanently on a worker crash, and has hardcoded FF++-flavored path/source strings while actually reading DFDC (`--workers 0` is the documented workaround).
-- `RPPG/rppg/features.py`: docstring says missing values are "median"-imputed; the code replaces them with hardcoded `FALLBACK_*` constants — the two are not the same and the fallbacks are silently used in training.
-
-### 6.6 Face-ROI false-accept fallback — [confirmed]
-
-`WORKING/RPPG/rppg/face_roi.py`: when MediaPipe finds no landmarks, a centered bounding-box ROI is used and `found=True, confidence=0.4` is returned — the pipeline proceeds to compute features on a guessed ROI instead of rejecting the frame. For adversarial/no-face KYC inputs this is a false-accept path. (The `min_usable_frames=48` gate is the only safety net, and it is per-video, not per-frame.)
-
-### 6.7 CV evaluation worker crash — [confirmed, already fixed locally]
-
-`WORKING/quantum/evaluation.py` previously used `multiprocessing.Pool` (deadlocks if a worker dies mid-fold). Replaced with `ProcessPoolExecutor` — verified 5 parallel folds in 6.1 s. Change is uncommitted.
+### M11. `roc_auc_score` is unguarded for single-class splits
+- `quantum/evaluation.py:82` and `quantum/plots.py:28` call `roc_auc_score(y_true, prob_real)` with no class-count check → `ValueError` if a test fold ends up single-class (today's 3-row test split is 2/1; any future small split can break `--all`).
+- Fix: compute AUC only when both classes present (skip → `null`).
 
 ---
 
-## 7. Technical Risks
+## 5. Confirmed Findings — Low
 
-- **[potential]** **Feature-contract drift:** `FEATURE_NAMES` is duplicated between `quantum/config.py` and `RPPG/rppg/features.py` (documented as intentional). Any reorder/rename silently misaligns `data.npz` columns with the QAOA index and the VQC input size; nothing validates the two lists at runtime.
-- **[potential]** **Pickle trust boundary:** `run_pipeline.py` and the RF cross-check `pickle.load` `rppg_classifier.pkl`. Acceptable for locally-generated artifacts, dangerous if the output directory is ever writable by an attacker (it is, via the frontend uploads).
-- **[confirmed]** **Model cache keyed on (n_features, mtime, size):** `vqc.py` reuses loaded weights across requests; a tampered-but-same-size checkpoint would be served silently.
-- **[confirmed]** **No runtime check that the scaler/checkpoint/feature-set are mutually consistent** in `run_pipeline.py` — stale artifacts (e.g., 8-feature checkpoint + 10-feature scaler) fail only at shape-mismatch time with an opaque torch error.
-- **[potential]** **rPPG signals on low-resolution / compressed KYC feeds** (the stated target) degrade SNR; thresholds (min_usable_frames, quality gates) were tuned on a handful of clips.
-- **[confirmed]** **Frontend 404 noise:** stale runs reference missing (gitignored) frame thumbnails — cosmetic, but signals a TTL/path coupling that could bite at higher concurrency.
-
----
-
-## 8. Code & Architecture Observations
-
-- `quantum/config.py` centralizes hyperparameters and documents each stage — good. All numbers that matter (seeds, layers, restarts, n_jobs) live there.
-- `quantum/data.py` correctly flips labels (csv 1=fake → quantum 1=real) and records provenance in `data.npz`; split is stratified on the tiny set.
-- `quantum/evaluation.py` reports ECE + calibration plot — a level of rigor above the project's scale.
-- `quantum/plots.py` imports `sklearn.metrics` at module level and is imported eagerly by `evaluation.py` → the "sklearn is lazy" claim in `AGENTS.md` is only half true (xgboost is lazy; sklearn costs ~2.4 s on every `import quantum.pipeline`). Consider moving the import inside the three plot functions.
-- `frontend/server.py` (466 lines, stdlib only) is well-factored: `_run_job` releases the semaphore in `finally`, TTL cleanup is periodic, filename sanitization `{job8}_{stem}.ext` is applied for thumbnail consistency. The `FRONTEMD_PORT` env name is a typo (documented in `AGENTS.md`, harmless but confusing).
-- `App.jsx` restores the last canonical result on load (`/api/previous`) — nice touch for a demo tool.
-- Legacy/unused surface: `rppg-pipeline/streamlit_app.py`, `run_live_webcam.py`, `batch_run.py`, `retrain_dfdc.py`, `debug_run.py`, `_make_test_video.py`, `_check_video.py`, `frame/app/main.py`, `quantum/scaling.py`'s `SCALER_FILE` duplication. None are wired into the main path; they should be pruned or clearly marked.
-- `.gitignore` ignores all `*.json` (including `package.json` — negated explicitly) and all `output/` — correct for regenerable artifacts, but it means **every clone must regenerate `dataset_features.csv` + quantum artifacts** before anything runs; no bootstrap script exists.
+- **L1** `frontend/package.json:2` — `"name": "frontemd"` typo.
+- **L2** `rppg-pipeline/run_on_video.py:7` — docstring says `python examples/run_on_video.py`; actual path is `rppg-pipeline/`.
+- **L3** `rppg-pipeline/streamlit_app.py:119-128` — hardcodes `output/rppg/rppg_classifier.pkl` relative to 3 parents up; works only from repo layout; `min_frames` initial-value logic tied to stale `fps` widget state (cosmetic).
+- **L4** `frame/app/pipeline.py:92-94` — silently remaps webcam source `0` → `1` with a warning; undocumented oddity.
+- **L5** `RPPG/rppg/model_utils.py` — downloads (`face_landmarker.task`, Haar XML) without checksum pinning; the `latest` URL is a moving target (reproducibility drift); no timeout on `urlretrieve`.
+- **L6** `AGENTS.md` optimization bullet claims stage-1 path "skips Laplacian/brightness" — **false**: `frame/app/pipeline.py:448` still computes and records them in metadata for every sampled frame (the *use* of the result is skipped in the rPPG stage, not the computation).
+- **L7** `quantum/plots.py` `_sklearn` docstring says "~12 s" import; measured ~2.4 s (stale comment).
+- **L8** Root `result.json` (untracked, gitignored) is a stale demo artifact referencing `FF++/train/FF-synthesis/id0_id1_0005.mp4` with an INCONCLUSIVE verdict — confusing if someone opens it.
+- **L9** `SKILL.md` at repo root is an AI agent skill file (frontend-design guidance) — unrelated repo clutter; likely committed by accident.
+- **L10** `quantum/config.py:73` `VQCConfig.batch_size = 32` with a 10-row train set → always a single batch; benign but misleading.
+- **L11** `quantum/vqc.py:58` `QuantumLayer.forward` calls `self.weights.cpu()` on every forward; could cache on the torch device to avoid per-call copies.
+- **L12** `WORKING/frame/requirements.txt:9` pins `opencv-python==4.6.0.66` while `WORKING/RPPG/requirements.txt:1` requires `>=4.8.0,<5.0.0` — installing per-stage requirements in the wrong order breaks stage 2; only the merged root `requirements.txt` resolves this. Foot-gun documented at root, still present.
 
 ---
 
-## 9. Performance
+## 6. Potential Risks / Assumptions (need verification)
 
-**[confirmed]** Measurements on this host (Windows, RTX 4050 Laptop GPU, 16 logical CPUs, 24 GB RAM; Python 3.10; torch 2.5.1+cu121; PennyLane 0.42.3; pennylane-lightning 0.42.0):
+- **P1 — DFDC subject leakage (unresolvable from current data).** DFDC archive filenames are random 10-char IDs (`aaagqkcdis.mp4`, …) that encode no subject pairing, so per-clip grouping (`data.py:30-41`) is the best available and *not demonstrably wrong*. However, DFDC contains multiple clips per subject; without the DFDC subject-metadata JSON, real/fake takes of the same person can land in different splits. Mitigation: import the DFDC metadata mapping for true subject IDs.
+- **P2 — Non-finite features at inference.** If a vector contains `-inf`/NaN at inference (see M5), `predict_features` behavior is untested; the scaler will produce NaN → probability NaN → verdict handling unknown. Verify and guard.
+- **P3 — GPU memory under concurrency.** Two simultaneous server jobs each load YOLO (CUDA) + MediaPipe + the VQC — the 4 GB RTX 4050 is near its ceiling; the concurrency cap of 2 is not enforced at the GPU level. Monitor during load tests.
+- **P4 — `pickle.load` of `rppg_classifier.pkl`.** Arbitrary-code execution if the pkl is replaced by anyone with write access to `output/rppg/`; low risk locally, must not move to shared hosting as-is.
+- **P5 — mediapipe version floor.** `mediapipe>=0.10.9` may resolve to a build whose Tasks `FaceLandmarker` API differs from what `face_roi.py` imports (docstring notes 0.10.30+ dropped the legacy API); the model bundle URL is unpinned (`latest`). Pin both for reproducibility.
+- **P6 — `_grouped_train_val_test_split` balance fallback.** When group sizes exceed per-split targets (not the case today: all groups are size 1), `place()` assigns to the least-filled split, which can unbalance classes. Fine for the current data; re-check if DFDC metadata brings multi-clip groups.
 
-| Item | Before | After | Notes |
+---
+
+## 7. Strengths (confirmed)
+
+- **Deterministic and reproducible.** Fixed seeds, restart aggregation, and now regression-guarded: `tests.py` (5/5) pins the beta-mixer, Hamiltonian≡cost, feature-contract sync, and split determinism.
+- **Correct degradation paths.** `features=None` → INCONCLUSIVE + exit 3; stage-1 failure → `process_video` fallback with `input_mode` recorded; server 30-min kill; TTL cleanup.
+- **Server hardening holds.** CORS allowlist, streamed uploads, magic-byte validation, concurrency cap — all verified in smoke tests (evil-origin POST → 403, bad body → 415).
+- **No synthetic data.** The quantum layer consumes only the real 16-row CSV (verified); no generator or bridge layer exists.
+- **Efficient numerics.** Vectorized POS (bit-identical to the loop), shared Welch PSD, cached detrend/filter coefficients, lazy heavy imports (torch/pennyLane measured; sklearn + xgboost deferred).
+- **Frontend quality.** Clean 7-stage state machine, SSE progress, verdict dossier, theme persistence with `prefers-reduced-motion`, no JS errors in E2E, responsive to 375 px.
+- **Feature contract enforced** by `test_feature_contract_sync` (the two 10-feature lists are identical, verified).
+
+---
+
+## 8. Recommended Fix Plan (priority order)
+
+| # | Severity | Fix | Effort |
 |---|---|---|---|
-| `python -m quantum.pipeline --all` | 81.1 s | **28.8 s** | identical metrics across runs |
-| QAOA stage (4 restarts) | ~37 s (sequential, default.qubit) | **14.6 s** | lightning.qubit, 18 ms/gate-circ, ProcessPoolExecutor |
-| `import quantum.pipeline` | ~22 s | **6.5–9.5 s** | xgboost fully lazy; sklearn still eager via plots.py (~2.4 s) |
-| VQC train (10 rows × 6 feats) | — | **15.2 s** | torch head CUDA; QNode default.qubit + backprop (lightning adjoint was slower) |
-| Inference (cached model) | — | **32 ms** | ~275 ms cold; cache keyed on (n_features, mtime, size) |
-| Parallel CV (5 folds) | hung (mp.Pool) | **6.1 s** | ProcessPoolExecutor, uncommitted |
-
-- Stage-1 (frame) YOLO runs on GPU via ultralytics; stage-2 (rPPG) is CPU-only (MediaPipe per-frame) and is the wall-clock dominator for long videos.
-- Upload/artifact serving is stdlib; SSE is chunked and result-first.
-
----
-
-## 10. Security
-
-**[confirmed] posture:** local single-user tool. Findings, in severity order:
-
-1. **No authentication** anywhere; any local process (or, with the frontend's CORS, any web page) can POST to `/api/detect` and read `/api/jobs/*`.
-2. **CORS `*`** (`server.py`): a malicious website can initiate uploads to `127.0.0.1:8000` and read results (CSRF-style). Restricted to localhost origins would be trivially safer.
-3. **Open artifact serving:** `/api/files?rel=` serves *any* file under `output/` (path-traversal guarded, but no authorization) — includes accepted-frame JPEGs (faces) and result JSONs (KYC PII) for every processed video.
-4. **Uploads buffered fully in memory** (up to 200 MB × 2 concurrent jobs = 400 MB potential spike against 24 GB) — stream-to-disk would be safer and allow a hard disk quota.
-5. **Subprocess runs untrusted-adjacent code** (`run_pipeline.py` with no timeout): a pathological input (e.g., huge resolution) can hold a job slot indefinitely; the semaphore is released in `finally`, but the worker process is not killed.
-6. **Unsafe deserialization:** `pickle.load` of `rppg_classifier.pkl` (see §7); unauthenticated auto-downloads (YOLO weights, MediaPipe model) without pinned hashes.
-
-For a local research demo these are acceptable; for any multi-tenant KYC deployment, items 1–5 are release-blockers.
+| 1 | High (H1) | Reject degenerate signals (SQI≈0 / fallback-heavy) as `features=None`; add warning log | ~30 min |
+| 2 | High (H2) | Guard cross-check predict/proba; validate `n_features_`/`n_classes_` | ~15 min |
+| 3 | High (H3) | Rewrite README data/model sections to the 16-row DFDC reality | ~20 min |
+| 4 | Medium (M1, M6, M10) | Fix doc commands; POS_MSEC==0 fallback; xgboost in requirements | ~45 min |
+| 5 | Medium (M2) | 8→10 sweep + add `hr_half_diff`/`peak_prominence` to `FEATURE_LABELS` | ~20 min |
+| 6 | Medium (M3, M4, M5) | `test_ratio` config; artifact-consistency asserts; docstring/`-inf` handling | ~40 min |
+| 7 | Medium (M7, M8) | Worker crash reporting + parent timeout; seeded caps + sorted CSV | ~40 min |
+| 8 | Medium (M11) | Guard AUC for single-class folds | ~10 min |
+| 9 | Low (L1–L12) | Triage; at minimum fix L6 (AGENTS.md claim) and L8 (remove stale result.json) | ~30 min |
+| 10 | Potential (P1–P6) | DFDC subject metadata, non-finite inference guard, GPU load test, pkl trust note, mediapipe pin | 1–2 days |
 
 ---
 
-## 11. Scalability
+## Appendix A — Environment & Benchmarks (measured this session)
 
-**[confirmed]**
+- Host: Windows 11, RTX 4050 Laptop (4 GB), 16 logical CPUs, 24 GB RAM; Python 3.10; torch 2.5.1+cu121; PennyLane 0.42.3; pennylane-lightning 0.42.0.
+- `python -m quantum.pipeline --all`: ~29 s (QAOA ~14.6 s; VQC train ~15.2 s). `import quantum.pipeline` ~6.5 s warm. Inference ~275 ms cold / ~32 ms cached.
+- QAOA restarts use `lightning.qubit` via `ProcessPoolExecutor` (4 workers); `lightning.gpu` has no Windows wheels — CPU SIMD is the ceiling.
+- Verify command set: `python -m quantum.tests`; `python -m quantum.pipeline --all`; `python run_pipeline.py --source <video> --method POS` (all from `WORKING/`).
 
-- **Compute:** single node; max 2 concurrent pipeline runs; quantum inference is cached (32 ms) but rPPG per-frame CPU work is the serial bottleneck.
-- **State:** jobs live in an in-memory dict + one JSON result file (`output/pipeline/`); no database, no job history beyond the last canonical result (`/api/previous`), no metrics/audit log.
-- **Storage:** frame sequences retained 24 h, TTL sweep is periodic; 200 MB upload cap.
-- **Multi-tenant:** not designed for it (see §10). The architecture (stages as subprocess, artifacts on disk, SSE) is *plausibly* shippable behind a real server with auth + queue + object storage, but the rPPG stage would need GPU/parallelism and the dataset problem (§5) dominates any scale discussion.
+## Appendix B — Data & artifact ground truth (this session)
 
----
+- `output/rppg/dataset_features.csv`: 16 rows (9 real `0` / 7 fake `1`), all `archive/DFDC_Dataset/Real|Fake`, 10 feature columns + label + video_path + source. Verified contents above (M9).
+- `output/quantum/`: `data.npz` (10/3/3 split), `qaoa_selection.json` (6 features, restart seed 43, cost 0.3950), `feature_scaler.json`, `hybrid_vqc.pt`, `metrics_quantum.json` (ECE 0.1052, acc 0.6667, F1 0.8000), plots.
+- `output/frames/`: `frame_sequences/`, `frame_extraction_log.jsonl`, `frame_extraction_summary.json`, `docs/` (sampling note, quality checklist, examples report) — all regenerated artifacts, untracked.
+- `output/pipeline/`: `run_pipeline.py` result JSON (prob_real 0.6155 → UNCERTAIN).
 
-## 12. Documentation Issues
+## Appendix C — Historical note
 
-**[confirmed]**
-
-| Doc | Issue |
-|---|---|
-| `README.md` | Claims 469 FF++ train clips / 669 labeled; actual: 16 DFDC rows, no FF++. Layout says "8 physiological features" (actual 10). |
-| `AGENTS.md` | "18 labeled rows" (actual 16); "video_meta probe" optimization bullet does not exist in code; "sklearn lazy" is half-true; missing QAOA beta-mixer + Hamiltonian-mismatch warnings. |
-| `WORKING/run_pipeline.py` docstring | "8-feature vector" (actual 10). |
-| `Docs/projec_audit.md` | Pre-refactor snapshot (8 features, old module names `selection.py`/`evaluate.py`/`run.py`; claims frame stage doesn't feed rPPG — fixed since). Should be marked historical. |
-| `WORKING/RPPG/rppg/features.py` docstring | "median imputation" vs actual hardcoded fallback constants. |
-| `WORKING/frame/README.md`, `frontend/README.md` | Accurate (verified `rppg_checks` exists at `frame/app/pipeline.py:542`; API contract matches `server.py`). |
-
----
-
-## 13. Prioritized Recommendations
-
-**P0 — data credibility (project-level):**
-1. Fix the dataset claims in `README.md` + `AGENTS.md` (16 DFDC rows; no FF++).
-2. State plainly in the README that current metrics are indicative only at this scale; add a "Dataset" section with composition, provenance, and how to extend.
-3. Add a bootstrap/regeneration script (`extract → train RF → --all`) so a fresh clone can reproduce artifacts.
-
-**P1 — correctness (both confirmed bugs):**
-4. Fix the QAOA `beta` mixer (§6.1); re-run `--all`; record the new canonical selection.
-5. Fix or gate the Hamiltonian verification (§6.2) with a hard assertion over sampled bitstrings.
-6. Add a minimal test suite (~10–15 assertions, no framework needed): beta affects cost; Hamiltonian ≈ classical on all-0/all-1/sampled bitstrings; `FEATURE_NAMES` (config) == `RPPGFeatures.feature_names()` order; data split sizes; determinism (same seed → same selection). This would have caught both bugs.
-
-**P2 — robustness:**
-7. `face_roi.py`: on no-landmark fallback, return `found=False` (route to `features=None` → INCONCLUSIVE) or drop confidence to a level the pipeline rejects.
-8. `extract_dataset_features.py`: remove stderr→NUL, replace `mp.Pool` with `ProcessPoolExecutor`, parametrize source paths.
-9. `server.py`: restrict CORS to `localhost`/`127.0.0.1` origins; stream uploads to disk; add per-job timeout + worker kill; consider a token for `/api/files`/`/api/detect` even on localhost.
-10. `plots.py`: move `sklearn.metrics` import into functions (saves ~2.4 s off every process start).
-
-**P3 — hygiene:**
-11. Prune/flag legacy scripts (`streamlit_app.py`, webcam/batch/debug runs, `main.py` legacy path).
-12. Fix stale docstrings (`run_pipeline.py` 8→10 features; `features.py` median→fallback).
-13. Pin hashes for auto-downloaded models; add runtime shape/feature-count assertions in `run_pipeline.py`.
-14. Mark `Docs/projec_audit.md` as historical (superseded by this report + `AGENTS.md`).
-
----
-
-## 14. Overall Assessment
-
-This is a **solid, well-documented research prototype** whose engineering quality (determinism, clean stage separation, careful numerical work, honest fallbacks, a genuinely nice frontend) is well above typical student-project level — but whose scientific claims are currently limited by two things: a 16-row dataset, and two confirmed QAOA-layer defects (one a refactor regression, one pre-existing and silently hidden by a non-failing verification).
-
-The fixes are small and surgical (§13 P1 items 4–6, maybe 40 lines total + a test file). The dataset question is the real strategic decision: either grow the DFDC sample and re-baseline, or explicitly reposition the project as a framework/demonstrator rather than a trained detector. Either way, the report should be read as "two concrete bugs + one existential data question," not as a failing audit — the architecture and implementation are the strong foundation the project needs.
-
----
-
-## Appendix A — Reproduction commands
-
-```bash
-# from WORKING/
-python -m quantum.pipeline --all                       # full flow, 28.8 s, seed 44
-python run_pipeline.py --source <video> --method POS    # end-to-end inference
-
-# beta-mixer proof (see §6.1)
-python -c "import numpy as np; from quantum.qaoa import _cost_terms, _precompute_gates, simulator_device, _classical_cost, _normalize_weights, _mutual_info_weights; from quantum.config import QAOASelectionConfig; ..."  # see §6.1 numbers
-
-# Hamiltonian-vs-classical proof (see §6.2)
-python -c "..."  # quantum expval vs _classical_cost on all-zeros / all-ones bitstrings
-
-# dataset truth
-python -c "import csv; rows=list(csv.DictReader(open('output/rppg/dataset_features.csv'))); print(len(rows), sum(r['label']=='0' for r in rows), sum(r['label']=='1' for r in rows))"
-# → 16 9 7
-```
-
-## Appendix B — Reference numbers (single host, 2026-08-13)
-
-- VQC metrics (test split, 3 samples): acc 0.6667, f1 0.8000, AUC 0.5000, ECE 0.2478.
-- Baselines: RandomForest acc 1.0, XGBoost acc 1.0 (overfit).
-- QAOA selection (current code): `cheek_forehead_correlation, left_right_cheek_correlation, mad, heart_rate_bpm, prv_std_ms, spectral_entropy`, seed 44, cost 1.3209.
-- QAOA selection (pre-refactor, fc61a54): `snr_db, signal_quality_index, peak_prominence, prv_std_ms, spectral_entropy, heart_rate_bpm`.
-- E2E inference check: `WIN_20260729_11_14_42_Pro.mp4`, POS → prob_real 0.5475 → UNCERTAIN.
+`Docs/projec_audit.md` (699 lines) predates the real-data refactor: it references `quantum/selection.py` (renamed to `qaoa.py`), the "8 features" count, and an older bug finding already fixed in `run_pipeline.py` — treat as historical only.
