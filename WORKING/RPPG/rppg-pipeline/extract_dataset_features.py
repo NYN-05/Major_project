@@ -6,6 +6,12 @@ features. The script now supports the new folder-based DFDC layout at
 archive/DFDC_Dataset/ in addition to the older CSV-based archive (1)/ layout.
 
 Outputs a CSV file dataset_features.csv for training the classifier.
+
+Data-quality caveat (measured on the DFDC-derived 16-row table): every row
+carries negative SNR (pulse buried in noise), HR features sit on a coarse
+~24.3 BPM grid set by short-clip spectral binning at 10 fps, and the train
+split is 10 rows — treat any metrics trained on this table as indicative
+only, not deployment guarantees.
 """
 
 from __future__ import annotations
@@ -27,12 +33,17 @@ os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
 
 import pandas as pd  # noqa: E402
 
+import numpy as np  # noqa: E402
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rppg import RPPGPipeline  # noqa: E402
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
+# Upper bound (seconds) for one clip before the parent gives up on the worker.
+ITEM_TIMEOUT_S = 600
 
 _WORKER: dict = {}
 
@@ -66,7 +77,7 @@ def _process_one(item: Tuple[int, Path, str, Path]) -> dict:
     try:
         result = _WORKER["pipeline"].process_video(str(video_path))
     except Exception as exc:  # noqa: BLE001 - record and continue
-        entry["error"] = f"{type(exc).__name__}: {exc}"
+        entry["error"] = f"{type(exc).__name__} (pid {os.getpid()}): {exc}"
         return entry
     if result.features is None:
         entry["no_features"] = True
@@ -98,6 +109,22 @@ def _add_sample(samples: List[Tuple[int, Path, str]], label: int, path: Path, so
         samples.append((label, path, source))
 
 
+def _cap_per_class(groups: List[list], max_per_class: Optional[int]) -> None:
+    """Deterministically cap per-class file lists.
+
+    A plain sorted()[...] slice would systematically pick the
+    alphabetically-first N files (e.g. the first FF++ actor pairs);
+    instead the sorted lists are seeded-shuffled (fixed seed 0) before
+    truncation, so caps are unbiased AND reproducible across runs.
+    """
+    if max_per_class is None:
+        return
+    rng = np.random.RandomState(0)
+    for files in groups:
+        rng.shuffle(files)
+        del files[max_per_class:]
+
+
 def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = False) -> List[Tuple[int, Path, str]]:
     root = _repo_root()
     samples: List[Tuple[int, Path, str]] = []
@@ -111,9 +138,7 @@ def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = Fa
         real_files = list(_iter_video_files(real_dir)) if real_dir.exists() else []
 
         if fake_files or real_files:
-            if max_per_class is not None:
-                fake_files = fake_files[:max_per_class]
-                real_files = real_files[:max_per_class]
+            _cap_per_class([fake_files, real_files], max_per_class)
 
             for path in fake_files:
                 _add_sample(samples, 1, path, "archive/DFDC_Dataset/Fake")
@@ -137,8 +162,7 @@ def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = Fa
                         real_files.extend(_iter_video_files(rd))
                 real_files = sorted(real_files)
                 if max_per_class is not None:
-                    synth_files = synth_files[:max_per_class]
-                    real_files = real_files[:max_per_class]
+                    _cap_per_class([synth_files, real_files], max_per_class)
                 for path in synth_files:
                     _add_sample(samples, 1, path, f"FF++/{split}/FF-synthesis")
                 for path in real_files:
@@ -152,14 +176,14 @@ def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = Fa
         if "deepfake" in legacy_df.columns:
             fake_paths = [legacy_root / str(value) for value in legacy_df["deepfake"].dropna().tolist()]
             if max_per_class is not None:
-                fake_paths = fake_paths[:max_per_class]
+                _cap_per_class([fake_paths], max_per_class)
             for path in fake_paths:
                 _add_sample(samples, 1, path, "archive (1)/DeepFake Videos Dataset.csv")
 
         if "video" in legacy_df.columns:
             real_paths = [legacy_root / str(value) for value in legacy_df["video"].dropna().tolist()]
             if max_per_class is not None:
-                real_paths = real_paths[:max_per_class]
+                _cap_per_class([real_paths], max_per_class)
             for path in real_paths:
                 _add_sample(samples, 0, path, "archive (1)/DeepFake Videos Dataset.csv")
 
@@ -231,7 +255,20 @@ def main() -> None:
             initializer=_init_worker,
             initargs=(args.method, args.target_fps, args.blur_threshold, args.min_usable_frames),
         ) as pool:
-            for entry in pool.imap_unordered(_process_one, items, chunksize=1):
+            results = iter(pool.imap_unordered(_process_one, items, chunksize=1))
+            done = 0
+            while done < len(items):
+                try:
+                    entry = results.next(timeout=ITEM_TIMEOUT_S)
+                except mp.TimeoutError:
+                    pool.terminate()
+                    raise SystemExit(
+                        f"FATAL: worker hung for > {ITEM_TIMEOUT_S}s on item {done + 1}/{len(items)} "
+                        f"(no result received). Pool terminated; re-run with --workers 1 to isolate."
+                    ) from None
+                except StopIteration:
+                    break
+                done += 1
                 error = entry.pop("error", None)
                 no_features = entry.pop("no_features", None)
                 if error:
@@ -255,6 +292,7 @@ def main() -> None:
         return
 
     out_df = pd.DataFrame(features_list)
+    out_df = out_df.sort_values("video_path").reset_index(drop=True)
     out_df.to_csv(out_csv_path, index=False)
     print(f"\nSuccessfully extracted features for {len(out_df)} videos.")
     print(f"Features saved to {out_csv_path}")

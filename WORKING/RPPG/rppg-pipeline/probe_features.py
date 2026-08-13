@@ -4,7 +4,7 @@ probe_features.py
 Quick featurability probe: process a subset of clips and compute a richer
 signal-level feature vector per clip (window jitter, spectral shape,
 cross-region phase coherence, two-half HR consistency, pulse regularity)
-on top of the 8 canonical features. Prints per-feature AUC per class to
+on top of the 10 canonical features. Prints per-feature AUC per class to
 judge whether ANY rPPG-derived signal separates real vs fake before
 committing to a full re-extraction.
 
@@ -33,6 +33,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from rppg import RPPGPipeline  # noqa: E402
 
 BAND_LO, BAND_HI = 0.7, 4.0
+
+# Upper bound (seconds) for one clip before the parent gives up on the worker.
+ITEM_TIMEOUT_S = 600
 
 _WORKER: dict = {}
 
@@ -137,7 +140,7 @@ def _process_one(item: Tuple[int, Path, str]) -> dict:
     try:
         r = _WORKER["pipeline"].process_video(str(video_path))
     except Exception as exc:  # noqa: BLE001
-        entry["error"] = f"{type(exc).__name__}: {exc}"
+        entry["error"] = f"{type(exc).__name__} (pid {os.getpid()}): {exc}"
         return entry
     if r.features is None:
         entry["no_features"] = True
@@ -182,7 +185,21 @@ def main():
 
     print(f"Probing {len(items)} clips ...")
     with mp.Pool(args.workers, initializer=_init_worker, initargs=("POS", 10.0, 30)) as pool:
-        entries = list(pool.imap_unordered(_process_one, items, chunksize=1))
+        results = iter(pool.imap_unordered(_process_one, items, chunksize=1))
+        entries = []
+        done = 0
+        while done < len(items):
+            try:
+                entries.append(results.next(timeout=ITEM_TIMEOUT_S))
+            except mp.TimeoutError:
+                pool.terminate()
+                raise SystemExit(
+                    f"FATAL: worker hung for > {ITEM_TIMEOUT_S}s on item {done + 1}/{len(items)} "
+                    "(no result received). Pool terminated."
+                ) from None
+            except StopIteration:
+                break
+            done += 1
 
     rows = [e for e in entries if "error" not in e and not e.get("no_features")]
     print(f"  ok={len(rows)} failed={sum('error' in e for e in entries)} no-feat={sum(e.get('no_features', False) for e in entries)}")
