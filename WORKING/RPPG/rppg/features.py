@@ -327,16 +327,34 @@ def compute_features(
         hr_half_diff=hrd,
         peak_prominence=ppr,
     )
+    raw_nan_count = sum(
+        1
+        for name in (
+            "heart_rate_bpm",
+            "snr_db",
+            "prv_std_ms",
+            "spectral_entropy",
+            "mad",
+            "signal_quality_index",
+            "cheek_forehead_correlation",
+            "left_right_cheek_correlation",
+            "hr_half_diff",
+            "peak_prominence",
+        )
+        if not np.isfinite(getattr(features, name))
+    )
+    features._raw_nan_count = raw_nan_count  # transient; excluded from asdict()/to_vector()
     _fill_nan_with_median(features)
     return features
 
 
 def _fill_nan_with_median(features: RPPGFeatures) -> None:
-    """Replace any remaining NaN feature values with neutral fallbacks so
-    the feature vector is always finite and classifier-ready.
+    """Replace any remaining NaN feature values with hardcoded neutral
+    fallbacks so the feature vector is always finite and classifier-ready.
 
-    Uses per-feature median of non-NaN values; if all are NaN (flat /
-    degenerate signal), falls back to a physiologically neutral default.
+    Note: these are fixed "average human" constants, NOT per-feature medians.
+    Degenerate signals (several NaNs or zero SQI) are rejected earlier by the
+    RPPGPipeline gate, so this fill only ever fires for a rare single-NaN case.
     """
     fallbacks = {
         "heart_rate_bpm": 72.0,

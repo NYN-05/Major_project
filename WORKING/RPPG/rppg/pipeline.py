@@ -302,6 +302,26 @@ class RPPGPipeline:
             high_hz=self.high_hz,
         )
 
+        raw_nan_count = getattr(feats, "_raw_nan_count", 0)
+        if raw_nan_count >= 2 or feats.signal_quality_index == 0.0:
+            warnings.append(
+                f"Degenerate rPPG signal (non-finite features: {raw_nan_count}, "
+                f"SQI: {feats.signal_quality_index:.2f}); "
+                "treating as no-features (INCONCLUSIVE)."
+            )
+            return RPPGResult(
+                fps=fps,
+                n_frames_total=n_total,
+                n_frames_usable=n_usable,
+                features=None,
+                combined_signal=combined_clean,
+                left_cheek_signal=left_clean,
+                right_cheek_signal=right_clean,
+                forehead_signal=forehead_clean,
+                quality_log=quality_log,
+                warnings=warnings,
+            )
+
         return RPPGResult(
             fps=fps,
             n_frames_total=n_total,
