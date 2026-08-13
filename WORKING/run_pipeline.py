@@ -10,7 +10,7 @@ Stages
 1. FRAMES  : frame sampling + quality assessment via the `frame/` module
              (YOLO face detection, blur/dark/bright/face checks).
 2. RPPG    : physiological feature extraction via the `RPPG/` module
-             (POS/CHROM pulse reconstruction -> 8-feature vector).
+             (POS/CHROM pulse reconstruction -> 10-feature vector).
 3. QUANTUM : train-fitted feature scaling + QAOA-selected subset of the
               rPPG features -> trained Hybrid VQC checkpoint -> P(real) ->
               KYC decision bins (real >= 0.7, fake <= 0.3).

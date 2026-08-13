@@ -5,7 +5,7 @@ Retrain the rPPG RandomForest classifier on archive/DFDC_Dataset
 (Fake/ + Real/) end-to-end.
 
 Pipeline per batch of videos:
-  1. Extract the 8 rPPG features per video (same RPPGPipeline used by
+  1. Extract the 10 rPPG features per video (same RPPGPipeline used by
      the quantum stage; features=None videos are skipped).
   2. Accumulate rows and append them to dataset_features_dfdc.csv
      (incremental, so a crash never loses finished work).

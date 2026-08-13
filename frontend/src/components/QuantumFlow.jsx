@@ -4,7 +4,7 @@ import { GLOSSARY, featureInfo } from "../lib.js";
 import Tip from "./Tip.jsx";
 
 const FLOW = [
-  { title: "8 features", sub: "physiological inputs from rPPG", icon: CircleDot },
+  { title: "10 features", sub: "physiological inputs from rPPG", icon: CircleDot },
   { title: "QAOA selection", sub: "quantum optimizer picks the strongest", icon: GitBranch },
   { title: "6 selected", sub: "compact feature subset", icon: Check },
   { title: "Quantum encoding", sub: "features mapped to qubit rotation angles", icon: Sigma },
@@ -85,7 +85,7 @@ export default function QuantumFlow({ result }) {
       )}
 
       <p className="q-note">
-        <b>Primary decision layer.</b> Six of the eight rPPG features — chosen by an{" "}
+        <b>Primary decision layer.</b> Six of the ten rPPG features — chosen by an{" "}
         <Tip text={GLOSSARY.qaoa}>QAOA</Tip> optimizer — are encoded into a{" "}
         <Tip text={GLOSSARY.vqc}>variational quantum circuit</Tip> whose trainable weights are
         optimized classically. The circuit output is the{" "}

@@ -3,9 +3,9 @@
 **Component 2** of the deepfake-verification system under `WORKING/`:
 `frame` (stage 1) -> `RPPG/` (this directory, stage 2) -> `quantum/` (stage 3).
 
-Extracts 8 physiological features from facial video via remote photoplethysmography (rPPG).
+Extracts 10 physiological features from facial video via remote photoplethysmography (rPPG).
 The feature table `output/rppg/dataset_features.csv` is the **direct data source** for the quantum
-decision layer (`WORKING/quantum/`): it consumes the 8 rPPG features as-is (no synthetic data),
+decision layer (`WORKING/quantum/`): it consumes the 10 rPPG features as-is (no synthetic data),
 flips the label convention (CSV 1 = fake -> quantum 0 = fake), and builds its
 training/eval splits from this table.
 
@@ -19,7 +19,7 @@ WORKING/RPPG/
 │   ├── pipeline.py           # RPPGPipeline: video/frames -> features + signals
 │   ├── signal_extraction.py  # POS/CHROM pulse reconstruction (vectorized)
 │   ├── preprocessing.py      # Detrend, bandpass, normalize (cached filters)
-│   ├── features.py           # 8-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations)
+│   ├── features.py           # 10-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations, HR half-diff, peak prominence)
 │   └── model_utils.py        # rPPG RandomForest classifier helpers (side path)
 ├── rppg-pipeline/            # Training & demo scripts
 │   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/ (+ FF++ via --include-ffpp)
@@ -76,7 +76,7 @@ pipeline = RPPGPipeline(
 | `fps` | float | Effective sampling rate |
 | `n_frames_total` | int | Total frames processed |
 | `n_frames_usable` | int | Frames with face detected |
-| `features` | `RPPGFeatures \| None` | **8-feature vector (or None if < 48 usable frames)** |
+| `features` | `RPPGFeatures \| None` | **10-feature vector (or None if < 48 usable frames)** |
 | `combined_signal` | `np.ndarray \| None` | Cleaned combined pulse waveform |
 | `left_cheek_signal` | `np.ndarray \| None` | Cleaned left cheek pulse |
 | `right_cheek_signal` | `np.ndarray \| None` | Cleaned right cheek pulse |
@@ -135,9 +135,9 @@ Writes: `WORKING/output/rppg/dataset_features.csv` (relative to `WORKING/`)
 
 ### Featurability Probe (`probe_features.py`)
 
-Signal-level study of how much class signal each of the 8 features actually
+Signal-level study of how much class signal each of the 10 features actually
 carries on a dataset — no classifier involved. Emits per-feature AUC (real vs
-fake) per method (POS/CHROM) per target fps, plus an all-8-feature oracle AUC,
+fake) per method (POS/CHROM) per target fps, plus an all-10-feature oracle AUC,
 and a table ranking features.
 
 ```bash
@@ -200,7 +200,7 @@ streamlit run rppg-pipeline/streamlit_app.py
 - **Shared Welch PSD** (`features.py`): Single periodogram for HR, SNR, entropy, SQI — 3 fewer `scipy.signal.welch` calls per video
 - **Cached filter/detrend** (`preprocessing.py`): `@lru_cache` on Butterworth coefficients + detrend sparse matrix
 - **Skin-mask hoist** (`face_roi.py`): Compute YCrCb+inRange once/frame instead of 3×
-- **Skip discarded quality work** (`pipeline.py`): Stage-1 path skips Laplacian/brightness (overwritten by `face.found` anyway)
+- **Discarded quality work** (`pipeline.py`): Stage-1 path still computes Laplacian/brightness (recorded in metadata) but the rPPG gate uses only `face.found`
 
 ## Install
 
@@ -255,7 +255,7 @@ NaN features are filled with physiologically neutral fallbacks (HR=72, SNR=0, et
 
 | File | Description |
 |------|-------------|
-| `dataset_features.csv` | 8 features + label per video (1=fake, 0=real) |
+| `dataset_features.csv` | 10 features + label per video (1=fake, 0=real) |
 | `rppg_classifier.pkl` | Trained RandomForest (side path) |
 | `rppg_classifier_metadata.json` | Training summary, feature columns, metrics |
 | `plots/` | Diagnostic plots (PSD, waveforms, feature distributions) |
