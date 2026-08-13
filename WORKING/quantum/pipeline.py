@@ -1,4 +1,5 @@
 import argparse
+import json
 from dataclasses import asdict
 
 import numpy as np
@@ -7,13 +8,21 @@ from quantum.config import (
     DataConfig,
     DecisionConfig,
     FEATURE_NAMES,
+    OUTPUT_DIR,
     QAOASelectionConfig,
     VQCConfig,
 )
 from quantum.data import build_dataset, load_dataset
 from quantum.evaluate import evaluate_quantum_model, run_baselines
 from quantum.preprocess import FeatureScaler, SCALER_FILE
-from quantum.qaoa import QAOASelector, load_selection, save_selection, verify_hamiltonian
+from quantum.qaoa import (
+    QAOASelector,
+    compare_selections,
+    load_selection,
+    save_selection,
+    select_classical,
+    verify_hamiltonian,
+)
 from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
 
 
@@ -108,12 +117,21 @@ def main():
         selection = QAOASelector(qaoa_cfg).select(X_train, data["y_train"])
         save_selection(selection, qaoa_cfg.selection_file)
         print(f"  Selected {len(selection['selected_features'])} features: {selection['selected_features']}")
+
+        classical = select_classical(X_train, data["y_train"], qaoa_cfg)
+        comparison = compare_selections(selection, classical)
+        comparison_file = OUTPUT_DIR / "selection_comparison.json"
+        comparison_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(comparison_file, "w") as fh:
+            json.dump(comparison, fh, indent=2)
+        print(f"  Classical MI-greedy reference: {classical['selected_features']}")
+        print(f"  Overlap with QAOA: {comparison['overlap_count']} features (see {comparison_file})")
     else:
         selection = load_selection(qaoa_cfg.selection_file)
 
     indices = [int(i) for i in selection["selected_indices"]]
     if args.train or args.all:
-        print("[3/6] Training hybrid VQC (6 QAOA-selected features)...")
+        print(f"[3/6] Training hybrid VQC on {len(indices)} QAOA-selected features...")
         train_vqc(
             X_train[:, indices],
             data["y_train"].astype(float),
@@ -142,12 +160,20 @@ def main():
             data["y_test"],
             vqc_cfg,
             decision_cfg,
+            X_train=X_train[:, indices],
+            y_train=data["y_train"],
         )
         metrics = result["metrics"]
         print(
             f"  accuracy={metrics['accuracy']:.4f} f1={metrics['f1']:.4f} "
             f"auc={metrics['auc_roc']:.4f} ece={metrics['ece']:.4f}"
         )
+        if "cv" in result:
+            cv = result["cv"]["mean"]
+            print(
+                f"  CV(5-fold): accuracy={cv['accuracy']:.4f}+-{result['cv']['std']['accuracy']:.4f} "
+                f"balanced_acc={cv['balanced_accuracy']:.4f} auc={cv['auc_roc']:.4f}"
+            )
         print(f"  decision bins: {result['decision_bins']}")
 
     if args.baselines or args.all:
@@ -164,6 +190,11 @@ def main():
                 f"  {name}: accuracy={metrics['accuracy']:.4f} "
                 f"f1={metrics['f1']:.4f} auc={metrics['auc_roc']:.4f}"
             )
+            if "cv" in metrics:
+                cv = metrics["cv"]["mean"]
+                print(
+                    f"    CV(5-fold): balanced_acc={cv['balanced_accuracy']:.4f}+-{metrics['cv']['std']['balanced_accuracy']:.4f}"
+                )
 
     print("Done.")
     return 0

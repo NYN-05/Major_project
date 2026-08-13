@@ -111,6 +111,44 @@ class QAOASelector:
         }
 
 
+def select_classical(X, y, cfg=None):
+    """Classical reference selection: top-k features by mutual information.
+
+    Report-only selector used to sanity-check that the QAOA choice is not
+    worse than a plain MI-greedy pick. Same output schema as
+    QAOASelector.select() so downstream code can consume either.
+    """
+    cfg = cfg or QAOASelectionConfig()
+    weights = _normalize_weights(mutual_info_classif(X, y, random_state=cfg.seed))
+    order = np.argsort(-weights)
+    selected = order[: cfg.target_features]
+    marginals = np.zeros(X.shape[1])
+    for pos, i in enumerate(selected):
+        marginals[i] = 1.0 - pos / X.shape[1]
+    return {
+        "selected_indices": [int(i) for i in selected],
+        "selected_features": [FEATURE_NAMES[i] for i in selected],
+        "marginal_probabilities": [float(m) for m in marginals],
+        "feature_weights": [float(w) for w in weights],
+        "cost": None,
+        "success": True,
+    }
+
+
+def compare_selections(qaoa_result, classical_result):
+    """Summarize two selections for the comparison artifact."""
+    qa = set(qaoa_result["selected_indices"])
+    cl = set(classical_result["selected_indices"])
+    return {
+        "qaoa_features": qaoa_result["selected_features"],
+        "classical_features": classical_result["selected_features"],
+        "overlap_indices": sorted(qa & cl),
+        "overlap_count": len(qa & cl),
+        "qaoa_only": [FEATURE_NAMES[i] for i in sorted(qa - cl)],
+        "classical_only": [FEATURE_NAMES[i] for i in sorted(cl - qa)],
+    }
+
+
 def verify_hamiltonian(X, y, cfg=None):
     cfg = cfg or QAOASelectionConfig()
     weights = _normalize_weights(mutual_info_classif(X, y, random_state=cfg.seed))

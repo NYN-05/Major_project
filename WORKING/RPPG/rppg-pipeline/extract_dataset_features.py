@@ -18,7 +18,14 @@ import time
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
-import pandas as pd
+# Silence MediaPipe / TensorFlow Lite C++ logging (GLOG + TF) that would
+# otherwise flood stderr from every worker process. Set before the
+# RPPGPipeline import and inside each worker so spawned children are quiet.
+os.environ.setdefault("GLOG_minloglevel", "2")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
+
+import pandas as pd  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -31,7 +38,18 @@ _WORKER: dict = {}
 
 
 def _init_worker(method: str, target_fps: Optional[float], blur_threshold: float, min_usable_frames: int) -> None:
-    """Per-process initializer: creates one RPPGPipeline per worker."""
+    """Per-process initializer: creates one RPPGPipeline per worker.
+
+    MediaPipe/TFLite log to C++ stderr from every worker; fd 2 is
+    redirected to NUL so the console stays readable (progress lines are
+    printed by the parent, so workers need no stderr).
+    """
+    try:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), 2)
+    except OSError:
+        pass
+    os.environ.setdefault("GLOG_minloglevel", "2")
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
     _WORKER["pipeline"] = RPPGPipeline(
         method=method,
         target_fps=target_fps,
@@ -80,7 +98,7 @@ def _add_sample(samples: List[Tuple[int, Path, str]], label: int, path: Path, so
         samples.append((label, path, source))
 
 
-def collect_samples(max_per_class: Optional[int] = None) -> List[Tuple[int, Path, str]]:
+def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = False) -> List[Tuple[int, Path, str]]:
     root = _repo_root()
     samples: List[Tuple[int, Path, str]] = []
 
@@ -101,6 +119,30 @@ def collect_samples(max_per_class: Optional[int] = None) -> List[Tuple[int, Path
                 _add_sample(samples, 1, path, "archive/DFDC_Dataset/Fake")
             for path in real_files:
                 _add_sample(samples, 0, path, "archive/DFDC_Dataset/Real")
+
+    if include_ffpp:
+        # FF++ (FaceForensics++): FF-synthesis clips are fully re-rendered
+        # fakes (Deepfakes/Face2Face/FaceShifter/NeuralTextures) where the
+        # physiological pulse is genuinely synthesized/altered; FF-real and
+        # YouTube-real are pristine real recordings.
+        ffpp_root = _repo_root().parent.parent / "FF++"
+        if ffpp_root.exists():
+            for split in ("train", "val", "test"):
+                synth_dir = ffpp_root / split / "FF-synthesis"
+                real_dirs = [ffpp_root / split / "FF-real", ffpp_root / split / "YouTube-real"]
+                synth_files = sorted(_iter_video_files(synth_dir)) if synth_dir.exists() else []
+                real_files = []
+                for rd in real_dirs:
+                    if rd.exists():
+                        real_files.extend(_iter_video_files(rd))
+                real_files = sorted(real_files)
+                if max_per_class is not None:
+                    synth_files = synth_files[:max_per_class]
+                    real_files = real_files[:max_per_class]
+                for path in synth_files:
+                    _add_sample(samples, 1, path, f"FF++/{split}/FF-synthesis")
+                for path in real_files:
+                    _add_sample(samples, 0, path, f"FF++/{split}/FF-real")
 
     legacy_root = root / "archive (1)"
     legacy_csv = legacy_root / "DeepFake Videos Dataset.csv"
@@ -131,11 +173,12 @@ def main() -> None:
     parser.add_argument("--blur-threshold", type=float, default=15.0, help="Minimum Laplacian variance to keep a frame")
     parser.add_argument("--min-usable-frames", type=int, default=48, help="Minimum usable frames required per clip")
     parser.add_argument("--max-per-class", type=int, default=None, help="Optional cap for each label when extracting features")
+    parser.add_argument("--include-ffpp", action="store_true", help="Also include FaceForensics++ clips (FF-synthesis fakes, FF-real/YouTube-real reals)")
     parser.add_argument("--output", default=None, help="Optional output CSV path")
     parser.add_argument("--workers", type=int, default=1, help="Number of parallel worker processes (0 = all CPU cores)")
     args = parser.parse_args()
 
-    samples = collect_samples(max_per_class=args.max_per_class)
+    samples = collect_samples(max_per_class=args.max_per_class, include_ffpp=args.include_ffpp)
     if not samples:
         print("No dataset videos were found. Check archive/DFDC_Dataset or archive (1).")
         return

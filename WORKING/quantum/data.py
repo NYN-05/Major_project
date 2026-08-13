@@ -41,11 +41,14 @@ def _infer_subject_key(row):
     return "clip:" + path
 
 
-def _load_rppg_rows(csv_file):
+def _load_rppg_rows(csv_file, cfg=None):
     """Load the real rPPG feature table.
 
     Returns X (n x 8, FEATURE_NAMES order), y (quantum convention:
-    1 = real, 0 = fake), subject groups, and video paths.
+    1 = real, 0 = fake), subject groups, video paths, and a dict of
+    filtering stats. When cfg.filter_implausible is set, rows with a
+    heart rate outside [hr_min, hr_max] or with non-finite feature
+    values are dropped (plausibility hygiene for KYC signals).
     """
     if not csv_file.exists():
         raise FileNotFoundError(
@@ -60,16 +63,40 @@ def _load_rppg_rows(csv_file):
     if missing:
         raise ValueError(f"{csv_file} is missing rPPG columns: {missing}")
 
+    filter_stats = {"total": len(rows), "dropped_hr": 0, "dropped_invalid": 0}
+    keep = []
+    for row in rows:
+        try:
+            values = [float(row[name]) for name in FEATURE_NAMES]
+        except (TypeError, ValueError):
+            keep.append(None)
+            continue
+        if not np.isfinite(values).all():
+            filter_stats["dropped_invalid"] += 1
+            keep.append(None)
+            continue
+        hr = values[FEATURE_NAMES.index("heart_rate_bpm")]
+        if cfg is not None and cfg.filter_implausible and not (cfg.hr_min <= hr <= cfg.hr_max):
+            filter_stats["dropped_hr"] += 1
+            keep.append(None)
+            continue
+        keep.append(row)
+
+    kept_rows = [row for row in keep if row is not None]
+    filter_stats["kept"] = len(kept_rows)
+    if not kept_rows:
+        raise ValueError(f"No labelled samples survived filtering in {csv_file}")
+
     X = np.asarray(
-        [[float(row[name]) for name in FEATURE_NAMES] for row in rows], dtype=np.float32
+        [[float(row[name]) for name in FEATURE_NAMES] for row in kept_rows], dtype=np.float32
     )
-    labels = np.asarray([int(round(float(row["label"]))) for row in rows], dtype=np.int64)
+    labels = np.asarray([int(round(float(row["label"]))) for row in kept_rows], dtype=np.int64)
     if set(labels.tolist()) - {0, 1}:
         raise ValueError("rPPG labels must be 0 (real) or 1 (fake)")
     y = np.where(labels == RPPG_LABEL_FAKE, LABEL_FAKE, LABEL_REAL).astype(np.int64)
-    groups = np.asarray([_infer_subject_key(row) for row in rows], dtype=object)
-    paths = np.asarray([row["video_path"].strip() for row in rows], dtype=object)
-    return X, y, groups, paths
+    groups = np.asarray([_infer_subject_key(row) for row in kept_rows], dtype=object)
+    paths = np.asarray([row["video_path"].strip() for row in kept_rows], dtype=object)
+    return X, y, groups, paths, filter_stats
 
 
 def _grouped_train_val_test_split(X, y, groups, paths, cfg):
@@ -148,7 +175,13 @@ def _grouped_train_val_test_split(X, y, groups, paths, cfg):
 def build_dataset(cfg=None):
     """Build data.npz from the real rPPG feature table (rPPG layer output)."""
     cfg = cfg or DataConfig()
-    X, y, groups, paths = _load_rppg_rows(cfg.csv_file)
+    X, y, groups, paths, stats = _load_rppg_rows(cfg.csv_file, cfg)
+    if cfg.filter_implausible:
+        print(
+            f"  Plausibility filter: {stats['kept']}/{stats['total']} kept "
+            f"(HR out of [{cfg.hr_min}, {cfg.hr_max}]: {stats['dropped_hr']}, "
+            f"non-finite features: {stats['dropped_invalid']})"
+        )
     split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
     cfg.data_file.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(

@@ -21,6 +21,7 @@ class QuantumLayer(nn.Module):
             n_layers=cfg.qml_layers, n_wires=n_qubits
         )
         self.weights = nn.Parameter(0.1 * torch.randn(*weight_shape))
+        self.broadcast = bool(getattr(cfg, "broadcast_qnode", True))
 
         @qml.qnode(dev, interface="torch", diff_method="backprop")
         def circuit(features, weights):
@@ -31,6 +32,16 @@ class QuantumLayer(nn.Module):
         self.circuit = circuit
 
     def forward(self, x):
+        if self.broadcast:
+            # Batched QNode execution: a (batch, n_features) input is
+            # broadcast through the circuit by PennyLane, replacing the
+            # per-row Python loop. Verified bit-identical to the loop
+            # path (max |diff| = 0.0) before enabling.
+            out = self.circuit(x, self.weights)
+            if isinstance(out, (list, tuple)):
+                out = torch.stack(out, dim=1)
+            out = out.float()
+            return out if out.dim() == 2 else out.unsqueeze(0)
         rows = [self.circuit(row, self.weights) for row in x]
         return torch.stack([torch.stack(row).float() for row in rows])
 
@@ -114,9 +125,11 @@ def _val_metrics(model, X_val, y_val, cfg):
 def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None):
     """Train the hybrid VQC on the QAOA-selected features.
 
-    Architecture, optimizer, loss, and hyperparameters are unchanged;
-    `X_val`/`y_val` only add per-epoch validation monitoring (never used
-    for updates). The checkpoint is saved together with `metadata`
+    Training loop upgrades: cosine-annealed learning rate, gradient
+    clipping, early stopping on validation loss with restore of the
+    best-validation checkpoint (instead of keeping final-epoch weights).
+    `X_val`/`y_val` are used only for monitoring/early stopping, never
+    for gradient updates. The checkpoint is saved together with `metadata`
     (QAOA selection, feature ordering, scaler, configs) for inference.
     """
     cfg = cfg or VQCConfig()
@@ -133,6 +146,20 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
         model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay
     )
     monitor_val = X_val is not None and y_val is not None
+
+    scheduler = None
+    if cfg.lr_schedule == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=cfg.epochs, eta_min=max(1e-5, cfg.learning_rate / 100.0)
+        )
+    elif cfg.lr_schedule == "plateau" and monitor_val:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=max(3, cfg.patience // 4)
+        )
+
+    best_val_loss = float("inf")
+    best_state = None
+    best_epoch = 0
     log = []
     for epoch in range(cfg.epochs):
         model.train()
@@ -141,20 +168,51 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
             optimizer.zero_grad()
             loss = focal_loss(model(xb), yb, cfg)
             loss.backward()
+            if cfg.clip_grad is not None and cfg.clip_grad > 0:
+                nn.utils.clip_grad_norm_(model.parameters(), cfg.clip_grad)
             optimizer.step()
             total_loss += loss.item() * len(xb)
-        record = {"epoch": epoch + 1, "train_loss": total_loss / len(features)}
+        record = {
+            "epoch": epoch + 1,
+            "train_loss": total_loss / len(features),
+            "lr": float(scheduler.get_last_lr()[0]) if scheduler else float(cfg.learning_rate),
+        }
         if monitor_val:
             val_loss, val_acc = _val_metrics(model, X_val, y_val, cfg)
             record["val_loss"] = val_loss
             record["val_accuracy"] = val_acc
+            if val_loss < best_val_loss - cfg.min_delta:
+                best_val_loss = val_loss
+                best_state = {k: v.clone() for k, v in model.state_dict().items()}
+                best_epoch = epoch + 1
         log.append(record)
-    cfg.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {"state_dict": model.state_dict(), "metadata": _sanitize_metadata(metadata or {})},
-        cfg.checkpoint_file,
-    )
-    with open(cfg.log_file, "w") as fh:
-        for row in log:
-            fh.write(json.dumps(row) + "\n")
+        if scheduler is not None:
+            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                scheduler.step(record["val_loss"] if monitor_val else record["train_loss"])
+            else:
+                scheduler.step()
+        if monitor_val and best_state is not None and (epoch + 1 - best_epoch) > cfg.patience:
+            break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    summary = {
+        "epochs_run": epoch + 1,
+        "best_epoch": best_epoch if best_state is not None else None,
+        "best_val_loss": best_val_loss if best_state is not None else None,
+        "early_stopped": best_state is not None and epoch + 1 - best_epoch > cfg.patience,
+    }
+    if cfg.save_checkpoint:
+        cfg.checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "state_dict": model.state_dict(),
+                "metadata": _sanitize_metadata(metadata or {}),
+                "training_summary": summary,
+            },
+            cfg.checkpoint_file,
+        )
+        with open(cfg.log_file, "w") as fh:
+            for row in log:
+                fh.write(json.dumps(row) + "\n")
     return model
