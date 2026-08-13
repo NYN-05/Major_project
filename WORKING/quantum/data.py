@@ -120,15 +120,15 @@ def _grouped_train_val_test_split(X, y, groups, paths, cfg):
 
     Groups are assigned greedily to the split with the largest remaining
     (normalized) per-class demand, so each split ends up with roughly
-    train_ratio / val_ratio of every class while never separating the
-    samples of one subject. Seeded via cfg.seed.
+    val_ratio / test_ratio of every class (train = remainder) while never
+    separating the samples of one subject. Seeded via cfg.seed.
     """
     n_classes = int(y.max()) + 1
     per_class = [int((y == c).sum()) for c in range(n_classes)]
     target = {s: [0] * n_classes for s in SPLITS}
     for c in range(n_classes):
         val_c = int(round(per_class[c] * cfg.val_ratio))
-        test_c = int(round(per_class[c] * cfg.val_ratio))
+        test_c = int(round(per_class[c] * cfg.test_ratio))
         train_c = per_class[c] - val_c - test_c
         if train_c < 0:
             raise ValueError("Not enough samples per class for the requested ratios")

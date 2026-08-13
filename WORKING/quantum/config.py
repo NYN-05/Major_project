@@ -40,8 +40,8 @@ OUTPUT_DIR = WORKING_ROOT / "output" / "quantum"
 @dataclass(frozen=True)
 class DataConfig:
     seed: int = 42
-    train_ratio: float = 0.6
     val_ratio: float = 0.2
+    test_ratio: float = 0.2
     filter_implausible: bool = True
     hr_min: float = 30.0
     hr_max: float = 220.0

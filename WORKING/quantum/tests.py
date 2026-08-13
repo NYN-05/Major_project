@@ -123,7 +123,7 @@ def test_feature_contract_sync():
 
 
 def test_split_determinism():
-    """Same seed -> identical split; per-class counts are preserved."""
+    """Same seed -> identical split; per-class counts preserved; ratios honored."""
     from quantum.data import _grouped_train_val_test_split
     from quantum.config import DataConfig
 
@@ -144,6 +144,15 @@ def test_split_determinism():
         total += len(first[f"y_{s}"])
     assert total == 16
     assert len(first["X_train"]) > 0 and len(first["X_test"]) > 0
+    for c in (0, 1):
+        per_class_total = sum(int((first[f"y_{s}"] == c).sum()) for s in ("train", "val", "test"))
+        assert per_class_total == int((y == c).sum()), f"class {c} rows lost in the split"
+        for s, ratio in (("val", cfg.val_ratio), ("test", cfg.test_ratio)):
+            n_s = int((first[f"y_{s}"] == c).sum())
+            expected = int(round(int((y == c).sum()) * ratio))
+            assert n_s == expected, (
+                f"class {c} {s} count {n_s} != round(per_class * {ratio}) = {expected}"
+            )
 
 
 def main() -> None:
