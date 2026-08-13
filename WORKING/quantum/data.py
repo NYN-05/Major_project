@@ -59,7 +59,7 @@ def _infer_split_key(row):
 def _load_rppg_rows(csv_file, cfg=None):
     """Load the real rPPG feature table.
 
-    Returns X (n x 8, FEATURE_NAMES order), y (quantum convention:
+    Returns X (n x len(FEATURE_NAMES), FEATURE_NAMES order), y (quantum convention:
     1 = real, 0 = fake), subject groups, video paths, and a dict of
     filtering stats. When cfg.filter_implausible is set, rows with a
     heart rate outside [hr_min, hr_max] or with non-finite feature
@@ -255,7 +255,7 @@ def load_dataset(path=None):
     path = path or DataConfig().data_file
     if not path.exists():
         raise FileNotFoundError(
-            f"Dataset not found at {path}. Build it first with: python -m quantum.run --build-data"
+            f"Dataset not found at {path}. Build it first with: python -m quantum.pipeline --build-data"
         )
     data = np.load(path)
     return {key: data[key] for key in ("X_train", "y_train", "X_val", "y_val", "X_test", "y_test")}

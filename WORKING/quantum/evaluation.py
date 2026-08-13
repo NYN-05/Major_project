@@ -1,20 +1,25 @@
+"""Evaluation of the trained quantum model: metrics, decision bins,
+cross-validation, classical baselines, and the artifact figures.
+
+The quantum model is scored on the held-out test split (accuracy, F1,
+AUC-ROC, ECE, decision bins). The train split is additionally
+cross-validated to report procedure stability (mean +/- std). Classical
+baselines (RandomForest, MLP, LogisticRegression, LinearSVC, GaussianNB,
+XGBoost) run on the same selected features for comparison. Plots are
+delegated to quantum.plots.
+"""
+
 import json
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
-    ConfusionMatrixDisplay,
     accuracy_score,
     precision_recall_fscore_support,
     roc_auc_score,
-    roc_curve,
 )
 from sklearn.model_selection import StratifiedKFold
 from sklearn.naive_bayes import GaussianNB
@@ -23,6 +28,11 @@ from sklearn.svm import LinearSVC
 from xgboost import XGBClassifier
 
 from quantum.config import DecisionConfig, VQCConfig
+from quantum.plots import (
+    plot_calibration_curve,
+    plot_confusion_matrix,
+    plot_roc_curve,
+)
 from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
 
 
@@ -114,57 +124,6 @@ def decision_bins(y_true, prob_real, cfg=None):
     }
 
 
-def _plot_roc(y_true, prob_real, path):
-    fpr, tpr, _ = roc_curve(y_true, prob_real)
-    auc = roc_auc_score(y_true, prob_real)
-    fig, ax = plt.subplots(figsize=(5, 5))
-    ax.plot(fpr, tpr, label=f"AUC-ROC = {auc:.3f}")
-    ax.plot([0, 1], [0, 1], "k--", alpha=0.5)
-    ax.set_xlabel("False Positive Rate")
-    ax.set_ylabel("True Positive Rate")
-    ax.set_title("Hybrid VQC ROC Curve")
-    ax.legend()
-    fig.tight_layout()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def _plot_confusion(y_true, predictions, path):
-    fig, ax = plt.subplots(figsize=(5, 4))
-    ConfusionMatrixDisplay.from_predictions(y_true, predictions, ax=ax, colorbar=False)
-    ax.set_title("Confusion Matrix (Hybrid VQC)")
-    fig.tight_layout()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def _plot_calibration(y_true, prob_real, path, n_bins=10):
-    """Reliability diagram: observed vs predicted probability per bin."""
-    bins = np.linspace(0.0, 1.0, n_bins + 1)
-    centers, observed, counts = [], [], []
-    for lo, hi in zip(bins[:-1], bins[1:]):
-        in_bin = (prob_real > lo) & (prob_real <= hi)
-        if int(in_bin.sum()) == 0:
-            continue
-        centers.append((lo + hi) / 2.0)
-        observed.append(float(y_true[in_bin].mean()))
-        counts.append(int(in_bin.sum()))
-    fig, ax = plt.subplots(figsize=(5, 5))
-    if centers:
-        ax.plot([0, 1], [0, 1], "k--", alpha=0.5, label="Perfect calibration")
-        ax.plot(centers, observed, "o-", label="Hybrid VQC")
-    ax.set_xlabel("Mean predicted probability")
-    ax.set_ylabel("Observed fraction of positives")
-    ax.set_title("Calibration Curve (Hybrid VQC)")
-    ax.legend()
-    fig.tight_layout()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
 def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None, X_train=None, y_train=None):
     vqc_cfg = vqc_cfg or VQCConfig()
     decision_cfg = decision_cfg or DecisionConfig()
@@ -187,9 +146,9 @@ def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None, X_tr
 
         payload["cv"] = run_cv(_fit_vqc, X_train, y_train, seed=vqc_cfg.seed)
 
-    _plot_roc(y_test, prob_real, decision_cfg.roc_plot)
-    _plot_confusion(y_test, (prob_real >= 0.5).astype(int), decision_cfg.confusion_plot)
-    _plot_calibration(y_test, prob_real, decision_cfg.calibration_plot)
+    plot_roc_curve(y_test, prob_real, decision_cfg.roc_plot)
+    plot_confusion_matrix(y_test, (prob_real >= 0.5).astype(int), decision_cfg.confusion_plot)
+    plot_calibration_curve(y_test, prob_real, decision_cfg.calibration_plot)
     with open(vqc_cfg.metrics_file, "w") as fh:
         json.dump(payload, fh, indent=2)
     return payload

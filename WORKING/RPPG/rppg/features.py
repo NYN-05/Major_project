@@ -33,6 +33,8 @@ class RPPGFeatures:
     signal_quality_index: float
     cheek_forehead_correlation: float
     left_right_cheek_correlation: float
+    hr_half_diff: float
+    peak_prominence: float
 
     def to_vector(self) -> np.ndarray:
         """Fixed-order numeric feature vector for ML/quantum encoding."""
@@ -46,6 +48,8 @@ class RPPGFeatures:
                 self.signal_quality_index,
                 self.cheek_forehead_correlation,
                 self.left_right_cheek_correlation,
+                self.hr_half_diff,
+                self.peak_prominence,
             ],
             dtype=np.float64,
         )
@@ -61,6 +65,8 @@ class RPPGFeatures:
             "signal_quality_index",
             "cheek_forehead_correlation",
             "left_right_cheek_correlation",
+            "hr_half_diff",
+            "peak_prominence",
         ]
 
     def to_dict(self) -> Dict[str, float]:
@@ -177,6 +183,38 @@ def mean_absolute_deviation(trace: np.ndarray) -> float:
     return float(np.mean(np.abs(trace - np.mean(trace))))
 
 
+def hr_half_diff(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0) -> float:
+    """
+    Absolute difference (BPM) between heart rates estimated from the first
+    and second halves of the pulse signal. A genuine recording keeps a
+    stable pulse across the clip; unstable or drifting (synthetic) signals
+    disagree between halves. Mirrors the probe feature of the same name.
+    """
+    trace = np.asarray(trace, dtype=np.float64)
+    n = len(trace)
+    half = max(15, n // 2)
+    hr1 = estimate_heart_rate(trace[:half], fs, low_hz, high_hz)
+    hr2 = estimate_heart_rate(trace[-half:], fs, low_hz, high_hz)
+    if not (np.isfinite(hr1) and np.isfinite(hr2)):
+        return float("nan")
+    return float(abs(hr1 - hr2))
+
+
+def peak_prominence(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0, psd: Optional[tuple] = None) -> float:
+    """
+    Spectral peak-to-mean ratio of the in-band power spectrum (prominence of
+    the dominant pulse peak). Genuine pulse signals concentrate energy at the
+    HR fundamental (ratio >> 1); noisy or fabricated spectra are flatter
+    (ratio near 1). Mirrors the probe feature of the same name.
+    """
+    freqs, psd = psd if psd is not None else _welch_psd(trace, fs)
+    band = (freqs >= low_hz) & (freqs <= high_hz)
+    pb = psd[band]
+    if not band.any() or pb.size < 2 or pb.mean() <= 0:
+        return float("nan")
+    return float(pb.max() / pb.mean())
+
+
 def signal_quality_index(trace: np.ndarray, fs: float, psd: Optional[tuple] = None) -> float:
     """
     Pulse-signal quality score in [0, 1], combining:
@@ -263,6 +301,8 @@ def compute_features(
     ent = spectral_entropy(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
     mad = mean_absolute_deviation(combined_signal)
     sqi = signal_quality_index(combined_signal, fs, psd=shared_psd)
+    hrd = hr_half_diff(combined_signal, fs, low_hz, high_hz)
+    ppr = peak_prominence(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
 
     cheek_corr_vals = [
         region_correlation(left_cheek_signal, forehead_signal),
@@ -284,6 +324,8 @@ def compute_features(
         signal_quality_index=sqi,
         cheek_forehead_correlation=cheek_forehead_corr,
         left_right_cheek_correlation=float(left_right_corr),
+        hr_half_diff=hrd,
+        peak_prominence=ppr,
     )
     _fill_nan_with_median(features)
     return features
@@ -303,6 +345,8 @@ def _fill_nan_with_median(features: RPPGFeatures) -> None:
         "spectral_entropy": 0.5,
         "mad": 0.0,
         "signal_quality_index": 0.0,
+        "hr_half_diff": 0.0,
+        "peak_prominence": 1.0,
     }
     for name in fallbacks:
         value = getattr(features, name)

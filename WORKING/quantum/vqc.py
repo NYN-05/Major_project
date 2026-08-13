@@ -1,3 +1,14 @@
+"""Hybrid quantum-classical VQC: model, training, and inference.
+
+The model combines a PennyLane quantum layer (angle embedding +
+strongly-entangling ansatz, P(Z) expectation per qubit) with a small
+classical head. Training uses a focal loss with label smoothing and a
+confidence penalty; the CUDA-accelerated path runs the torch-side tensors
+on GPU while the statevector QNode executes on CPU (differentiable
+.cpu()/.to() bridge). Checkpoints bundle state_dict + metadata so
+inference can reproduce the exact training-time transformation.
+"""
+
 import json
 from pathlib import Path
 
@@ -8,6 +19,13 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from quantum.config import VQCConfig
+
+
+def resolve_device():
+    """CUDA when available, else CPU. PennyLane's default.qubit executes
+    on the CPU; the torch-side tensors (head, loss, optimizer) run on GPU
+    via a differentiable .cpu()/.to() bridge in QuantumLayer.forward."""
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class QuantumLayer(nn.Module):
@@ -32,18 +50,27 @@ class QuantumLayer(nn.Module):
         self.circuit = circuit
 
     def forward(self, x):
+        # The QNode executes on CPU; .cpu()/.to() are differentiable
+        # identity ops in torch, so the CUDA parameter graph stays intact
+        # (verified: grads flow back to the GPU weights).
+        if x.is_cuda:
+            x = x.cpu()
+        w = self.weights.cpu()
         if self.broadcast:
             # Batched QNode execution: a (batch, n_features) input is
             # broadcast through the circuit by PennyLane, replacing the
             # per-row Python loop. Verified bit-identical to the loop
             # path (max |diff| = 0.0) before enabling.
-            out = self.circuit(x, self.weights)
+            out = self.circuit(x, w)
             if isinstance(out, (list, tuple)):
                 out = torch.stack(out, dim=1)
             out = out.float()
-            return out if out.dim() == 2 else out.unsqueeze(0)
-        rows = [self.circuit(row, self.weights) for row in x]
-        return torch.stack([torch.stack(row).float() for row in rows])
+            out = out if out.dim() == 2 else out.unsqueeze(0)
+            return out.to(self.weights.device)
+        rows = [self.circuit(row, w) for row in x]
+        return torch.stack([torch.stack(row).float() for row in rows]).to(
+            self.weights.device
+        )
 
 
 class HybridModel(nn.Module):
@@ -73,6 +100,48 @@ def focal_loss(logits, targets, cfg):
     return focal.mean() - cfg.confidence_penalty * entropy.mean()
 
 
+# Trained models are cached across calls (keyed by feature count + checkpoint
+# identity) so repeated inference never rebuilds the PennyLane circuit or
+# re-reads the checkpoint from disk. The cache is small and keyed by file
+# mtime/size, so retraining invalidates the old entry automatically.
+_MODEL_CACHE: dict[tuple, HybridModel] = {}
+_MODEL_CACHE_MAX = 8
+
+
+def load_vqc_model(n_features, cfg=None):
+    """Build the HybridModel and load the saved checkpoint (evaluation + inference).
+
+    Compatible with both the current bundle format (dict with "state_dict"
+    and "metadata") and legacy bare-state_dict checkpoints. Results are
+    cached: a second call with the same (n_features, checkpoint identity)
+    returns the already-loaded model on the same device.
+    """
+    cfg = cfg or VQCConfig()
+    stat = cfg.checkpoint_file.stat()
+    key = (n_features, str(cfg.checkpoint_file), stat.st_mtime_ns, stat.st_size)
+    cached = _MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    model = HybridModel(n_features, cfg)
+    ckpt = torch.load(cfg.checkpoint_file, map_location="cpu")
+    state = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
+    model.load_state_dict(state)
+    model.to(resolve_device())
+    model.eval()
+    if len(_MODEL_CACHE) >= _MODEL_CACHE_MAX:
+        _MODEL_CACHE.clear()
+    _MODEL_CACHE[key] = model
+    return model
+
+
+def predict_vqc(model, X):
+    """P(real) for a (n, n_features) matrix from a trained VQC."""
+    device = next(model.parameters()).device
+    with torch.no_grad():
+        logits = model(torch.tensor(np.asarray(X, dtype=np.float32), device=device))
+    return torch.sigmoid(logits).cpu().numpy()
+
+
 def _sanitize_metadata(obj):
     """Recursively convert metadata to JSON-safe (weights_only-loadable) values.
 
@@ -88,34 +157,13 @@ def _sanitize_metadata(obj):
     return obj
 
 
-def load_vqc_model(n_features, cfg=None):
-    """Build the HybridModel and load the saved checkpoint (evaluation + inference).
-
-    Compatible with both the current bundle format (dict with "state_dict"
-    and "metadata") and legacy bare-state_dict checkpoints.
-    """
-    cfg = cfg or VQCConfig()
-    model = HybridModel(n_features, cfg)
-    ckpt = torch.load(cfg.checkpoint_file, map_location="cpu")
-    state = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
-    model.load_state_dict(state)
-    model.eval()
-    return model
-
-
-def predict_vqc(model, X):
-    """P(real) for a (n, n_features) matrix from a trained VQC."""
-    with torch.no_grad():
-        logits = model(torch.tensor(np.asarray(X, dtype=np.float32)))
-    return torch.sigmoid(logits).numpy()
-
-
 def _val_metrics(model, X_val, y_val, cfg):
     """Validation loss (same focal loss as training) + accuracy, eval-mode."""
     model.eval()
+    device = next(model.parameters()).device
     with torch.no_grad():
-        X = torch.tensor(np.asarray(X_val, dtype=np.float32))
-        y = torch.tensor(np.asarray(y_val, dtype=np.float32))
+        X = torch.tensor(np.asarray(X_val, dtype=np.float32), device=device)
+        y = torch.tensor(np.asarray(y_val, dtype=np.float32), device=device)
         val_loss = float(focal_loss(model(X), y, cfg).item())
         probs = predict_vqc(model, X_val)
     val_acc = float(((probs >= 0.5).astype(int) == np.asarray(y_val)).mean())
@@ -134,14 +182,15 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
     """
     cfg = cfg or VQCConfig()
     torch.manual_seed(cfg.seed)
-    X = torch.tensor(np.asarray(features, dtype=np.float32))
-    y = torch.tensor(np.asarray(labels, dtype=np.float32))
+    device = resolve_device()
+    X = torch.tensor(np.asarray(features, dtype=np.float32), device=device)
+    y = torch.tensor(np.asarray(labels, dtype=np.float32), device=device)
     loader = DataLoader(
         TensorDataset(X, y),
         batch_size=cfg.batch_size,
         shuffle=True,
     )
-    model = HybridModel(features.shape[1], cfg)
+    model = HybridModel(features.shape[1], cfg).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay
     )

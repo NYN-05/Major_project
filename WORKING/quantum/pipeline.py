@@ -13,8 +13,8 @@ from quantum.config import (
     VQCConfig,
 )
 from quantum.data import build_dataset, load_dataset
-from quantum.evaluate import evaluate_quantum_model, run_baselines
-from quantum.preprocess import FeatureScaler, SCALER_FILE
+from quantum.evaluation import evaluate_quantum_model, run_baselines
+from quantum.scaling import FeatureScaler, SCALER_FILE
 from quantum.qaoa import (
     QAOASelector,
     compare_selections,

@@ -7,7 +7,7 @@ correlation), but the hybrid VQC angle embedding receives raw rPPG
 magnitudes (e.g. heart_rate_bpm ~ 50-146) which are not meaningful
 rotation angles. This module applies the codebase's existing
 normalization idiom (z-score, as used on signal traces in
-RPPG/rppg/preprocessing.py) to the 8-feature vector.
+RPPG/rppg/preprocessing.py) to the feature vector.
 
 The scaler is fitted on the TRAINING split only; validation, test, and
 inference reuse the exact fitted transformation. The artifact is saved

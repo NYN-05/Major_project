@@ -4,7 +4,7 @@ from pathlib import Path
 LABEL_REAL = 1
 LABEL_FAKE = 0
 
-# Feature contract: the raw 8-feature vector produced by the rPPG layer
+# Feature contract: the raw 10-feature vector produced by the rPPG layer
 # (same names/order as RPPGFeatures.feature_names() in RPPG/rppg/features.py).
 FEATURE_NAMES = [
     "heart_rate_bpm",
@@ -15,6 +15,8 @@ FEATURE_NAMES = [
     "signal_quality_index",
     "cheek_forehead_correlation",
     "left_right_cheek_correlation",
+    "hr_half_diff",
+    "peak_prominence",
 ]
 
 FEATURE_MEANINGS = {
@@ -26,12 +28,13 @@ FEATURE_MEANINGS = {
     "signal_quality_index": "Beat-regularity and spectral-concentration quality in [0, 1]",
     "cheek_forehead_correlation": "Pearson correlation between cheek and forehead pulse signals",
     "left_right_cheek_correlation": "Pearson correlation between left and right cheek pulse signals",
+    "hr_half_diff": "Absolute difference between first-half and second-half heart rates (BPM)",
+    "peak_prominence": "Spectral peak-to-mean ratio of the in-band pulse spectrum",
 }
 
 QUANTUM_ROOT = Path(__file__).resolve().parent
 WORKING_ROOT = QUANTUM_ROOT.parent
 OUTPUT_DIR = WORKING_ROOT / "output" / "quantum"
-DOCS_DIR = OUTPUT_DIR
 
 
 @dataclass(frozen=True)
@@ -92,4 +95,3 @@ class DecisionConfig:
     roc_plot: Path = field(default_factory=lambda: OUTPUT_DIR / "roc_curve.png")
     confusion_plot: Path = field(default_factory=lambda: OUTPUT_DIR / "confusion_matrix.png")
     calibration_plot: Path = field(default_factory=lambda: OUTPUT_DIR / "calibration_curve.png")
-    report_file: Path = field(default_factory=lambda: DOCS_DIR / "results_report.md")

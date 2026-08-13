@@ -206,7 +206,7 @@ def quantum_inference(features: dict) -> dict:
     """QAOA-selected subset of the actual rPPG features -> trained hybrid VQC.
 
     `predict_features` is the quantum layer's own inference entry point: it
-    applies the saved training-time QAOA indices to the 8-feature rPPG output
+    applies the saved training-time QAOA indices to the 10-feature rPPG output
     and returns P(real) plus the KYC verdict (REAL / FAKE / UNCERTAIN).
     """
     return predict_features(features)
