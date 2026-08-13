@@ -31,7 +31,7 @@ frontend/
 - `python -m quantum.tests` — self-checks (no pytest): beta-alive ansatz, Hamiltonian≡classical cost, feature-contract sync, split determinism. Run after any `qaoa.py`/`config.py` change.
 - `python run_pipeline.py --source path/video.mp4 [--method POS|CHROM] [--out result.json]` — end-to-end inference. Requires the quantum artifacts above.
 - Rebuild rPPG training data: `python rppg-pipeline/extract_dataset_features.py` from `WORKING/RPPG/` (writes `output/rppg/dataset_features.csv`), then rerun `python -m quantum.pipeline --all`.
-- Standalone frame stage: `python app/main.py --source test.mp4 --save-metadata` from `WORKING/frame/`.
+- Standalone frame stage: `python app/pipeline.py --source test.mp4 --save-metadata` from `WORKING/frame/` (`app/main.py` does not exist).
 
 The `quantum.*` imports and the `sys.path` insertions in `run_pipeline.py` assume the working directory is `WORKING/`. Do not run from the repo root.
 

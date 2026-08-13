@@ -13,14 +13,8 @@ WORKING/frame/
 ├── app/
 │   ├── config.py           # Model presets, runtime configuration
 │   ├── detector.py         # YOLO face detection wrapper
-│   ├── extract_frames.py   # Frame sampling + quality assessment (main entry)
-│   ├── ingest.py           # Video/image/webcam/stream frame ingestion
-│   ├── logger.py           # Shared logger setup
-│   ├── main.py             # Legacy face pipeline entry (also triggers extract_frames)
-│   ├── pipeline.py         # run_frame_sampling_quality_layer() - called by run_pipeline.py
-│   ├── processing.py       # FrameQualityAssessor, StorageManager, FrameIngestor
-│   ├── quality.py          # Quality rules, rejection taxonomy, composite scoring
-│   └── storage.py          # Async annotated frame / face crop / metadata storage
+│   ├── pipeline.py         # Single CLI: face pipeline AND frame extraction (was app/main.py)
+│   └── processing.py       # FrameIngestor, FrameQualityAssessor, StorageManager
 ├── weights/
 │   └── yolov8n-face-lindevs.pt   # Auto-downloaded if missing
 ├── requirements.txt
@@ -31,16 +25,10 @@ WORKING/frame/
 
 | File | Responsibility |
 |------|----------------|
-| `app/pipeline.py` | **Main entry for `run_pipeline.py`** - `run_frame_sampling_quality_layer()` extracts frames, runs YOLO + quality gates, saves accepted JPEGs + JSONL metadata |
-| `app/extract_frames.py` | Standalone CLI for frame extraction + quality assessment (used by `pipeline.py`) |
-| `app/ingest.py` | `FrameIngestor` - yields ordered frame packets with timestamps at target FPS |
+| `app/pipeline.py` | **Single CLI entry** - `run_frame_sampling_quality_layer()` (used by `run_pipeline.py`) plus the standalone face pipeline and frame-extraction modes (the legacy `app/main.py` / `app/extract_frames.py`) |
 | `app/detector.py` | `FaceDetector` - loads YOLO weights, runs inference, returns face boxes + confidences |
-| `app/quality.py` | `FrameQualityAssessor` - applies blur/dark/bright/face-size/pose rules, computes composite score |
-| `app/processing.py` | `FrameQualityAssessor`, `StorageManager`, `FrameIngestor` implementations |
-| `app/storage.py` | Async save of annotated frames, face crops, metadata JSONL |
+| `app/processing.py` | `FrameIngestor`, `FrameQualityAssessor`, `StorageManager` implementations |
 | `app/config.py` | Model preset mapping (`MODEL_WEIGHTS`), `build_config()` for normalized paths |
-| `app/main.py` | Legacy full face pipeline (detect + crop + annotate + store); also calls `extract_frames` |
-| `app/logger.py` | Shared logger setup |
 
 ## Pipeline Flow
 
@@ -98,16 +86,16 @@ This automatically runs Stage 1 (frame sampling + quality) and passes accepted f
 
 ```bash
 # From WORKING/frame/
-python app/main.py --source test.mp4 --save-metadata
+python app/pipeline.py --source test.mp4 --save-metadata
 ```
 
-Or extraction-only mode:
+Or extraction-only mode (same entry point; extraction flags switch the mode):
 
 ```bash
-python app/extract_frames.py --source test.mp4 --sample-fps 10 --save-quality-examples
+python app/pipeline.py --source test.mp4 --sample-fps 10 --save-quality-examples
 ```
 
-### Main Options (app/main.py)
+### Main Options (app/pipeline.py — face pipeline mode)
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -123,7 +111,7 @@ python app/extract_frames.py --source test.mp4 --sample-fps 10 --save-quality-ex
 | `--save-metadata` | Write JSONL metadata per frame | off |
 | `--max-io-workers` | Storage thread pool size | `4` |
 
-### Extraction Script Options (app/extract_frames.py)
+### Extraction Script Options (app/pipeline.py — extraction mode)
 
 | Option | Description | Default |
 |--------|-------------|---------|
