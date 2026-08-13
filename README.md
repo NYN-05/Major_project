@@ -63,11 +63,21 @@ which is the direct data source for the quantum layer.
 
 ```bash
 # From WORKING/RPPG/ - rebuild output/rppg/dataset_features.csv
-python rppg-pipeline/extract_dataset_features.py
+#   --workers 0          = all CPU cores (16 on this host -> ~12 vid/s)
+#   --target-fps 10      = stage-1 sample rate the model is designed for
+#   --min-usable-frames 30 = training-table gate (inference keeps 48)
+python rppg-pipeline/extract_dataset_features.py --workers 0 --target-fps 10 --min-usable-frames 30
+# Optional: include FaceForensics++ clips (FF-synthesis fakes + FF-real/YouTube-real reals)
+python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0 --target-fps 10 --min-usable-frames 30
 
 # Train rPPG classifier (side path, not used for final verdict)
 python rppg-pipeline/train_classifier.py
 ```
+
+Feature sources (see `collect_samples()`): DFDC (`archive/DFDC_Dataset/Fake|Real`),
+FaceForensics++ (repo-root `FF++/`, via `--include-ffpp`), and the legacy
+`archive (1)` CSV layout. MediaPipe/TFLite C++ stderr logging is silenced in
+worker processes for readable progress output.
 
 ### 3. Quantum Model (`WORKING/quantum/`)
 
@@ -77,15 +87,26 @@ no synthetic data is generated anywhere in the pipeline.
 
 - **Data** - `data.py` builds `output/quantum/data.npz` from the real labeled rPPG feature
   table `output/rppg/dataset_features.csv` (rPPG label 1 = fake is flipped to the quantum
-  convention LABEL_REAL = 1, LABEL_FAKE = 0) with a stratified train/val/test split
+  convention LABEL_REAL = 1, LABEL_FAKE = 0). Uses the **official FF++ train/val/test
+  folders** when the table is FF++-sourced (no regrouping, no test leakage); falls back
+  to the seeded subject-grouped random split otherwise. An HR-plausibility filter
+  (30-220 BPM, non-finite rejection) drops implausible rows at build time and logs counts.
 - **QAOA feature selection** - `qaoa.py` selects the most informative rPPG features
   using a cost Hamiltonian (mutual information weights + correlation redundancy
-  penalty + cardinality constraint), optimized with COBYLA
+  penalty + cardinality constraint), optimized with COBYLA. A classical MI-greedy
+  reference selection is computed alongside and written to
+  `output/quantum/selection_comparison.json`.
 - **Hybrid VQC** - `vqc.py`: angle-encoded features into a parameterized quantum
-  circuit (`StronglyEntanglingLayers`) feeding a small classical head
+  circuit (`StronglyEntanglingLayers`) feeding a small classical head. Training uses
+  cosine-annealed LR, gradient clipping, and early stopping on validation loss with
+  restore of the best-validation checkpoint. The QNode runs in **broadcast mode**
+  (batched rows through PennyLane) — verified bit-identical to the per-row loop
+  (max |diff| = 0) at ~28x training / ~156x inference speedup.
 - **Evaluation** - `evaluate.py`: accuracy / precision / recall / F1 / AUC-ROC / ECE,
-  KYC-friendly decision bins (real / uncertain / fake), ROC and confusion-matrix
-  plots, plus classical baselines (MLP, RandomForest) on the same features
+  KYC-friendly decision bins (real / uncertain / fake), ROC, confusion-matrix and
+  calibration-curve plots. **StratifiedKFold (5-fold) cross-validation** (mean +/- std,
+  balanced accuracy) for the VQC and every baseline. Classical baselines:
+  RandomForest, MLP, LogisticRegression, calibrated LinearSVC, GaussianNB, XGBoost.
 - **Orchestration** - `pipeline.py` drives the full training flow and exposes
   `predict_features()` as the single inference entry point used by `run_pipeline.py`
 
@@ -93,6 +114,13 @@ no synthetic data is generated anywhere in the pipeline.
 # From WORKING/: build data, QAOA selection, train VQC, evaluate, baselines
 python -m quantum.pipeline --all
 ```
+
+**Current trained model**: hybrid VQC on 6 QAOA-selected features, trained on
+469 FF++ train clips (official splits; 249 real / 220 fake).
+Hold-out test (101 clips): `accuracy 0.564, AUC-ROC 0.640, ECE 0.073` — the best
+model across all baselines (GaussianNB next at 0.621). At the strict 0.3/0.7
+decision gates this signal stays within UNCERTAIN band by design; temperature
+calibration yields ECE 0.015 without changing ranks.
 
 ## Install
 
@@ -135,7 +163,7 @@ features, quantum probabilities and plots, the pulse waveform).
 
 ## Verified Constraints (do not break)
 
-- **No synthetic data.** The quantum layer consumes only the real rPPG feature table `output/rppg/dataset_features.csv` (currently 18 labeled rows). Never reintroduce a generator or a transform/bridge layer.
+- **No synthetic data.** The quantum layer consumes only the real rPPG feature table `output/rppg/dataset_features.csv` (currently an FF++-sourced table of 669 labeled clips; the DFDC row subset is false-positive noise and excluded from training). Never reintroduce a generator or a transform/bridge layer.
 - **Feature contract:** `FEATURE_NAMES` in `quantum/config.py` must stay identical in name AND order to `RPPGFeatures.feature_names()` in `RPPG/rppg/features.py` (duplicated on purpose; `data.py`, `qaoa.py`, and `pipeline.py` all index by it). Keep the two lists in sync.
 - **Label conventions differ per stage — do not unify:**
   - rPPG CSV: `1 = fake, 0 = real`

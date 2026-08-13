@@ -41,6 +41,21 @@ def _infer_subject_key(row):
     return "clip:" + path
 
 
+def _infer_split_key(row):
+    """Official dataset split when the source layout declares one.
+
+    FF++ clips live under FF++/<split>/..., so their train/val/test
+    folders are used directly (no random regrouping); anything else
+    returns None and falls back to the seeded grouped random split.
+    """
+    path = row["video_path"].replace("\\", "/").strip().lower()
+    if "/ff++/" in path:
+        for split in SPLITS:
+            if f"/ff++/{split}/" in path:
+                return split
+    return None
+
+
 def _load_rppg_rows(csv_file, cfg=None):
     """Load the real rPPG feature table.
 
@@ -96,7 +111,8 @@ def _load_rppg_rows(csv_file, cfg=None):
     y = np.where(labels == RPPG_LABEL_FAKE, LABEL_FAKE, LABEL_REAL).astype(np.int64)
     groups = np.asarray([_infer_subject_key(row) for row in kept_rows], dtype=object)
     paths = np.asarray([row["video_path"].strip() for row in kept_rows], dtype=object)
-    return X, y, groups, paths, filter_stats
+    split_keys = np.asarray([_infer_split_key(row) for row in kept_rows], dtype=object)
+    return X, y, groups, paths, split_keys, filter_stats
 
 
 def _grouped_train_val_test_split(X, y, groups, paths, cfg):
@@ -172,17 +188,40 @@ def _grouped_train_val_test_split(X, y, groups, paths, cfg):
     return data
 
 
+def _split_by_source(X, y, groups, paths, split_keys):
+    """Explicit train/val/test split from the dataset's own folders.
+
+    Used when every row carries an official split hint (FF++ layout);
+    returns the same dict keys as _grouped_train_val_test_split.
+    """
+    data = {}
+    for s in SPLITS:
+        mask = split_keys == s
+        if not mask.any():
+            raise ValueError(f"Official split '{s}' has no samples")
+        data[f"X_{s}"] = X[mask]
+        data[f"y_{s}"] = y[mask]
+        data[f"groups_{s}"] = groups[mask]
+        data[f"paths_{s}"] = paths[mask]
+    return data
+
+
 def build_dataset(cfg=None):
     """Build data.npz from the real rPPG feature table (rPPG layer output)."""
     cfg = cfg or DataConfig()
-    X, y, groups, paths, stats = _load_rppg_rows(cfg.csv_file, cfg)
+    X, y, groups, paths, split_keys, stats = _load_rppg_rows(cfg.csv_file, cfg)
     if cfg.filter_implausible:
         print(
             f"  Plausibility filter: {stats['kept']}/{stats['total']} kept "
             f"(HR out of [{cfg.hr_min}, {cfg.hr_max}]: {stats['dropped_hr']}, "
             f"non-finite features: {stats['dropped_invalid']})"
         )
-    split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
+    use_official = bool(split_keys.size) and all(k is not None for k in split_keys)
+    if use_official:
+        print("  Using official dataset train/val/test folders (no regrouping).")
+        split = _split_by_source(X, y, groups, paths, split_keys)
+    else:
+        split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
     cfg.data_file.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         cfg.data_file,

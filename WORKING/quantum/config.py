@@ -70,8 +70,8 @@ class VQCConfig:
     weight_decay: float = 1e-2
     alpha: float = 0.75
     gamma: float = 2.0
-    label_smoothing: float = 0.1
-    confidence_penalty: float = 0.1
+    label_smoothing: float = 0.03
+    confidence_penalty: float = 0.02
     lr_schedule: str = "cosine"
     patience: int = 12
     min_delta: float = 1e-4

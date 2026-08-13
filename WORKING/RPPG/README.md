@@ -22,7 +22,8 @@ WORKING/RPPG/
 │   ├── features.py           # 8-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations)
 │   └── model_utils.py        # rPPG RandomForest classifier helpers (side path)
 ├── rppg-pipeline/            # Training & demo scripts
-│   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/
+│   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/ (+ FF++ via --include-ffpp)
+│   ├── probe_features.py            # Per-feature AUC probe on a dataset (signal-level study)
 │   ├── train_classifier.py         # Train rPPG RandomForest (side path)
 │   ├── run_on_video.py             # Single video inference
 │   ├── batch_run.py                # Batch processing
@@ -110,16 +111,50 @@ Returns `features=None` when `n_frames_usable < min_usable_frames` (48).
 ```bash
 # From WORKING/RPPG/
 python rppg-pipeline/extract_dataset_features.py \
-  --method POS \
-  --target-fps 15 \
-  --max-per-class 50   # Optional: limit for smoke test
+  --workers 0            # 0 = all CPU cores (~12 vid/s on this host)
+  --target-fps 10        # stage-1 sample rate the pipeline is designed for
+  --min-usable-frames 30 # training-table gate (inference keeps 48)
+  --method POS
+
+# Optional flags
+#   --include-ffpp    include FaceForensics++ clips (FF-synthesis fakes, FF-real/YouTube-real reals)
+#   --max-per-class N cap samples per class (smoke test)
+#   --output <path>   redirect the output CSV (probe runs)
 ```
 
-Reads videos from:
-- `archive/DFDC_Dataset/Fake/`
+Reads videos from (see `collect_samples()`):
+- `archive/DFDC_Dataset/Fake/` (DFDC phone-style face-swaps)
 - `archive/DFDC_Dataset/Real/`
+- `FF++/` at the repo root, only with `--include-ffpp`
+- legacy `archive (1)` CSV layout
+
+MediaPipe/TFLite C++ stderr logging is silenced in worker processes, so the
+progress bar stays readable during bulk extraction.
 
 Writes: `WORKING/output/rppg/dataset_features.csv` (relative to `WORKING/`)
+
+### Featurability Probe (`probe_features.py`)
+
+Signal-level study of how much class signal each of the 8 features actually
+carries on a dataset — no classifier involved. Emits per-feature AUC (real vs
+fake) per method (POS/CHROM) per target fps, plus an all-8-feature oracle AUC,
+and a table ranking features.
+
+```bash
+python rppg-pipeline/probe_features.py --ffpp --max-per-class 120 --workers 8
+```
+
+### Dataset Findings (Validated Aug 2026)
+
+- **DFDC preview (2,797 clips extracted)**: all 8 rPPG features are at **chance
+  level** — AUC 0.47-0.53 across POS/CHROM at 10 and 30 fps. Face-swap fakes
+  transplant the source person's genuine skin/vascular signal, so rPPG cannot
+  discriminate them. DFDC stays in `archive/` for rPPG research but is
+  **excluded from quantum training**.
+- **FaceForensics++ (669 usable clips)**: features carry a modest but real
+  signal (quantum VQC test AUC 0.640 vs 0.621 best classical baseline). FF++
+  is the current quantum-layer training source, using the **official
+  train/val/test folders** (no regrouping, no test leakage).
 
 ### Train rPPG Classifier (Side Path - Not Used for Final Verdict)
 
@@ -240,12 +275,17 @@ Measure heart-rate error against contact-PPG reference; report MAE/RMSE.
 - Very low frame rates reduce usable heart-rate range
 - Heavy compression distorts skin-tone cues, weakens rPPG
 - Classifier only as good as extracted features and training data quality
-- Small training set (18 rows) makes QAOA weights degenerate — data-quantity issue, not code bug
+- DFDC clips carry no rPPG class signal (see Dataset Findings) — do not mix
+  DFDC rows into quantum training
+- FF++ training set is small (669 clips) and only modestly separable, and QAOA
+  mutual-information weights get degenerate on tiny tables — data-quantity
+  issue, not code bug
 
 ## Recommended Workflow
 
-1. Add new videos to `archive/DFDC_Dataset/Fake` and `archive/DFDC_Dataset/Real`
-2. Regenerate features: `python rppg-pipeline/extract_dataset_features.py`
-3. Retrain classifier (optional): `python rppg-pipeline/train_classifier.py`
-4. Rerun quantum pipeline: `python -m quantum.pipeline --all` (from `WORKING/`)
-5. Test end-to-end: `python run_pipeline.py --source <video> --method POS`
+1. Add new videos to `archive/DFDC_Dataset/Fake|Real` (rPPG research) or `FF++/` (quantum-relevant data)
+2. Probe the dataset first: `python rppg-pipeline/probe_features.py --ffpp --workers 8`
+3. Regenerate features: `python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0 --target-fps 10 --min-usable-frames 30`
+4. Retrain classifier (optional): `python rppg-pipeline/train_classifier.py`
+5. Rerun quantum pipeline: `python -m quantum.pipeline --all` (from `WORKING/`)
+6. Test end-to-end: `python run_pipeline.py --source <video> --method POS`
