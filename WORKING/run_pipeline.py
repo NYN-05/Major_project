@@ -191,8 +191,19 @@ def rppg_classifier_crosscheck(vector: np.ndarray) -> dict:
     except (pickle.UnpicklingError, AttributeError, ImportError, ModuleNotFoundError) as exc:
         return {"skipped": f"rppg_classifier.pkl could not be loaded: {exc}"}
     x = vector.reshape(1, -1)
-    proba = clf.predict_proba(x)[0]
-    pred = int(clf.predict(x)[0])
+    n_features = getattr(clf, "n_features_in_", 0)
+    classes = getattr(clf, "classes_", None)
+    n_classes = 0 if classes is None else len(classes)
+    if n_features != 10 or n_classes != 2:
+        return {
+            "skipped": "rppg_classifier.pkl incompatible "
+            f"(n_features={n_features}, classes={n_classes}); expected 10 features, 2 classes",
+        }
+    try:
+        proba = clf.predict_proba(x)[0]
+        pred = int(clf.predict(x)[0])
+    except Exception as exc:
+        return {"skipped": f"rppg_classifier.pkl prediction failed: {type(exc).__name__}: {exc}"}
     if pred == 1:
         return {"verdict": "DEEPFAKE", "probability": float(proba[1])}
     return {"verdict": "REAL", "probability": float(proba[0])}
