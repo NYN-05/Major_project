@@ -1,5 +1,8 @@
 FF++/
 
+# Dev scratch (tests, temp scripts, screenshots, logs — see AGENTS.md)
+Scrape/
+
 # Python bytecode
 __pycache__/
 *.pyc

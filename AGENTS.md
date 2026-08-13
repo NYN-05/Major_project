@@ -4,7 +4,7 @@ Deepfake-video detection for KYC using rPPG (physiological evidence) + hybrid qu
 
 ## Layout
 
-All active code lives under `WORKING/` and `frontend/`; the repo root holds docs/PDFs and README. Single git repo (no nested repos). `FF++/` is the gitignored dataset.
+All active code lives under `WORKING/` and `frontend/`; the repo root holds docs/PDFs, README, and `Scrape/` (dev scratch). Single git repo (no nested repos). `FF++/` is the gitignored dataset.
 
 ```
 WORKING/
@@ -23,6 +23,15 @@ frontend/
   src/        React + Vite frontend (components/, hooks.js, api.js, styles.css)
   dump_signal.py  reconstructs rPPG waveform from stage-1 frames for UI visualization
 ```
+
+## Dev Scratch (`Scrape/`) — Mandatory Home for Dev Files
+
+`Scrape/` at the repo root is the **only** place for throwaway development files. This is a permanent project convention:
+
+- **All tests, test artifacts, temporary scripts, debugging scripts, one-off probes, benchmark scripts, screenshots/screen captures, logs, and related development files MUST be created and stored inside `Scrape/`** — including everything produced by an agent (opencode/Claude) during a session.
+- **Never create or leave such files in temp directories** (e.g. `%TEMP%\opencode`, `/tmp`), the repo root, or any other project directory. This keeps the project root, `WORKING/`, `frontend/`, and docs clean and `git status` meaningful.
+- Preserve meaningful artifacts: move old temp-dir files into `Scrape/` rather than deleting them (done 2026-08-13: ~200 files migrated from `%TEMP%\opencode`).
+- `Scrape/` is gitignored — treat it as scratch, not source. Production code still belongs in `WORKING/`/`frontend/`; only files with lasting value (e.g. `Scrape/test_*.py` harnesses) may be promoted into the repo deliberately, never by accident.
 
 ## Commands
 
@@ -80,7 +89,7 @@ Upload limits: 200 MB max; magic-byte validation (MP4/MOV ftyp, AVI RIFF, WebM E
 - **Shared Welch PSD** (`WORKING/RPPG/rppg/features.py`): single periodogram for HR, SNR, entropy, SQI — 3 fewer `scipy.signal.welch` calls per video.
 - **Cached filter/detrend** (`WORKING/RPPG/rppg/preprocessing.py`): `@lru_cache` on Butterworth coefficients + detrend sparse matrix.
 - **Skin-mask hoist** (`WORKING/RPPG/rppg/face_roi.py`): compute YCrCb+inRange once/frame instead of 3×.
-- **Skip discarded quality work** (`WORKING/RPPG/rppg/pipeline.py`): stage-1 path skips Laplacian/brightness (overwritten by `face.found` anyway).
+- **Discarded quality work** (`WORKING/RPPG/rppg/pipeline.py`): stage-1 path still computes Laplacian/brightness per frame (they are recorded in metadata) but the rPPG gate uses only `face.found`.
 - **Quantum model cache** (`WORKING/quantum/vqc.py`): `HybridModel` cached by `(n_features, ckpt_mtime, size)` — reuses loaded weights across server requests.
 - **Server hardening** (`frontend/server.py`): size/magic validation, concurrency cap (2), result-first SSE + async `signal` event, TTL cleanup, sanitized inbox filenames (`{job8}_{stem}.ext`) for thumbnail consistency, CORS restricted to localhost origins (POST from other origins → 403), uploads streamed to disk in 64 KB chunks (no 200 MB in-memory buffers), 30-min hard timeout per pipeline run (worker killed), `FRONTEND_PORT` env (deprecated `FRONTEMD_PORT` still honored).
 
