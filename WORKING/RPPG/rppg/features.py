@@ -131,7 +131,7 @@ def estimate_snr(
     noise_power = psd[band_mask].sum() - signal_power
     noise_power = max(noise_power, 1e-12)
 
-    snr = 10 * np.log10(signal_power / noise_power) if signal_power > 0 else -np.inf
+    snr = 10 * np.log10(signal_power / noise_power) if signal_power > 0 else float("nan")
     return float(snr)
 
 
