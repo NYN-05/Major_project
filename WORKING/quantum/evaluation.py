@@ -14,20 +14,6 @@ import json
 import os
 
 import numpy as np
-import torch
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (
-    accuracy_score,
-    precision_recall_fscore_support,
-    roc_auc_score,
-)
-from sklearn.model_selection import StratifiedKFold
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neural_network import MLPClassifier
-from sklearn.svm import LinearSVC
-from xgboost import XGBClassifier
 
 from quantum.config import DecisionConfig, VQCConfig
 from quantum.plots import (
@@ -36,6 +22,36 @@ from quantum.plots import (
     plot_roc_curve,
 )
 from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
+
+
+def _sklearn():
+    """Lazy sklearn import: costs ~12s on this host, so it is only paid by
+    processes that actually run evaluation/baselines (not by QAOA workers)."""
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import (
+        accuracy_score,
+        precision_recall_fscore_support,
+        roc_auc_score,
+    )
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.naive_bayes import GaussianNB
+    from sklearn.neural_network import MLPClassifier
+    from sklearn.svm import LinearSVC
+
+    return {
+        "CalibratedClassifierCV": CalibratedClassifierCV,
+        "RandomForestClassifier": RandomForestClassifier,
+        "LogisticRegression": LogisticRegression,
+        "accuracy_score": accuracy_score,
+        "precision_recall_fscore_support": precision_recall_fscore_support,
+        "roc_auc_score": roc_auc_score,
+        "StratifiedKFold": StratifiedKFold,
+        "GaussianNB": GaussianNB,
+        "MLPClassifier": MLPClassifier,
+        "LinearSVC": LinearSVC,
+    }
 
 
 def expected_calibration_error(y_true, prob_real, n_bins=10):
@@ -53,24 +69,26 @@ def expected_calibration_error(y_true, prob_real, n_bins=10):
 
 
 def classification_metrics(y_true, prob_real):
+    sk = _sklearn()
     predictions = (prob_real >= 0.5).astype(int)
-    precision, recall, f1, _ = precision_recall_fscore_support(
+    precision, recall, f1, _ = sk["precision_recall_fscore_support"](
         y_true, predictions, average="binary", zero_division=0
     )
     return {
-        "accuracy": float(accuracy_score(y_true, predictions)),
+        "accuracy": float(sk["accuracy_score"](y_true, predictions)),
         "precision": float(precision),
         "recall": float(recall),
         "f1": float(f1),
-        "auc_roc": float(roc_auc_score(y_true, prob_real)),
+        "auc_roc": float(sk["roc_auc_score"](y_true, prob_real)),
         "ece": expected_calibration_error(y_true, prob_real),
     }
 
 
 def balanced_accuracy(y_true, prob_real):
     """Balanced accuracy (mean of per-class recall) from probabilities."""
+    sk = _sklearn()
     predictions = (prob_real >= 0.5).astype(int)
-    _, recall, _, _ = precision_recall_fscore_support(
+    _, recall, _, _ = sk["precision_recall_fscore_support"](
         y_true, predictions, average=None, zero_division=0
     )
     return float(np.mean(recall)) if len(recall) else 0.0
@@ -93,7 +111,8 @@ def run_cv(fit_predict, X, y, n_splits=5, seed=42, n_jobs=0):
     ``n_jobs`` > 1 (or 0 = auto); training per fold is expensive (VQC),
     so parallel folds scale wall time down by the worker count.
     """
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    sk = _sklearn()
+    skf = sk["StratifiedKFold"](n_splits=n_splits, shuffle=True, random_state=seed)
     X = np.asarray(X)
     y = np.asarray(y)
     fold_args = [(X[tr], y[tr], X[te], y[te]) for tr, te in skf.split(X, y)]
@@ -131,7 +150,9 @@ def decision_bins(y_true, prob_real, cfg=None):
     confirmed_accuracy = None
     if (fake | real).any():
         predictions = (prob_real >= 0.5).astype(int)
-        confirmed_accuracy = float(accuracy_score(y_true[fake | real], predictions[fake | real]))
+        confirmed_accuracy = float(
+            _sklearn()["accuracy_score"](y_true[fake | real], predictions[fake | real])
+        )
     return {
         "real": int(real.sum()),
         "uncertain": int(uncertain.sum()),
@@ -195,22 +216,28 @@ def run_baselines(X_train, y_train, X_test, y_test, decision_cfg=None, seed=42, 
     X_test = np.asarray(X_test)
     y_test = np.asarray(y_test)
 
+    # xgboost is imported lazily: importing it costs ~13s on this host and
+    # would otherwise slow down every process that imports this module
+    # (including the QAOA parallel workers).
+    from xgboost import XGBClassifier  # noqa: PLC0415
+
+    sk = _sklearn()
     models = {
-        "random_forest": lambda: RandomForestClassifier(
+        "random_forest": lambda: sk["RandomForestClassifier"](
             n_estimators=200, random_state=seed, n_jobs=-1
         ),
-        "mlp": lambda: MLPClassifier(
+        "mlp": lambda: sk["MLPClassifier"](
             hidden_layer_sizes=(32, 16), max_iter=500, random_state=seed
         ),
-        "logistic_regression": lambda: LogisticRegression(
+        "logistic_regression": lambda: sk["LogisticRegression"](
             max_iter=2000, class_weight="balanced", random_state=seed
         ),
-        "linear_svc": lambda: CalibratedClassifierCV(
-            LinearSVC(class_weight="balanced", max_iter=5000, random_state=seed),
+        "linear_svc": lambda: sk["CalibratedClassifierCV"](
+            sk["LinearSVC"](class_weight="balanced", max_iter=5000, random_state=seed),
             method="sigmoid",
             cv=3,
         ),
-        "gaussian_nb": GaussianNB,
+        "gaussian_nb": sk["GaussianNB"],
         "xgboost": lambda: XGBClassifier(
             n_estimators=300,
             learning_rate=0.1,

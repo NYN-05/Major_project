@@ -1,13 +1,20 @@
-import json
+﻿import json
 import os
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pennylane as qml
 from scipy.optimize import minimize
-from sklearn.feature_selection import mutual_info_classif
 
 from quantum.config import FEATURE_NAMES, QAOASelectionConfig
+
+
+def _mutual_info_weights(X, y, seed):
+    """MI feature weights. sklearn is imported lazily: importing it costs
+    ~12s on this host, which would slow every QAOA worker process."""
+    from sklearn.feature_selection import mutual_info_classif  # noqa: PLC0415
+
+    return mutual_info_classif(X, y, random_state=seed)
 
 
 def simulator_device(wires):
@@ -143,7 +150,7 @@ class QAOASelector:
 
     def select(self, X, y):
         cfg = self.cfg
-        weights = _normalize_weights(mutual_info_classif(X, y, random_state=cfg.seed))
+        weights = _normalize_weights(_mutual_info_weights(X, y, cfg.seed))
         correlation = np.abs(np.corrcoef(X.T))
         n_restarts = max(1, cfg.restarts)
         seeds = [cfg.seed + i for i in range(n_restarts)]
@@ -189,7 +196,7 @@ def select_classical(X, y, cfg=None):
     QAOASelector.select() so downstream code can consume either.
     """
     cfg = cfg or QAOASelectionConfig()
-    weights = _normalize_weights(mutual_info_classif(X, y, random_state=cfg.seed))
+    weights = _normalize_weights(_mutual_info_weights(X, y, cfg.seed))
     order = np.argsort(-weights)
     selected = order[: cfg.target_features]
     marginals = np.zeros(X.shape[1])
@@ -221,7 +228,7 @@ def compare_selections(qaoa_result, classical_result):
 
 def verify_hamiltonian(X, y, cfg=None):
     cfg = cfg or QAOASelectionConfig()
-    weights = _normalize_weights(mutual_info_classif(X, y, random_state=cfg.seed))
+    weights = _normalize_weights(_mutual_info_weights(X, y, cfg.seed))
     correlation = np.abs(np.corrcoef(X.T))
     coeffs, ops = _cost_terms(weights, correlation, cfg)
     dev = simulator_device(X.shape[1])
