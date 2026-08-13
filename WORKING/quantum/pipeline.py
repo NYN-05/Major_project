@@ -47,14 +47,32 @@ def predict_features(features):
         train-fitted FeatureScaler -> QAOA-selected indices ->
         trained hybrid VQC -> P(real) -> KYC verdict (REAL/FAKE/UNCERTAIN).
 
-    `features` must be a dict keyed by the 8 rPPG feature names
+    `features` must be a dict keyed by the 10 rPPG feature names
     (FEATURE_NAMES order).
     """
     x = np.asarray([[float(features[name]) for name in FEATURE_NAMES]], dtype=np.float64)
-    x_scaled = FeatureScaler(FEATURE_NAMES).load().transform(x)
+    scaler = FeatureScaler(FEATURE_NAMES).load()
+    if scaler.mean_.shape[0] != len(FEATURE_NAMES):
+        raise RuntimeError(
+            f"feature_scaler.json is out of sync: expected {len(FEATURE_NAMES)} features, "
+            f"found {scaler.mean_.shape[0]}. Rerun `python -m quantum.pipeline --all` from WORKING/."
+        )
+    x_scaled = scaler.transform(x)
     selection = load_selection()
     indices = [int(i) for i in selection["selected_indices"]]
-    model = load_vqc_model(len(indices))
+    if not indices or any(i < 0 or i >= len(FEATURE_NAMES) for i in indices):
+        raise RuntimeError(
+            f"qaoa_selection.json indices out of range for {len(FEATURE_NAMES)} features: "
+            f"{indices}. Rerun `python -m quantum.pipeline --all` from WORKING/."
+        )
+    try:
+        model = load_vqc_model(len(indices))
+    except Exception as exc:
+        raise RuntimeError(
+            f"hybrid_vqc.pt incompatible with the QAOA selection "
+            f"({len(indices)} features): {type(exc).__name__}: {exc}. "
+            "Rerun `python -m quantum.pipeline --all` from WORKING/."
+        ) from exc
     prob_real = float(predict_vqc(model, x_scaled[:, indices])[0])
 
     decision_cfg = DecisionConfig()
