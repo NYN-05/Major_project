@@ -199,11 +199,10 @@ if _MEDIAPIPE_AVAILABLE:
                     if len(faces) > 0:
                         x, y, w, h = faces[0]
                         return TrackedFace(frame_index=frame_index, found=True, landmarks_px=None, bbox=(x, y, w, h), confidence=0.6)
-                # If cascade not available or no faces found, use a centered bbox
-                fh, fw = frame_bgr.shape[:2]
-                bw, bh = int(fw * 0.5), int(fh * 0.5)
-                bx, by = (fw - bw) // 2, (fh - bh) // 2
-                return TrackedFace(frame_index=frame_index, found=True, landmarks_px=None, bbox=(bx, by, bw, bh), confidence=0.4)
+                # No evidence of a face: reject the frame. A guessed
+                # centered bbox would feed non-facial pixels into the rPPG
+                # signal and silently produce features (false-accept path).
+                return TrackedFace(frame_index=frame_index, found=False, landmarks_px=None, bbox=None, confidence=0.0)
 
             lm_list = result.face_landmarks[0]
             pts = np.array([[p.x * w, p.y * h] for p in lm_list], dtype=np.float32)
@@ -354,13 +353,9 @@ else:
             if self._cascade is not None:
                 faces = self._cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
             if len(faces) == 0:
-                # As a pragmatic fallback for synthetic or low-detail test
-                # videos, return a centered bbox so the pipeline can still
-                # proceed. Real deployments should rely on MediaPipe.
-                fh, fw = frame_bgr.shape[:2]
-                bw, bh = int(fw * 0.5), int(fh * 0.5)
-                bx, by = (fw - bw) // 2, (fh - bh) // 2
-                return TrackedFace(frame_index=frame_index, found=True, landmarks_px=None, bbox=(bx, by, bw, bh), confidence=0.4)
+                # No evidence of a face: reject the frame rather than
+                # computing features on a guessed centered bbox.
+                return TrackedFace(frame_index=frame_index, found=False, landmarks_px=None, bbox=None, confidence=0.0)
             x, y, w, h = faces[0]
             # approximate landmarks as None; bbox provided
             return TrackedFace(frame_index=frame_index, found=True, landmarks_px=None, bbox=(x, y, w, h), confidence=0.8)

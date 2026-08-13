@@ -9,10 +9,21 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import ConfusionMatrixDisplay, roc_auc_score, roc_curve
+
+
+def _sklearn():
+    """Deferred sklearn import (~2.4 s on this host).
+
+    Keep it inside the plot functions so `import quantum.pipeline`
+    stays fast for QAOA spawn workers and server restarts.
+    """
+    from sklearn.metrics import ConfusionMatrixDisplay, roc_auc_score, roc_curve  # noqa: PLC0415
+
+    return ConfusionMatrixDisplay, roc_auc_score, roc_curve
 
 
 def plot_roc_curve(y_true, prob_real, path):
+    ConfusionMatrixDisplay, roc_auc_score, roc_curve = _sklearn()
     fpr, tpr, _ = roc_curve(y_true, prob_real)
     auc = roc_auc_score(y_true, prob_real)
     fig, ax = plt.subplots(figsize=(5, 5))
@@ -29,6 +40,7 @@ def plot_roc_curve(y_true, prob_real, path):
 
 
 def plot_confusion_matrix(y_true, predictions, path):
+    ConfusionMatrixDisplay, _, _ = _sklearn()
     fig, ax = plt.subplots(figsize=(5, 4))
     ConfusionMatrixDisplay.from_predictions(y_true, predictions, ax=ax, colorbar=False)
     ax.set_title("Confusion Matrix (Hybrid VQC)")

@@ -9,7 +9,7 @@ All active code lives under `WORKING/` and `frontend/`; the repo root holds docs
 ```
 WORKING/
   frame/    stage 1: frame sampling, YOLO face detection, quality filtering (has its own app/ + requirements.txt)
-  RPPG/     stage 2: MediaPipe face ROIs -> POS/CHROM pulse -> 8 physiological features (+ rppg-pipeline/, requirements.txt)
+  RPPG/     stage 2: MediaPipe face ROIs -> POS/CHROM pulse -> 10 physiological features (+ rppg-pipeline/, requirements.txt)
   quantum/  stage 3: QAOA feature selection -> hybrid VQC -> P(real) -> verdict (run via `python -m quantum.pipeline`)
   run_pipeline.py  end-to-end orchestrator: frames -> rPPG -> quantum -> verdict
   output/   global regenerated-artifacts root (all `output/` dirs untracked)
@@ -28,6 +28,7 @@ frontend/
 
 ### From `WORKING/`
 - `python -m quantum.pipeline --all` — full quantum flow: build real dataset, QAOA selection (8→6), train VQC, evaluate, baselines. Regenerates `output/quantum/*` (`data.npz`, `qaoa_selection.json`, `feature_scaler.json`, `hybrid_vqc.pt`, metrics, plots).
+- `python -m quantum.tests` — self-checks (no pytest): beta-alive ansatz, Hamiltonian≡classical cost, feature-contract sync, split determinism. Run after any `qaoa.py`/`config.py` change.
 - `python run_pipeline.py --source path/video.mp4 [--method POS|CHROM] [--out result.json]` — end-to-end inference. Requires the quantum artifacts above.
 - Rebuild rPPG training data: `python rppg-pipeline/extract_dataset_features.py` from `WORKING/RPPG/` (writes `output/rppg/dataset_features.csv`), then rerun `python -m quantum.pipeline --all`.
 - Standalone frame stage: `python app/main.py --source test.mp4 --save-metadata` from `WORKING/frame/`.
@@ -55,7 +56,7 @@ Upload limits: 200 MB max; magic-byte validation (MP4/MOV ftyp, AVI RIFF, WebM E
 
 ## Verified Constraints (do not break)
 
-- **No synthetic data.** The quantum layer consumes only the real rPPG feature table `output/rppg/dataset_features.csv` (currently 18 labeled rows). Never reintroduce a generator or a transform/bridge layer.
+- **No synthetic data.** The quantum layer consumes only the real rPPG feature table `output/rppg/dataset_features.csv` (currently 16 labeled rows: 9 real, 7 fake — DFDC archive only; FF++ is NOT used despite README claims). Never reintroduce a generator or a transform/bridge layer.
 - **Feature contract:** `FEATURE_NAMES` in `quantum/config.py` must stay identical in name AND order to `RPPGFeatures.feature_names()` in `RPPG/rppg/features.py` (duplicated on purpose; `data.py`, `qaoa.py`, and `pipeline.py` all index by it). Keep the two lists in sync.
 - **Label conventions differ per stage — do not unify:**
   - rPPG CSV: `1 = fake, 0 = real`
@@ -67,8 +68,10 @@ Upload limits: 200 MB max; magic-byte validation (MP4/MOV ftyp, AVI RIFF, WebM E
 - RandomForest cross-check is an optional side path; the final verdict comes exclusively from the quantum stage.
 - Small training set (10 train rows) makes QAOA mutual-information weights degenerate (`"success": false`, mostly-zero weights in `qaoa_selection.json`). Expected — data-quantity issue, not a code bug.
 - **QAOA simulator:** `qaoa.simulator_device()` uses `lightning.qubit` (falls back to `default.qubit` if `pennylane-lightning` is missing). Cost circuits precompute `PauliRot` gates; restarts (default 4) run in a `ProcessPoolExecutor` (`QAOASelectionConfig.restarts`/`n_jobs`). Expect ~15 s vs ~37 s sequential on `default.qubit`. `lightning.gpu` is NOT available on Windows (no `custatevec` wheels) — CPU SIMD is the ceiling there.
+- **QAOA ansatz (fixed 2026-08-13):** `_apply_qaoa` applies precomputed cost gates with `gamma` and the X-mixer gates with `beta` separately (both lists come from `_precompute_gates`). Regression guard: `test_beta_alive` in `quantum/tests.py` asserts perturbing beta changes the cost. Any refactor must keep beta alive and re-run `python -m quantum.tests` + `--all`.
+- **Hamiltonian ≡ classical cost (fixed 2026-08-13):** `_cost_terms` now reproduces `_classical_cost` exactly (verified 7.1e-15 on real data over all-zeros/all-ones/single-bit/random bitstrings) and `pipeline.py` hard-asserts `error < 1e-6`. The old `verify_hamiltonian` max err ≈ 1.94e+00 (print-only) is history — do not reintroduce a silent verification.
 - **VQC training device:** torch side of `HybridModel` runs on CUDA when available (`vqc.resolve_device()`); the PennyLane QNode stays on `default.qubit` + `backprop` (lightning.qubit adjoint was slower: 15.3 s vs 13.2 s). Inference: ~275 ms cold / 32 ms cached.
-- **Lazy heavy imports:** `evaluation.py` imports sklearn + xgboost lazily (sklearn ~12 s, xgboost ~13 s on this host); `qaoa.py` via `_mutual_info_weights`. Keeps QAOA spawn workers cheap — `import quantum.pipeline` ~6.5 s vs ~22 s before.
+- **Lazy heavy imports:** xgboost is imported only inside `run_baselines` (~13 s on this host); sklearn is still EAGER via `quantum/plots.py` (imported by `evaluation.py`, ~2.4 s) — move it into the plot functions to fully defer. `qaoa.py` imports sklearn lazily via `_mutual_info_weights`. Keeps QAOA spawn workers cheap — `import quantum.pipeline` ~6.5 s (warm) / ~9.5 s (cold) vs ~22 s before.
 - rPPG needs MediaPipe Face Landmarker; the model auto-downloads on first run (internet required). In `frame/`, only `yolov8n-face-lindevs.pt` auto-downloads; missing other presets raise `FileNotFoundError`.
 
 ## Optimizations (completed)
@@ -79,8 +82,9 @@ Upload limits: 200 MB max; magic-byte validation (MP4/MOV ftyp, AVI RIFF, WebM E
 - **Skin-mask hoist** (`WORKING/RPPG/rppg/face_roi.py`): compute YCrCb+inRange once/frame instead of 3×.
 - **Skip discarded quality work** (`WORKING/RPPG/rppg/pipeline.py`): stage-1 path skips Laplacian/brightness (overwritten by `face.found` anyway).
 - **Quantum model cache** (`WORKING/quantum/vqc.py`): `HybridModel` cached by `(n_features, ckpt_mtime, size)` — reuses loaded weights across server requests.
-- **Video metadata probe** (`WORKING/run_pipeline.py`): single `cv2.VideoCapture` open emits `video_meta` (name, size, duration, fps, resolution, frame_count) — no fabricated values.
-- **Server hardening** (`frontend/server.py`): size/magic validation, concurrency cap (2), result-first SSE + async `signal` event, TTL cleanup, sanitized inbox filenames (`{job8}_{stem}.ext`) for thumbnail consistency.
+- **Server hardening** (`frontend/server.py`): size/magic validation, concurrency cap (2), result-first SSE + async `signal` event, TTL cleanup, sanitized inbox filenames (`{job8}_{stem}.ext`) for thumbnail consistency, CORS restricted to localhost origins (POST from other origins → 403), uploads streamed to disk in 64 KB chunks (no 200 MB in-memory buffers), 30-min hard timeout per pipeline run (worker killed), `FRONTEND_PORT` env (deprecated `FRONTEMD_PORT` still honored).
+
+See `PROJECT_AUDIT_REPORT.md` (repo root) for the full 2026-08-13 audit — two confirmed QAOA-layer defects (§6.1 beta-mixer regression, §6.2 Hamiltonian mismatch) since fixed and regression-guarded in `quantum/tests.py`, dataset-scale limits, and server security notes.
 
 ## Frontend State Machine
 
@@ -90,7 +94,7 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
 
 ## Verification
 
-- **Numerical equivalence:** POS vectorization bit-identical to original loop (max |diff| = 0.0 across 7 (T,fs) pairs). Full pipeline verdict: `prob_real=0.6359 → UNCERTAIN, confidence=0.2718` — matches historical result.
+- **Numerical equivalence:** POS vectorization bit-identical to original loop (max |diff| = 0.0 across 7 (T,fs) pairs). Post-fix pipeline verdict (2026-08-13): `prob_real=0.6155 → UNCERTAIN, confidence=0.2311`; QAOA selection `['hr_half_diff','cheek_forehead_correlation','left_right_cheek_correlation','mad','heart_rate_bpm','spectral_entropy']` (chosen restart seed 43, cost 0.3950), ECE 0.1052 (was 0.2478 under the buggy ansatz/Hamiltonian).
 - **E2E:** `idle → selected → running → done` with signal canvas, frame thumbnails (5 frames), theme toggle, sequential rerun. Invalid file → 415 friendly error. Responsive: 1920→375px no overflow.
 - **No JS errors.** Console 404s = missing frame thumbnails for stale runs (gitignored).
 

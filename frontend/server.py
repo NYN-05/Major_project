@@ -42,11 +42,23 @@ INBOX = OUTPUT_ROOT / "frontend_inbox"
 RESULTS_DIR = OUTPUT_ROOT / "pipeline"
 CANONICAL_RESULT = RESULTS_DIR / "pipeline_result.json"
 
-PORT = int(os.environ.get("FRONTEMD_PORT", "8000"))
+PORT = int(os.environ.get("FRONTEND_PORT") or os.environ.get("FRONTEMD_PORT") or "8000")
 JOB_TTL_SECONDS = 60 * 60
+JOB_RUN_TIMEOUT_SECONDS = 30 * 60  # hard cap on one pipeline subprocess run
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
 MAX_CONCURRENT_JOBS = 2
 SEQUENCE_TTL_SECONDS = 24 * 60 * 60  # frame_sequences retention
+UPLOAD_CHUNK_BYTES = 64 * 1024
+
+# Browser origins allowed to talk to this localhost API. Requests without
+# an Origin header (curl, local CLI) are allowed; anything else is blocked
+# so a malicious web page cannot CSRF-upload to or read from the server.
+ALLOWED_ORIGINS = {
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+}
 
 STAGE_TAGS = ("[1/3]", "[2/3]", "[3/3]")
 
@@ -138,6 +150,19 @@ def _mime(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
+def _pump_stdout(proc: subprocess.Popen, job: dict) -> None:
+    """Forward pipeline stdout lines to the job (SSE) as they arrive."""
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        line = line.rstrip("\r\n")
+        if not line:
+            continue
+        job["lines"].append(line)
+        job["queue"].put(("line", line))
+        if any(tag in line for tag in STAGE_TAGS):
+            job["queue"].put(("stage", line))
+
+
 def _run_job(job: dict, video_path: Path) -> None:
     run_pipeline = WORKING / "run_pipeline.py"
     out_json = RESULTS_DIR / f"pipeline_result_{job['id']}.json"
@@ -160,16 +185,17 @@ def _run_job(job: dict, video_path: Path) -> None:
             errors="replace",
             bufsize=1,
         )
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.rstrip("\r\n")
-            if not line:
-                continue
-            job["lines"].append(line)
-            job["queue"].put(("line", line))
-            if any(tag in line for tag in STAGE_TAGS):
-                job["queue"].put(("stage", line))
-        proc.wait()
+        reader = threading.Thread(target=_pump_stdout, args=(proc, job), daemon=True)
+        reader.start()
+        try:
+            proc.wait(timeout=JOB_RUN_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise TimeoutError(
+                f"pipeline exceeded the {JOB_RUN_TIMEOUT_SECONDS // 60}-minute timeout"
+            )
+        reader.join(timeout=5)
         if not out_json.exists():
             raise RuntimeError("pipeline produced no result JSON")
         result = json.loads(out_json.read_text(encoding="utf-8"))
@@ -266,7 +292,10 @@ class Handler(BaseHTTPRequestHandler):
     # -- helpers ---------------------------------------------------------
 
     def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin")
+        if origin and origin in ALLOWED_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
@@ -313,6 +342,10 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path != "/api/detect":
             self._json({"error": "not found"}, 404)
             return
+        origin = self.headers.get("Origin")
+        if origin and origin not in ALLOWED_ORIGINS:
+            self._json({"error": "forbidden origin"}, 403)
+            return
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0:
             self._json({"error": "empty upload"}, 400)
@@ -335,8 +368,8 @@ class Handler(BaseHTTPRequestHandler):
                 429,
             )
             return
-        body = self.rfile.read(length)
-        if not _looks_like_video(body):
+        first = self.rfile.read(min(length, 4096))
+        if not _looks_like_video(first):
             JOB_SLOTS.release()
             self._json(
                 {
@@ -353,12 +386,26 @@ class Handler(BaseHTTPRequestHandler):
         INBOX.mkdir(parents=True, exist_ok=True)
         # Sanitized filename: the frame-sequence dir, the signal dump and
         # the frontend thumbnail lookup all key off this name.
-        inbox_name = f"{_safe_stem(self.headers.get('X-Filename', 'video'), job_id)}{_video_ext(body)}"
+        inbox_name = f"{_safe_stem(self.headers.get('X-Filename', 'video'), job_id)}{_video_ext(first)}"
         video_path = INBOX / inbox_name
         try:
-            video_path.write_bytes(body)
+            # Stream to disk (magic bytes already validated above) instead
+            # of buffering up to 200 MB per request in memory.
+            with open(video_path, "wb") as fh:
+                fh.write(first)
+                total = len(first)
+                while total < length:
+                    chunk = self.rfile.read(min(UPLOAD_CHUNK_BYTES, length - total))
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    fh.write(chunk)
         except OSError:
             JOB_SLOTS.release()
+            try:
+                video_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             self._json({"error": "could not store upload"}, 500)
             return
 

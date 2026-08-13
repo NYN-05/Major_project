@@ -39,17 +39,38 @@ def _normalize_weights(weights):
 
 
 def _cost_terms(weights, correlation, cfg):
+    """Encode the classical selection cost as a Pauli-Z Hamiltonian.
+
+    Classical cost over bitstrings (b_i in {0,1}):
+        C(b) = -w.b + rp * sum_{i<j} C_ij b_i b_j + cp * (sum b - k)^2
+    Substituting b = (1 - Z)/2 gives H = const + sum lin_i Z_i
+    + sum_{i<j} quad_ij Z_i Z_j with:
+        lin_i    =  w_i/2 + cp*(2k - 1)/2
+                    - (rp/4)*(rowsum_i - 1) - (cp/2)*(n - 1)
+        quad_ij  =  (rp/4)*C_ij + cp/2
+        const    =  cp*k^2 - sum(w)/2 + (n/2)*cp*(1 - 2k)
+                    + (rp/4)*triu(C, 1).sum() + cp*n*(n - 1)/4
+    (The -(1/4)*sum_{j!=i} q_ij terms in lin_i come from expanding
+    (1-Z_i)(1-Z_j)/4; omitting them breaks expval(H) == C(b).)
+    """
     n = len(weights)
     k = cfg.target_features
     rp = cfg.redundancy_penalty
     cp = cfg.cardinality_penalty
     lin = (
         weights / 2.0
+        + cp * (2 * k - 1) / 2.0
         - (rp / 4.0) * (correlation.sum(axis=1) - 1.0)
-        + cp * (4 * k - 2 * n + 1) / 4.0
+        - (cp / 2.0) * (n - 1)
     )
     quad = (rp / 4.0) * correlation + cp / 2.0
-    constant = cp * (n - 2 * k) ** 2 / 4.0 + (rp / 4.0) * np.triu(correlation, 1).sum()
+    constant = (
+        cp * k**2
+        - weights.sum() / 2.0
+        + (n / 2.0) * cp * (1 - 2 * k)
+        + (rp / 4.0) * np.triu(correlation, 1).sum()
+        + cp * n * (n - 1) / 4.0
+    )
     coeffs = [float(constant)]
     ops = [qml.Identity(wires=0)]
     for i in range(n):
@@ -83,29 +104,35 @@ def _precompute_gates(coeffs, ops, wires):
     exactly exp(-i*gamma*H) (no Trotter error). The identity term is a
     global phase and is dropped. Precomputing the gate list removes the
     per-call Hamiltonian-expansion overhead inside the QNode.
+
+    Returns ``(cost_gates, mixer_gates)``: the Z-term gates are driven by
+    ``gamma``; the single-qubit X rotations are the QAOA mixer and MUST be
+    driven by ``beta`` (regression guard: cost must change when beta is
+    perturbed — see ``tests.py``).
     """
-    gates = []
+    cost_gates = []
     for c, op in zip(coeffs, ops):
         if isinstance(op, qml.Identity):
             continue
-        gates.append((float(c), "Z" * len(op.wires), list(op.wires)))
-    for w in range(wires):
-        gates.append((1.0, "X", [w]))
-    return gates
+        cost_gates.append((float(c), "Z" * len(op.wires), list(op.wires)))
+    mixer_gates = [(1.0, "X", [w]) for w in range(wires)]
+    return cost_gates, mixer_gates
 
 
 def _make_circuits(coeffs, ops, wires):
     hamiltonian = qml.Hamiltonian(coeffs, ops)
     dev = simulator_device(wires)
-    gates = _precompute_gates(coeffs, ops, wires)
+    cost_gates, mixer_gates = _precompute_gates(coeffs, ops, wires)
 
     def _apply_qaoa(params):
         for wire in range(wires):
             qml.Hadamard(wires=wire)
         for layer in range(len(params) // 2):
             gamma, beta = params[2 * layer], params[2 * layer + 1]
-            for c, basis, gate_wires in gates:
+            for c, basis, gate_wires in cost_gates:
                 qml.PauliRot(2.0 * gamma * c, basis, wires=gate_wires)
+            for _, basis, gate_wires in mixer_gates:
+                qml.PauliRot(2.0 * beta, basis, wires=gate_wires)
 
     @qml.qnode(dev)
     def cost_circuit(params):
@@ -227,6 +254,13 @@ def compare_selections(qaoa_result, classical_result):
 
 
 def verify_hamiltonian(X, y, cfg=None):
+    """Max |expval(H) - classical_cost| over representative bitstrings.
+
+    Checks all-zeros, all-ones, every single-bit state, and a handful of
+    random bitstrings so a coefficient-derivation slip (as in the original
+    ``_cost_terms``) cannot pass by checking only two states. Returns the
+    max absolute error; the caller must assert it is ~0.
+    """
     cfg = cfg or QAOASelectionConfig()
     weights = _normalize_weights(_mutual_info_weights(X, y, cfg.seed))
     correlation = np.abs(np.corrcoef(X.T))
@@ -240,11 +274,16 @@ def verify_hamiltonian(X, y, cfg=None):
                 qml.PauliX(wires=i)
         return qml.expval(qml.Hamiltonian(coeffs, ops))
 
-    all_ones = np.ones(X.shape[1], dtype=int)
-    single = np.zeros(X.shape[1], dtype=int)
-    single[0] = 1
+    rng = np.random.RandomState(cfg.seed)
+    n = X.shape[1]
+    states = [np.zeros(n, dtype=int), np.ones(n, dtype=int)]
+    for i in range(n):
+        single = np.zeros(n, dtype=int)
+        single[i] = 1
+        states.append(single)
+    states.extend(rng.randint(0, 2, size=(8, n)))
     max_error = 0.0
-    for bitstring in (all_ones, single):
+    for bitstring in states:
         quantum = float(basis_cost(bitstring))
         classical = _classical_cost(bitstring, weights, correlation, cfg)
         max_error = max(max_error, abs(quantum - classical))

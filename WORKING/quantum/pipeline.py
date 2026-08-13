@@ -113,7 +113,11 @@ def main():
     if args.select or args.all:
         print("[2/6] Running QAOA feature selection (train split only)...")
         error = verify_hamiltonian(X_train, data["y_train"], qaoa_cfg)
-        print(f"  Hamiltonian verification max error: {error:.2e}")
+        assert error < 1e-6, (
+            f"Hamiltonian verification FAILED (max error {error:.2e}): "
+            "_cost_terms does not reproduce _classical_cost"
+        )
+        print(f"  Hamiltonian verification OK (max error {error:.2e})")
         selection = QAOASelector(qaoa_cfg).select(X_train, data["y_train"])
         save_selection(selection, qaoa_cfg.selection_file)
         print(

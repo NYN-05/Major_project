@@ -120,10 +120,10 @@ def run_cv(fit_predict, X, y, n_splits=5, seed=42, n_jobs=0):
     if n_splits > 1 and (n_jobs != 1):
         workers = n_jobs if n_jobs > 0 else min(n_splits, os.cpu_count() or 1)
         try:
-            import multiprocessing as mp
+            from concurrent.futures import ProcessPoolExecutor
 
-            with mp.Pool(workers) as pool:
-                probs_per_fold = pool.starmap(fit_predict, fold_args)
+            with ProcessPoolExecutor(max_workers=workers) as pool:
+                probs_per_fold = list(pool.map(fit_predict, *zip(*fold_args)))
         except Exception:
             probs_per_fold = [fit_predict(*args) for args in fold_args]
     else:
