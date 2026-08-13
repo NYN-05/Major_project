@@ -26,7 +26,7 @@ frames  ->  rPPG  ->  quantum  ->  final verdict (REAL / FAKE / UNCERTAIN)
 |---|---|
 | `WORKING/` | Active project root (all three pipeline stages + end-to-end runner) |
 | `WORKING/frame/` | Stage 1 - frame sampling, YOLO face detection, quality filtering (has its own `app/` + `requirements.txt`) |
-| `WORKING/RPPG/` | Stage 2 - MediaPipe face ROIs -> POS/CHROM pulse -> 8 physiological features (+ `rppg-pipeline/`, `requirements.txt`) |
+| `WORKING/RPPG/` | Stage 2 - MediaPipe face ROIs -> POS/CHROM pulse -> 10 physiological features (+ `rppg-pipeline/`, `requirements.txt`) |
 | `WORKING/quantum/` | Stage 3 - QAOA feature selection -> hybrid VQC -> P(real) -> verdict (run via `python -m quantum.pipeline`) |
 | `WORKING/run_pipeline.py` | End-to-end orchestrator: frames -> rPPG -> quantum -> verdict |
 | `WORKING/output/` | Global regenerated-artifacts root (all `output/` dirs untracked) |
@@ -47,17 +47,19 @@ FPS, face detection (YOLO), quality assessment (blur / dark / overexposed / no-f
 Outputs accepted JPEGs + per-frame metadata JSONL for the rPPG stage.
 
 ```bash
-# Standalone frame stage
-python app/main.py --source test.mp4 --save-metadata
-# Or extraction-only mode
-python app/extract_frames.py --source test.mp4 --sample-fps 10 --save-quality-examples
+# Standalone frame stage (from WORKING/frame/)
+python app/pipeline.py --source test.mp4 --save-metadata
+# Or extraction-only mode (same entry point; extraction flags switch the mode)
+python app/pipeline.py --source test.mp4 --sample-fps 10 --save-quality-examples
 ```
+(Note: the legacy `app/main.py` / `app/extract_frames.py` entry points no longer exist — `app/pipeline.py` is the single CLI.)
 
 ### 2. rPPG Pipeline (`WORKING/RPPG/`)
 
 POS/CHROM pulse reconstruction from facial ROIs (left cheek, right cheek, forehead)
-and an 8-feature physiological vector per video: heart rate, SNR, PRV, spectral
-entropy, MAD, signal quality index, and inter-region correlations. Features are
+and a 10-feature physiological vector per video: heart rate, SNR, PRV, spectral
+entropy, MAD, signal quality index, and inter-region correlations (full list in
+`RPPGFeatures.feature_names()`). Features are
 persisted with labels (1 = fake, 0 = real) in `WORKING/output/rppg/dataset_features.csv`,
 which is the direct data source for the quantum layer.
 
@@ -82,14 +84,14 @@ worker processes for readable progress output.
 ### 3. Quantum Model (`WORKING/quantum/`)
 
 Hybrid classical-quantum decision stage built with PennyLane + PyTorch. It consumes
-the rPPG 8-feature vector **directly** (same names/order as `RPPGFeatures.feature_names()`);
+the rPPG 10-feature vector **directly** (same names/order as `RPPGFeatures.feature_names()`);
 no synthetic data is generated anywhere in the pipeline.
 
 - **Data** - `data.py` builds `output/quantum/data.npz` from the real labeled rPPG feature
   table `output/rppg/dataset_features.csv` (rPPG label 1 = fake is flipped to the quantum
-  convention LABEL_REAL = 1, LABEL_FAKE = 0). Uses the **official FF++ train/val/test
-  folders** when the table is FF++-sourced (no regrouping, no test leakage); falls back
-  to the seeded subject-grouped random split otherwise. An HR-plausibility filter
+  convention LABEL_REAL = 1, LABEL_FAKE = 0). The current table carries no official
+  split hints, so `data.py` uses the seeded subject-grouped random split. An
+  HR-plausibility filter
   (30-220 BPM, non-finite rejection) drops implausible rows at build time and logs counts.
 - **QAOA feature selection** - `qaoa.py` selects the most informative rPPG features
   using a cost Hamiltonian (mutual information weights + correlation redundancy
@@ -115,12 +117,19 @@ no synthetic data is generated anywhere in the pipeline.
 python -m quantum.pipeline --all
 ```
 
-**Current trained model**: hybrid VQC on 6 QAOA-selected features, trained on
-469 FF++ train clips (official splits; 249 real / 220 fake).
-Hold-out test (101 clips): `accuracy 0.564, AUC-ROC 0.640, ECE 0.073` — the best
-model across all baselines (GaussianNB next at 0.621). At the strict 0.3/0.7
-decision gates this signal stays within UNCERTAIN band by design; temperature
-calibration yields ECE 0.015 without changing ranks.
+**Current trained model**: hybrid VQC on 6 QAOA-selected features, trained on the
+real rPPG feature table `output/rppg/dataset_features.csv` — 16 labeled DFDC clips
+(9 real / 7 fake), split 10 train / 3 val / 3 test (seeded, subject-grouped).
+Hold-out test: `accuracy 0.667, F1 0.800, AUC-ROC 0.500, ECE 0.105`. QAOA selection
+(restart seed 43, cost 0.3950): `hr_half_diff, cheek_forehead_correlation,
+left_right_cheek_correlation, mad, heart_rate_bpm, spectral_entropy`. E2E verdict on
+a real clip: `prob_real=0.6155 -> UNCERTAIN (confidence 0.2311)`.
+
+> **Small-data disclaimer**: 10 training rows are far too few for statistically
+> meaningful metrics — treat all numbers as indicative smoke tests, not deployment
+> guarantees. Every row carries negative SNR (pulse buried in noise) and HR is
+> quantized to a coarse grid by short-clip spectral resolution. Full audit trail:
+> `PROJECT_AUDIT_REPORT.md`; fix plans: `fix_plans.md`.
 
 ## Install
 
@@ -163,7 +172,7 @@ features, quantum probabilities and plots, the pulse waveform).
 
 ## Verified Constraints (do not break)
 
-- **No synthetic data.** The quantum layer consumes only the real rPPG feature table `output/rppg/dataset_features.csv` (currently an FF++-sourced table of 669 labeled clips; the DFDC row subset is false-positive noise and excluded from training). Never reintroduce a generator or a transform/bridge layer.
+- **No synthetic data.** The quantum layer consumes only the real rPPG feature table `output/rppg/dataset_features.csv` (currently 16 labeled rows: 9 real, 7 fake — DFDC archive only; FF++ is NOT used). Never reintroduce a generator or a transform/bridge layer.
 - **Feature contract:** `FEATURE_NAMES` in `quantum/config.py` must stay identical in name AND order to `RPPGFeatures.feature_names()` in `RPPG/rppg/features.py` (duplicated on purpose; `data.py`, `qaoa.py`, and `pipeline.py` all index by it). Keep the two lists in sync.
 - **Label conventions differ per stage — do not unify:**
   - rPPG CSV: `1 = fake, 0 = real`
