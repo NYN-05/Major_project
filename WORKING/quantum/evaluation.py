@@ -74,12 +74,16 @@ def classification_metrics(y_true, prob_real):
     precision, recall, f1, _ = sk["precision_recall_fscore_support"](
         y_true, predictions, average="binary", zero_division=0
     )
+    if len(set(int(v) for v in y_true)) < 2:
+        auc_roc = None
+    else:
+        auc_roc = float(sk["roc_auc_score"](y_true, prob_real))
     return {
         "accuracy": float(sk["accuracy_score"](y_true, predictions)),
         "precision": float(precision),
         "recall": float(recall),
         "f1": float(f1),
-        "auc_roc": float(sk["roc_auc_score"](y_true, prob_real)),
+        "auc_roc": auc_roc,
         "ece": expected_calibration_error(y_true, prob_real),
     }
 
@@ -218,8 +222,13 @@ def run_baselines(X_train, y_train, X_test, y_test, decision_cfg=None, seed=42, 
 
     # xgboost is imported lazily: importing it costs ~13s on this host and
     # would otherwise slow down every process that imports this module
-    # (including the QAOA parallel workers).
-    from xgboost import XGBClassifier  # noqa: PLC0415
+    # (including the QAOA parallel workers). It is also optional: a host
+    # without xgboost must still complete `--all` (the VQC is the deliverable,
+    # baselines are comparison only).
+    try:
+        from xgboost import XGBClassifier  # noqa: PLC0415
+    except ImportError:
+        XGBClassifier = None
 
     sk = _sklearn()
     models = {
@@ -250,9 +259,12 @@ def run_baselines(X_train, y_train, X_test, y_test, decision_cfg=None, seed=42, 
     }
 
     results = {}
+    xgboost_types = () if XGBClassifier is None else (XGBClassifier,)
+    if XGBClassifier is None:
+        models.pop("xgboost", None)
     for name, make_model in models.items():
         model = make_model()
-        if isinstance(model, XGBClassifier):
+        if isinstance(model, xgboost_types):
             model.fit(X_train, y_train, eval_set=[(X_train, y_train)], verbose=False)
         else:
             model.fit(X_train, y_train)
@@ -263,7 +275,7 @@ def run_baselines(X_train, y_train, X_test, y_test, decision_cfg=None, seed=42, 
 
             def _fit_fold(Xtr, ytr, Xte, yte, make=make_model):
                 m = make()
-                if isinstance(m, XGBClassifier):
+                if isinstance(m, xgboost_types):
                     m.fit(Xtr, ytr, eval_set=[(Xtr, ytr)], verbose=False)
                 else:
                     m.fit(Xtr, ytr)
@@ -271,6 +283,9 @@ def run_baselines(X_train, y_train, X_test, y_test, decision_cfg=None, seed=42, 
 
             entry["cv"] = run_cv(_fit_fold, X_train, y_train, n_splits=n_splits, seed=seed, n_jobs=1)
         results[name] = entry
+
+    if XGBClassifier is None:
+        results["xgboost"] = {"skipped": "xgboost not installed"}
 
     with open(decision_cfg.metrics_baseline_file, "w") as fh:
         json.dump(results, fh, indent=2)

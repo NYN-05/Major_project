@@ -23,6 +23,8 @@ def _sklearn():
 
 
 def plot_roc_curve(y_true, prob_real, path):
+    if len(set(int(v) for v in y_true)) < 2:
+        return
     ConfusionMatrixDisplay, roc_auc_score, roc_curve = _sklearn()
     fpr, tpr, _ = roc_curve(y_true, prob_real)
     auc = roc_auc_score(y_true, prob_real)
