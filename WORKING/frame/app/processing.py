@@ -1,4 +1,5 @@
 import json
+import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,6 +8,8 @@ from typing import Any
 import cv2
 
 from app.detector import FaceDetection
+
+logger = logging.getLogger("face_pipeline")
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -96,6 +99,9 @@ class FrameIngestor:
         sample_step = self._sample_step(sample_fps)
         sample_interval_ms = (1000.0 / sample_fps) if (sample_fps is not None and sample_fps > 0) else None
         next_target_ms = 0.0
+        zero_ts_seen = 0
+        ts_fallback_armed = sample_interval_ms is not None
+        probe_frames = 2 * max(1, sample_step)
 
         while True:
             ok, frame = self.capture.read()
@@ -105,24 +111,38 @@ class FrameIngestor:
             source_frame_id += 1
             timestamp_ms = int(self.capture.get(cv2.CAP_PROP_POS_MSEC))
 
-            if sample_interval_ms is None:
-                if (source_frame_id - 1) % sample_step != 0:
-                    continue
-            else:
+            if ts_fallback_armed and source_frame_id <= probe_frames:
+                if timestamp_ms <= 0:
+                    zero_ts_seen += 1
+                    if zero_ts_seen >= 2:
+                        logger.warning(
+                            "CAP_PROP_POS_MSEC is unusable (0.0 for %d frames); "
+                            "falling back to stride sampling", zero_ts_seen
+                        )
+                        ts_fallback_armed = False
+
+            if sample_interval_ms is not None and ts_fallback_armed:
                 if timestamp_ms < next_target_ms:
                     continue
-
-            frame_id += 1
-            yield FramePacket(
-                frame_id=frame_id,
-                frame=frame,
-                timestamp_ms=timestamp_ms,
-                source_frame_id=source_frame_id,
-            )
-
-            if sample_interval_ms is not None:
+                frame_id += 1
+                yield FramePacket(
+                    frame_id=frame_id,
+                    frame=frame,
+                    timestamp_ms=timestamp_ms,
+                    source_frame_id=source_frame_id,
+                )
                 while next_target_ms <= timestamp_ms:
                     next_target_ms += sample_interval_ms
+            else:
+                if (source_frame_id - 1) % sample_step != 0:
+                    continue
+                frame_id += 1
+                yield FramePacket(
+                    frame_id=frame_id,
+                    frame=frame,
+                    timestamp_ms=timestamp_ms,
+                    source_frame_id=source_frame_id,
+                )
 
         self.close()
 
