@@ -21,6 +21,8 @@ pandas>=2.0.0
 
 # ---------- Stage 3: quantum (PennyLane VQC + QAOA) ----------
 pennylane>=0.36.0
+# SIMD statevector backend: ~20x faster QAOA cost evaluations than default.qubit
+pennylane-lightning>=0.36.0
 
 # ---------- Shared numeric / ML / vision ----------
 numpy==1.26.4

@@ -116,7 +116,15 @@ def main():
         print(f"  Hamiltonian verification max error: {error:.2e}")
         selection = QAOASelector(qaoa_cfg).select(X_train, data["y_train"])
         save_selection(selection, qaoa_cfg.selection_file)
-        print(f"  Selected {len(selection['selected_features'])} features: {selection['selected_features']}")
+        print(
+            f"  Selected {len(selection['selected_features'])} features: {selection['selected_features']}"
+        )
+        restarts = selection.get("restarts", {})
+        if restarts:
+            print(
+                f"  QAOA: {restarts['n_restarts']} parallel restarts, "
+                f"chosen seed {restarts['chosen_seed']} (cost {selection['cost']:.4f})"
+            )
 
         classical = select_classical(X_train, data["y_train"], qaoa_cfg)
         comparison = compare_selections(selection, classical)
@@ -132,6 +140,9 @@ def main():
     indices = [int(i) for i in selection["selected_indices"]]
     if args.train or args.all:
         print(f"[3/6] Training hybrid VQC on {len(indices)} QAOA-selected features...")
+        from quantum.vqc import resolve_device
+
+        print(f"  Device: {resolve_device()} (torch head on GPU, PennyLane QNode on CPU)")
         train_vqc(
             X_train[:, indices],
             data["y_train"].astype(float),

@@ -59,6 +59,8 @@ class QAOASelectionConfig:
     cardinality_penalty: float = 0.5
     target_features: int = 6
     seed: int = 42
+    restarts: int = 4
+    n_jobs: int = 0
     selection_file: Path = field(default_factory=lambda: OUTPUT_DIR / "qaoa_selection.json")
 
 

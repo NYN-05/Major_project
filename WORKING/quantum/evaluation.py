@@ -9,7 +9,9 @@ XGBoost) run on the same selected features for comparison. Plots are
 delegated to quantum.plots.
 """
 
+import functools
 import json
+import os
 
 import numpy as np
 import torch
@@ -82,21 +84,36 @@ def _aggregate_cv(rows):
     return {"mean": mean, "std": std, "folds": rows}
 
 
-def run_cv(fit_predict, X, y, n_splits=5, seed=42):
+def run_cv(fit_predict, X, y, n_splits=5, seed=42, n_jobs=0):
     """Stratified K-fold cross-validation for a fit_predict callable.
 
     `fit_predict(Xtr, ytr, Xte, yte) -> P(class=1)` is invoked per fold;
     returns _aggregate_cv payload with per-fold metrics plus balanced
-    accuracy.
+    accuracy. Folds are executed in parallel subprocesses when
+    ``n_jobs`` > 1 (or 0 = auto); training per fold is expensive (VQC),
+    so parallel folds scale wall time down by the worker count.
     """
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
     X = np.asarray(X)
     y = np.asarray(y)
+    fold_args = [(X[tr], y[tr], X[te], y[te]) for tr, te in skf.split(X, y)]
+
+    if n_splits > 1 and (n_jobs != 1):
+        workers = n_jobs if n_jobs > 0 else min(n_splits, os.cpu_count() or 1)
+        try:
+            import multiprocessing as mp
+
+            with mp.Pool(workers) as pool:
+                probs_per_fold = pool.starmap(fit_predict, fold_args)
+        except Exception:
+            probs_per_fold = [fit_predict(*args) for args in fold_args]
+    else:
+        probs_per_fold = [fit_predict(*args) for args in fold_args]
+
     rows = []
-    for tr, te in skf.split(X, y):
-        probs = fit_predict(X[tr], y[tr], X[te], y[te])
-        m = classification_metrics(y[te], probs)
-        m["balanced_accuracy"] = balanced_accuracy(y[te], probs)
+    for (_, _, _, yte), probs in zip(fold_args, probs_per_fold):
+        m = classification_metrics(yte, probs)
+        m["balanced_accuracy"] = balanced_accuracy(yte, probs)
         rows.append(m)
     return _aggregate_cv(rows)
 
@@ -124,6 +141,16 @@ def decision_bins(y_true, prob_real, cfg=None):
     }
 
 
+def _fit_vqc_fold(Xtr, ytr, Xte, yte, cfg):
+    """Module-level CV fold worker: train a VQC on the fold, return P(real).
+
+    Defined at module level so multiprocessing can pickle it for parallel
+    cross-validation.
+    """
+    model = train_vqc(Xtr, ytr, cfg, X_val=Xte, y_val=yte)
+    return predict_vqc(model, Xte)
+
+
 def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None, X_train=None, y_train=None):
     vqc_cfg = vqc_cfg or VQCConfig()
     decision_cfg = decision_cfg or DecisionConfig()
@@ -139,12 +166,13 @@ def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None, X_tr
     # hold-out test above is untouched). Reported as mean +/- std.
     if _enough_for_cv(y_train, n_splits=5):
         cv_cfg = VQCConfig(**{**vqc_cfg.__dict__, "save_checkpoint": False})
-
-        def _fit_vqc(Xtr, ytr, Xte, yte):
-            model = train_vqc(Xtr, ytr, cv_cfg, X_val=Xte, y_val=yte)
-            return predict_vqc(model, Xte)
-
-        payload["cv"] = run_cv(_fit_vqc, X_train, y_train, seed=vqc_cfg.seed)
+        payload["cv"] = run_cv(
+            functools.partial(_fit_vqc_fold, cfg=cv_cfg),
+            X_train,
+            y_train,
+            seed=vqc_cfg.seed,
+            n_jobs=os.cpu_count() or 1,
+        )
 
     plot_roc_curve(y_test, prob_real, decision_cfg.roc_plot)
     plot_confusion_matrix(y_test, (prob_real >= 0.5).astype(int), decision_cfg.confusion_plot)
@@ -214,7 +242,7 @@ def run_baselines(X_train, y_train, X_test, y_test, decision_cfg=None, seed=42, 
                     m.fit(Xtr, ytr)
                 return m.predict_proba(Xte)[:, 1]
 
-            entry["cv"] = run_cv(_fit_fold, X_train, y_train, n_splits=n_splits, seed=seed)
+            entry["cv"] = run_cv(_fit_fold, X_train, y_train, n_splits=n_splits, seed=seed, n_jobs=1)
         results[name] = entry
 
     with open(decision_cfg.metrics_baseline_file, "w") as fh:

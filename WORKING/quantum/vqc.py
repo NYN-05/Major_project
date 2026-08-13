@@ -123,7 +123,7 @@ def load_vqc_model(n_features, cfg=None):
     if cached is not None:
         return cached
     model = HybridModel(n_features, cfg)
-    ckpt = torch.load(cfg.checkpoint_file, map_location="cpu")
+    ckpt = torch.load(cfg.checkpoint_file, map_location="cpu", weights_only=True)
     state = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
     model.load_state_dict(state)
     model.to(resolve_device())
