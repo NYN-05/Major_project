@@ -92,8 +92,7 @@ no synthetic data is generated anywhere in the pipeline.
   convention LABEL_REAL = 1, LABEL_FAKE = 0). The current table carries no official
   split hints, so `data.py` uses the seeded subject-grouped random split. DFDC clips are
   grouped per-clip (no subject IDs available); if the DFDC metadata JSON is obtained
-  later, `_infer_subject_key` should map clips to subjects. An
-  HR-plausibility filter
+  later, `_infer_subject_key` should map clips to subjects. An HR-plausibility filter
   (30-220 BPM, non-finite rejection) drops implausible rows at build time and logs counts.
 - **QAOA feature selection** - `qaoa.py` selects the most informative rPPG features
   using a cost Hamiltonian (mutual information weights + correlation redundancy
@@ -130,8 +129,9 @@ a real clip: `prob_real=0.6155 -> UNCERTAIN (confidence 0.2311)`.
 > **Small-data disclaimer**: 10 training rows are far too few for statistically
 > meaningful metrics — treat all numbers as indicative smoke tests, not deployment
 > guarantees. Every row carries negative SNR (pulse buried in noise) and HR is
-> quantized to a coarse grid by short-clip spectral resolution. Full audit trail:
-> `PROJECT_AUDIT_REPORT.md`; fix plans: `fix_plans.md`.
+> quantized to a coarse grid by short-clip spectral resolution. The engineering
+> conventions, verified constraints, and regression guards are maintained in
+> `AGENTS.md`.
 
 ## Install
 

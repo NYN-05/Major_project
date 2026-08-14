@@ -94,7 +94,7 @@ Upload limits: 200 MB max; magic-byte validation (MP4/MOV ftyp, AVI RIFF, WebM E
 - **Quantum model cache** (`WORKING/quantum/vqc.py`): `HybridModel` cached by `(n_features, ckpt_mtime, size)` — reuses loaded weights across server requests.
 - **Server hardening** (`frontend/server.py`): size/magic validation, concurrency cap (2), result-first SSE + async `signal` event, TTL cleanup, sanitized inbox filenames (`{job8}_{stem}.ext`) for thumbnail consistency, CORS restricted to localhost origins (POST from other origins → 403), uploads streamed to disk in 64 KB chunks (no 200 MB in-memory buffers), 30-min hard timeout per pipeline run (worker killed), `FRONTEND_PORT` env (deprecated `FRONTEMD_PORT` still honored).
 
-See `PROJECT_AUDIT_REPORT.md` (repo root) for the full 2026-08-13 audit — two confirmed QAOA-layer defects (§6.1 beta-mixer regression, §6.2 Hamiltonian mismatch) since fixed and regression-guarded in `quantum/tests.py`, dataset-scale limits, and server security notes.
+The 2026-08-13 audit found two confirmed QAOA-layer defects (§6.1 beta-mixer regression, §6.2 Hamiltonian mismatch) — both fixed and regression-guarded in `quantum/tests.py` (see "QAOA ansatz" / "Hamiltonian ≡ classical cost" above).
 
 ## Frontend State Machine
 

@@ -20,7 +20,7 @@ WORKING/RPPG/
 │   ├── signal_extraction.py  # POS/CHROM pulse reconstruction (vectorized)
 │   ├── preprocessing.py      # Detrend, bandpass, normalize (cached filters)
 │   ├── features.py           # 10-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations, HR half-diff, peak prominence)
-│   └── model_utils.py        # rPPG RandomForest classifier helpers (side path)
+│   └── model_utils.py        # MediaPipe Face Landmarker + Haar cascade download/caching (SHA-256 verified)
 ├── rppg-pipeline/            # Training & demo scripts
 │   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/ (+ FF++ via --include-ffpp)
 │   ├── probe_features.py            # Per-feature AUC probe on a dataset (signal-level study)
@@ -76,7 +76,7 @@ pipeline = RPPGPipeline(
 | `fps` | float | Effective sampling rate |
 | `n_frames_total` | int | Total frames processed |
 | `n_frames_usable` | int | Frames with face detected |
-| `features` | `RPPGFeatures \| None` | **10-feature vector (or None if < 48 usable frames)** |
+| `features` | `RPPGFeatures \| None` | **10-feature vector (or None if < 48 usable frames / degenerate signal)** |
 | `combined_signal` | `np.ndarray \| None` | Cleaned combined pulse waveform |
 | `left_cheek_signal` | `np.ndarray \| None` | Cleaned left cheek pulse |
 | `right_cheek_signal` | `np.ndarray \| None` | Cleaned right cheek pulse |
@@ -84,7 +84,7 @@ pipeline = RPPGPipeline(
 | `quality_log` | `List[FrameQuality]` | Per-frame quality records |
 | `warnings` | `List[str]` | Runtime warnings |
 
-### 8 Physiological Features (`rppg/features.py`)
+### 10 Physiological Features (`rppg/features.py`)
 
 | Feature | Description | Units/Range |
 |---------|-------------|-------------|
@@ -96,13 +96,18 @@ pipeline = RPPGPipeline(
 | `signal_quality_index` | Beat regularity + spectral concentration | 0-1 |
 | `cheek_forehead_correlation` | Pearson r between cheek & forehead pulses | -1 to 1 |
 | `left_right_cheek_correlation` | Pearson r between left & right cheek pulses | -1 to 1 |
+| `hr_half_diff` | Abs. HR difference between first/second halves of the pulse (stability marker) | BPM (0 = stable) |
+| `peak_prominence` | Spectral peak-to-mean ratio of the in-band PSD (dominance of the pulse peak) | ratio (>>1 = strong pulse) |
 
 **Feature order is fixed** - must match `FEATURE_NAMES` in `quantum/config.py` and `RPPGFeatures.feature_names()`.
 
 ### Failure Mode
 
-Returns `features=None` when `n_frames_usable < min_usable_frames` (48).
-`run_pipeline.py` then emits `INCONCLUSIVE` verdict and exits with code 3.
+Returns `features=None` when `n_frames_usable < min_usable_frames` (48) **or** when the
+raw features are degenerate (≥ 2 NaN values or `signal_quality_index == 0.0` — a flat/dead
+pulse). Degenerate signals are rejected at the pipeline level instead of being filled with
+"average human" constants (H1). `run_pipeline.py` then emits `INCONCLUSIVE` verdict and
+exits with code 3.
 
 ## Data Generation
 
@@ -146,15 +151,18 @@ python rppg-pipeline/probe_features.py --ffpp --max-per-class 120 --workers 8
 
 ### Dataset Findings (Validated Aug 2026)
 
-- **DFDC preview (2,797 clips extracted)**: all 8 rPPG features are at **chance
-  level** — AUC 0.47-0.53 across POS/CHROM at 10 and 30 fps. Face-swap fakes
-  transplant the source person's genuine skin/vascular signal, so rPPG cannot
-  discriminate them. DFDC stays in `archive/` for rPPG research but is
-  **excluded from quantum training**.
-- **FaceForensics++ (669 usable clips)**: features carry a modest but real
-  signal (quantum VQC test AUC 0.640 vs 0.621 best classical baseline). FF++
-  is the current quantum-layer training source, using the **official
-  train/val/test folders** (no regrouping, no test leakage).
+- **Current training table** (`output/rppg/dataset_features.csv`): **16 labeled DFDC clips
+  (9 real / 7 fake)** — `archive/DFDC_Dataset/Real|Fake`, DFDC archive only. This is the
+  **direct, exclusive data source for the quantum layer**; FF++ is NOT used (gitignored,
+  `--include-ffpp` off by default).
+- **Quality caveats**: all 16 rows carry **negative SNR** (−1.4 to −8.1 dB) — the pulse is
+  buried in noise across the whole set; HR features lie on a coarse ~24.3 BPM grid
+  (short compressed clips + coarse PSD binning at 10 fps). With a 10-row train set, all
+  metrics are indicative only.
+- Historical probe runs (2,797 DFDC preview clips) showed rPPG features at **chance level**
+  (AUC 0.47–0.53) — face-swap fakes transplant the source person's genuine skin/vascular
+  signal. That probe motivated the current small, honest DFDC table; it does not change
+  the fact that the trained model consumes exactly the 16 rows above.
 
 ### Train rPPG Classifier (Side Path - Not Used for Final Verdict)
 
@@ -249,7 +257,10 @@ Time-domain features:
 - `mad`: Mean absolute deviation of cleaned waveform
 - Correlations: Pearson r between per-ROI cleaned signals
 
-NaN features are filled with physiologically neutral fallbacks (HR=72, SNR=0, etc.).
+NaN features are filled with physiologically neutral fallbacks (HR=72, SNR=0, etc.)
+**only for the rare single-NaN case** — degenerate signals (≥ 2 NaN or zero SQI) are
+rejected as `features=None` before the fallback runs, and `estimate_snr` returns NaN
+(not `-inf`) for zero-power signals so NaN is the single missing-value convention.
 
 ## Output Files (in `WORKING/output/rppg/`)
 
@@ -275,17 +286,15 @@ Measure heart-rate error against contact-PPG reference; report MAE/RMSE.
 - Very low frame rates reduce usable heart-rate range
 - Heavy compression distorts skin-tone cues, weakens rPPG
 - Classifier only as good as extracted features and training data quality
-- DFDC clips carry no rPPG class signal (see Dataset Findings) — do not mix
-  DFDC rows into quantum training
-- FF++ training set is small (669 clips) and only modestly separable, and QAOA
-  mutual-information weights get degenerate on tiny tables — data-quantity
-  issue, not code bug
+- The training table is only 16 rows (9 real / 7 fake, all negative-SNR DFDC clips) —
+  metrics are smoke tests, not deployment guarantees; QAOA mutual-information weights
+  go degenerate on tiny tables (data-quantity issue, not a code bug)
 
 ## Recommended Workflow
 
-1. Add new videos to `archive/DFDC_Dataset/Fake|Real` (rPPG research) or `FF++/` (quantum-relevant data)
-2. Probe the dataset first: `python rppg-pipeline/probe_features.py --ffpp --workers 8`
-3. Regenerate features: `python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0 --target-fps 10 --min-usable-frames 30`
+1. Add new videos to `archive/DFDC_Dataset/Fake|Real` (the current quantum-relevant data source)
+2. Probe the dataset first: `python rppg-pipeline/probe_features.py --max-per-class N --workers 8`
+3. Regenerate features: `python rppg-pipeline/extract_dataset_features.py --workers 0 --target-fps 10 --min-usable-frames 30`
 4. Retrain classifier (optional): `python rppg-pipeline/train_classifier.py`
 5. Rerun quantum pipeline: `python -m quantum.pipeline --all` (from `WORKING/`)
 6. Test end-to-end: `python run_pipeline.py --source <video> --method POS`

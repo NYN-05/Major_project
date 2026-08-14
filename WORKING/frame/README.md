@@ -25,7 +25,7 @@ WORKING/frame/
 
 | File | Responsibility |
 |------|----------------|
-| `app/pipeline.py` | **Single CLI entry** - `run_frame_sampling_quality_layer()` (used by `run_pipeline.py`) plus the standalone face pipeline and frame-extraction modes (the legacy `app/main.py` / `app/extract_frames.py`) |
+| `app/pipeline.py` | **Single CLI entry** - `run_frame_sampling_quality_layer()` (used by `run_pipeline.py`) plus the standalone face pipeline and frame-extraction modes (replacing the legacy `app/main.py` / `app/extract_frames.py`, which no longer exist) |
 | `app/detector.py` | `FaceDetector` - loads YOLO weights, runs inference, returns face boxes + confidences |
 | `app/processing.py` | `FrameIngestor`, `FrameQualityAssessor`, `StorageManager` implementations |
 | `app/config.py` | Model preset mapping (`MODEL_WEIGHTS`), `build_config()` for normalized paths |
