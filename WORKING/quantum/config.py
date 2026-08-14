@@ -70,6 +70,7 @@ class VQCConfig:
     hidden_units: int = 8
     dropout: float = 0.2
     epochs: int = 80
+    # Batch 32 with <=32 train rows = a single batch per epoch (benign at this scale).
     batch_size: int = 32
     learning_rate: float = 1e-2
     weight_decay: float = 1e-2

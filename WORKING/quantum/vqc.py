@@ -55,7 +55,17 @@ class QuantumLayer(nn.Module):
         # (verified: grads flow back to the GPU weights).
         if x.is_cuda:
             x = x.cpu()
-        w = self.weights.cpu()
+        # Cache the CPU copy across forwards, invalidated whenever the
+        # parameter is mutated in place (optimizer step bumps _version,
+        # .to()/.load_state_dict() reallocate -> data_ptr changes). The
+        # cached tensor keeps its autograd graph, so training grads still
+        # flow back to the GPU weights on a cache miss.
+        key = (self.weights._version, self.weights.data_ptr())
+        cached = getattr(self, "_w_cpu_key", None)
+        if cached != key:
+            self._w_cpu = self.weights.cpu()
+            self._w_cpu_key = key
+        w = self._w_cpu
         if self.broadcast:
             # Batched QNode execution: a (batch, n_features) input is
             # broadcast through the circuit by PennyLane, replacing the
