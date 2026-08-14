@@ -4,7 +4,7 @@ run_on_video.py
 Example usage of the rPPG pipeline.
 
 Usage:
-    python examples/run_on_video.py path/to/kyc_video.mp4
+    python rppg-pipeline/run_on_video.py path/to/kyc_video.mp4
 
 Prints the extracted physiological feature vector and saves a plot
 of the cleaned pulse waveform + power spectrum to

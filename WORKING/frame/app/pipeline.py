@@ -89,9 +89,7 @@ def parse_args():
 def main() -> int:
     args = parse_args()
     logger = setup_logger()
-    source = "1" if str(args.source).strip() == "0" else args.source
-    if source != args.source:
-        logger.warning("Remapping webcam source 0 to camera index 1")
+    source = args.source
     selected_weights = args.weights if args.weights else MODEL_WEIGHTS[args.model]
 
     config = build_config(
