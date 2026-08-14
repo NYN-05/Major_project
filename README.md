@@ -90,7 +90,9 @@ no synthetic data is generated anywhere in the pipeline.
 - **Data** - `data.py` builds `output/quantum/data.npz` from the real labeled rPPG feature
   table `output/rppg/dataset_features.csv` (rPPG label 1 = fake is flipped to the quantum
   convention LABEL_REAL = 1, LABEL_FAKE = 0). The current table carries no official
-  split hints, so `data.py` uses the seeded subject-grouped random split. An
+  split hints, so `data.py` uses the seeded subject-grouped random split. DFDC clips are
+  grouped per-clip (no subject IDs available); if the DFDC metadata JSON is obtained
+  later, `_infer_subject_key` should map clips to subjects. An
   HR-plausibility filter
   (30-220 BPM, non-finite rejection) drops implausible rows at build time and logs counts.
 - **QAOA feature selection** - `qaoa.py` selects the most informative rPPG features
@@ -179,6 +181,7 @@ features, quantum probabilities and plots, the pulse waveform).
   - quantum: `LABEL_REAL = 1`, `LABEL_FAKE = 0`; `quantum/data.py` flips (`y = 1 - csv_label`)
   - rPPG RandomForest cross-check in `run_pipeline.py`: `1 = DEEPFAKE`
 - **Gitignored artifacts:** `*.csv`, `*.json`, `*.pkl`, `*.mp4`, and all `output/` dirs are untracked — `dataset_features.csv`, `output/quantum/*`, and the trained models will not appear in `git status`. Regenerating them is normal.
+- **rPPG classifier trust:** `output/rppg/` must remain write-protected — `rppg_classifier.pkl` is `pickle.load`-ed by `run_pipeline.py` and the Streamlit demo (arbitrary-code risk if replaced). Never move this to shared hosting as-is.
 - **rPPG returns `features=None`** when usable frames < `min_usable_frames` (48); `run_pipeline.py` then emits INCONCLUSIVE and exits 3. New code must handle `None`.
 - **Stage 1 feeds stage 2.** `run_pipeline.py` hands the frame stage's accepted JPEGs (`output/frames/frame_sequences/<video>/frames/`) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (10 fps). rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling (INCONCLUSIVE, exit 3) is unchanged.
 

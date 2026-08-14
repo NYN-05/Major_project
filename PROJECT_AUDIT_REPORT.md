@@ -27,6 +27,33 @@ The previous audit found two QAOA-layer defects and other issues; all were fixed
 
 ---
 
+## Post-plan resolution (2026-08-14 — every item in `fix_plans.md` verified against the tree)
+
+All Phase 1 (High) and Phase 2 (Medium) findings below are **fixed and committed** (`d948d46` … `1173767`); canonical baselines unchanged (ECE 0.1052, `0.6155 → UNCERTAIN`, `quantum.tests` 5/5). Phase 3 low items: L6/L7 done, rest open. Phase 4 risks: all still open (P1/P2/P4/P5 are small doc/guard items; P6 awaits P1).
+
+| Finding | Status | Commit |
+|---|---|---|
+| H1 degenerate-signal fabrication | ✅ Fixed | `d948d46` |
+| H2 cross-check crash path | ✅ Fixed | `3f84d00` |
+| H3 README describes nonexistent model | ✅ Fixed | `9da797f` |
+| M1 broken documented commands | ✅ Fixed | `ce1367c` |
+| M2 "8 features" → 10 drift + missing UI labels | ✅ Fixed | `ec18e8c` |
+| M3 dead `train_ratio` config | ✅ Fixed | `5930f93` |
+| M4 artifact-consistency validation | ✅ Fixed | `4ad2a6c` |
+| M5 fallback docstring + `-inf` SNR | ✅ Fixed | `c1f4848` |
+| M6 POS_MSEC==0 sampling collapse | ✅ Fixed | `ed51efb` |
+| M7 worker crash visibility + timeout | ✅ Fixed | `8377760` |
+| M8 biased caps + nondeterministic CSV | ✅ Fixed | `8377760` |
+| M9 dataset-quality caveats | ✅ Fixed (docs) | `8377760`, `9da797f` |
+| M10 `--all` crashes without xgboost | ✅ Fixed | `1173767` |
+| M11 unguarded AUC | ✅ Fixed | `1173767` |
+| L1–L5, L8–L12 hygiene batch | ⏳ Open | — |
+| L6 AGENTS.md quality-gate claim | ✅ Fixed (pre-plan) | — |
+| L7 plots.py stale docstring | ✅ Fixed | — |
+| P1–P6 potential risks | ⏳ Open (documented) | — |
+
+---
+
 ## 1. Executive Summary
 
 The project is a cleanly separated, deterministic three-stage prototype whose documented engineering claims (structure, reproducibility, degradation behavior, no synthetic data) hold up under full review. The quantum-layer correctness fixes from the morning audit are verified in place with regression guards.
@@ -58,19 +85,22 @@ Strengths confirmed: deterministic seeds and split logic, correct `features=None
 
 ## 3. Confirmed Findings — High
 
-### H1. Degenerate signals are silently converted into "average human" features (silent wrong evidence)
+### H1. Degenerate signals are silently converted into "average human" features (silent wrong evidence) — ✅ FIXED (`d948d46`)
+- **Status (2026-08-14):** `RPPGPipeline._finalize` now gates on raw non-finite count ≥ 2 or `signal_quality_index == 0.0` → `features=None` (INCONCLUSIVE, exit 3) with a warning; `_fill_nan_with_median` remains only for single-NaN cases. See `fix_plans.md` H1.
 - **Files:** `WORKING/RPPG/rppg/features.py:334-354` (`_fill_nan_with_median`), consumed by `RPPG/rppg/pipeline.py::_finalize` and `run_pipeline.py`.
 - **Evidence:** The fallback table is hardcoded: NaN `heart_rate_bpm → 72.0`, `spectral_entropy → 0.5`, `peak_prominence → 1.0`, `snr_db → 0.0`, etc. A totally flat/degenerate pulse (e.g., no face ROI signal, static scene, heavily compressed face) therefore produces the feature vector of a *plausible healthy person* (HR 72 BPM, mid entropy) instead of being rejected. `signal_quality_index → 0.0` is the only honest "bad" feature, and nothing consumes it to reject the clip. The quantum layer's plausibility filter (`quantum/data.py:89-98`) only drops non-finite values, which can no longer occur after filling.
 - **Consequence:** At inference, garbage input can score as "likely real" (or fake) on fabricated physiology — precisely the failure mode the system claims to detect. At training time it would inject fake-neutral rows.
 - **Fix:** treat low-SQI/NaN-heavy signals as `features=None` (INCONCLUSIVE) at the pipeline level, or add a `degenerate_signal` flag carried through `run_pipeline.py`; at minimum, log a warning when >2 fallbacks fire.
 
-### H2. rPPG cross-check crash path: stale/single-class classifier kills the pipeline
+### H2. rPPG cross-check crash path: stale/single-class classifier kills the pipeline — ✅ FIXED (`3f84d00`)
+- **Status (2026-08-14):** predict/proba wrapped in try/except → `{"skipped": ...}`; `n_features_in_ == 10` and 2 classes validated before use. See `fix_plans.md` H2.
 - **Files:** `WORKING/run_pipeline.py:183-198`; enabler `WORKING/RPPG/rppg-pipeline/retrain_dfdc.py:194-204`.
 - **Evidence:** `pickle.load` is wrapped, but `clf.predict_proba(x)[0]` and `clf.predict(x)[0]` are not. `retrain_dfdc.py` writes `rppg_classifier.pkl` **incrementally** — a checkpoint is saved after every 10 processed videos (default), which can be trained on a single class (e.g., first 10 sorted clips all Fake). sklearn `RandomForestClassifier.predict_proba` on a single-class fit returns a 1-column array → `proba[1]` raises `IndexError`. A stale pkl with a different feature count raises `ValueError`. Either crashes `run_pipeline.py` after the rPPG stage → server job ends in error.
 - **Consequence:** One bad checkpoint (or an old pkl left in `output/rppg/`) breaks every subsequent run. The cross-check is informational; it must never be able to kill the job.
 - **Fix:** wrap the predict/proba calls in try/except and emit `{"skipped": ...}`; validate `clf.n_features_in_ == 10` and `clf.n_classes_ == 2` before use.
 
-### H3. README documents a model that does not exist
+### H3. README documents a model that does not exist — ✅ FIXED (`9da797f`)
+- **Status (2026-08-14):** README Data/Model/Constraints sections now describe the 16-row DFDC table (10/3/3 split, seed 43, ECE 0.1052, `0.6155 → UNCERTAIN`) with an explicit small-data disclaimer. See `fix_plans.md` H3.
 - **Files:** `README.md:118-123` ("Current trained model": 469 FF++ clips, test acc 0.564, AUC 0.640, ECE 0.073, GaussianNB 0.621) and `README.md:166` ("currently an FF++-sourced table of 669 labeled clips; the DFDC row subset is false-positive noise and excluded").
 - **Evidence:** The actual training table is `WORKING/output/rppg/dataset_features.csv` — 16 rows, all `archive/DFDC_Dataset` (9 real / 7 fake). FF++ is gitignored, not used (`--include-ffpp` defaults off), and no 469/669-clip artifacts exist in `output/quantum/` metrics. The README's "Verified Constraints" section also claims the official FF++ split path is active; `data.py::_split_by_source` is dead code for the current data.
 - **Consequence:** Anyone evaluating the project from the README gets a completely wrong picture of the deployed model and its validity. The §H1/H2 issues compound this.
@@ -80,11 +110,13 @@ Strengths confirmed: deterministic seeds and split logic, correct `features=None
 
 ## 4. Confirmed Findings — Medium
 
-### M1. Broken documented commands
+### M1. Broken documented commands — ✅ FIXED (`ce1367c`)
+- **Status (2026-08-14):** README + `frame/README.md` point at `python app/pipeline.py --source ...`; legacy entry points explicitly noted as removed. See `fix_plans.md` M1.
 - `README.md:51-53` and `AGENTS.md` instruct `python app/main.py --source test.mp4 --save-metadata` and `python app/extract_frames.py ...`. Neither file exists (`WORKING/frame/app/` contains only `config.py, detector.py, pipeline.py, processing.py`; verified via `git ls-files`). Both commands fail with `ModuleNotFoundError`.
 - The real entry point is `python app/pipeline.py --source ...` (`extract` mode via `--input-dir`/`--sample-fps` flags). Fix the docs (or add shim modules).
 
-### M2. "8 features" → 10-feature drift (confirmed, 8 sites)
+### M2. "8 features" → 10-feature drift (confirmed, 8 sites) — ✅ FIXED (`ec18e8c`)
+- **Status (2026-08-14):** all 8 sites swept to 10; `FEATURE_LABELS` now includes `hr_half_diff` and `peak_prominence`; MAD glossary corrected. See `fix_plans.md` M2.
 - The feature contract is 10 features (both `FEATURE_NAMES` and `RPPGFeatures.feature_names()` verified identical). Stale "8" claims remain in:
   - `WORKING/run_pipeline.py:13` (docstring), `WORKING/quantum/pipeline.py:50` ("keyed by the 8 rPPG feature names"),
   - `WORKING/RPPG/README.md:6`, `WORKING/RPPG/rppg-pipeline/retrain_dfdc.py:8` ("the 8 rPPG features"),
@@ -93,41 +125,50 @@ Strengths confirmed: deterministic seeds and split logic, correct `features=None
 - Additionally `frontend/src/lib.js:132-141` `FEATURE_LABELS` lists only **8 of 10** features — `hr_half_diff` and `peak_prominence` (both selected by QAOA and displayed nowhere) are missing from the Insights panel; `lib.js:123` describes MAD as "derivative magnitude approach" while `features.py:182` computes plain mean absolute deviation.
 - Fix: sweep `8`→`10` and add the two missing labels (the QAOA "Selected by QAOA" tags in `QuantumFlow.jsx` already fall back to raw names for them).
 
-### M3. Dead/misleading split configuration
+### M3. Dead/misleading split configuration — ✅ FIXED (`5930f93`)
+- **Status (2026-08-14):** `train_ratio` removed; `test_ratio = 0.2` added and honored in `_grouped_train_val_test_split`; determinism test extended (10/3/3 unchanged). See `fix_plans.md` M3.
 - `quantum/config.py:43` declares `DataConfig.train_ratio = 0.6`, which is **never read**; `quantum/data.py:130-131` computes `test_c = round(per_class * val_ratio)` — the test ratio is the val ratio, there is no `test_ratio` field. Changing `train_ratio` silently does nothing; the split is train = remainder, val = test = 0.2.
 - Fix: remove `train_ratio`, add `test_ratio` (or document that val and test share the ratio).
 
-### M4. `predict_features` has no artifact-consistency validation
+### M4. `predict_features` has no artifact-consistency validation — ✅ FIXED (`4ad2a6c`)
+- **Status (2026-08-14):** scaler shape, selection-index range, and checkpoint input dim are asserted at load with actionable `RuntimeError`s; docstring corrected to 10 features. See `fix_plans.md` M4.
 - `WORKING/quantum/pipeline.py::predict_features` applies saved QAOA indices, a saved scaler, and a saved checkpoint independently. If artifacts are rebuilt out of sync (e.g., new `--select` run + old checkpoint, or a checkpoint from a different feature count), inference fails with opaque shape errors deep inside torch/sklearn instead of a clear message. The stale "8 rPPG feature names" docstring (`pipeline.py:50`) makes this worse.
 - Fix: at load time assert `scaler.mean_.shape == (len(FEATURE_NAMES),)`, `selection indices < 10`, and `checkpoint input dim == len(selection)`; raise a descriptive error.
 
-### M5. Fallback docstring/code mismatch + `-inf` SNR edge
+### M5. Fallback docstring/code mismatch + `-inf` SNR edge — ✅ FIXED (`c1f4848`)
+- **Status (2026-08-14):** docstring describes the real hardcoded fallbacks; `estimate_snr` returns NaN (not `-inf`) for zero signal power — NaN is now the single missing-value convention. See `fix_plans.md` M5.
 - `features.py:334-354` docstring claims "per-feature median of non-NaN values" — the code only uses hardcoded constants (median is never computed).
 - `estimate_snr` returns `-inf` when signal power is zero (`features.py:134`); `np.isnan(-inf)` is `False`, so the fallback does not replace it — `-inf` propagates to the CSV (silently dropped by `data.py`'s isfinite filter) or, at inference, into the scaler → NaN probability. Confirm the scaler/`predict_features` behavior for non-finite inputs (see P3).
 
-### M6. Timestamp-based frame sampling can silently collapse to 1 frame
+### M6. Timestamp-based frame sampling can silently collapse to 1 frame — ✅ FIXED (`ed51efb`)
+- **Status (2026-08-14):** after 2 zero-timestamp frames, `FrameIngestor` switches to stride sampling with a logged warning. See `fix_plans.md` M6.
 - `WORKING/frame/app/processing.py:100-126`: when `sample_fps` is set, sampling keys off `CAP_PROP_POS_MSEC`. For containers/codecs where OpenCV reports `POS_MSEC == 0` for every frame, only the first frame passes (`0 >= next_target(0)`, then `next_target=100` never reached) → stage 1 yields 1 frame → rPPG `features=None` → INCONCLUSIVE, with the root cause invisible in logs.
 - Fix: detect `all(timestamp == 0)` and fall back to stride-based sampling (`(source_frame_id-1) % step == 0`) with a warning.
 
-### M7. Extraction workers hide crash diagnostics (and can hang the pool)
+### M7. Extraction workers hide crash diagnostics (and can hang the pool) — ✅ FIXED (`8377760`)
+- **Status (2026-08-14):** per-item 600 s timeout drains `imap_unordered`; hung worker → `pool.terminate()` + FATAL message; worker PID added to error strings. See `fix_plans.md` M7.
 - `extract_dataset_features.py:40-58` and `probe_features.py:40-47` redirect worker `stderr` to NUL (`os.dup2`). Any worker crash prints nothing; with `mp.Pool.imap_unordered`, a hard worker death can hang the parent indefinitely (no timeout). `chunksize=1` maximizes pickle round-trips.
 - Fix: send `traceback.format_exc()` back in the result dict; add a parent-side deadline (e.g., `pool.imap_unordered(...)` + `multiprocessing` timeout or a watchdog).
 
-### M8. Dataset-cap selection is biased and CSV order is non-deterministic
+### M8. Dataset-cap selection is biased and CSV order is non-deterministic — ✅ FIXED (`8377760`)
+- **Status (2026-08-14):** seeded shuffle (`RandomState(0)`) before capping; CSV written sorted by `video_path`. Applies to future extractions only — the 16-row table is unchanged (per user decision). See `fix_plans.md` M8.
 - `extract_dataset_features.py:110-116`: `sorted(...)[:max_per_class]` takes the alphabetically-first N files — with DFDC's random 10-char IDs this is effectively an arbitrary but *reproducible* subset; with any named layout (FF++ `id0_id1_…`) it systematically selects the first actor pairs.
 - `extract_dataset_features.py:234` uses `imap_unordered` → CSV row order varies between extraction runs; `data.py` group iteration order (dict insertion = first-seen order) then feeds `rng.shuffle(mixed)` — so **regenerating the CSV can change the train/val/test assignment even with the same seed** (same groups, different order). Within a fixed CSV, the split is deterministic.
 - Fix: seed a random subset for caps; write the CSV sorted by `video_path`.
 
-### M9. Dataset quality observations (verified from the CSV)
+### M9. Dataset quality observations (verified from the CSV) — ✅ DOCUMENTED (`8377760` + `9da797f`)
+- **Status (2026-08-14):** README small-data disclaimer + extraction-script docstrings state the negative-SNR / coarse-HR / 10-row-train caveats. See `fix_plans.md` M9.
 - All 16 rows have **negative SNR** (`-1.37 … -8.13 dB`) — the pulse is buried in noise across the entire training set; the signal is weak evidence.
 - HR and `hr_half_diff` values lie on a coarse grid (multiples of ≈24.32 BPM; HR ∈ {48.6, 60.8, 72.97, 85.1, 121.6, 133.8, 145.9}) — coarse PSD binning on short clips limits physiological precision. `hr_half_diff` multiples of 24.32 also make HR-difference features nearly quantized constants.
 - Training size: 10 train rows (5 real / 5 fake). Metrics (acc 0.6667, F1 0.8000, AUC 0.5000) are not statistically meaningful; the report should state this explicitly.
 
-### M10. `--all` crashes on fresh environments (missing xgboost)
+### M10. `--all` crashes on fresh environments (missing xgboost) — ✅ FIXED (`1173767`)
+- **Status (2026-08-14):** guarded import → explicit `{"skipped": "xgboost not installed"}` entry; `xgboost>=2.0.0` declared in root `requirements.txt` (optional baseline). See `fix_plans.md` M10.
 - `quantum/evaluation.py:222` imports `XGBClassifier` inside `run_baselines` **without a try/except**, and xgboost appears in **no** requirements file (root, frame, or RPPG). On a host without xgboost, `python -m quantum.pipeline --all` fails at the baselines step after all training work is done.
 - Fix: add `xgboost>=2.0.0` to root requirements, or wrap in try/except and skip the XGBoost baseline.
 
-### M11. `roc_auc_score` is unguarded for single-class splits
+### M11. `roc_auc_score` is unguarded for single-class splits — ✅ FIXED (`1173767`)
+- **Status (2026-08-14):** AUC computed only when both classes present (`auc_roc=None` in metrics; ROC panel skipped). See `fix_plans.md` M11.
 - `quantum/evaluation.py:82` and `quantum/plots.py:28` call `roc_auc_score(y_true, prob_real)` with no class-count check → `ValueError` if a test fold ends up single-class (today's 3-row test split is 2/1; any future small split can break `--all`).
 - Fix: compute AUC only when both classes present (skip → `null`).
 
@@ -135,29 +176,29 @@ Strengths confirmed: deterministic seeds and split logic, correct `features=None
 
 ## 5. Confirmed Findings — Low
 
-- **L1** `frontend/package.json:2` — `"name": "frontemd"` typo.
-- **L2** `rppg-pipeline/run_on_video.py:7` — docstring says `python examples/run_on_video.py`; actual path is `rppg-pipeline/`.
-- **L3** `rppg-pipeline/streamlit_app.py:119-128` — hardcodes `output/rppg/rppg_classifier.pkl` relative to 3 parents up; works only from repo layout; `min_frames` initial-value logic tied to stale `fps` widget state (cosmetic).
-- **L4** `frame/app/pipeline.py:92-94` — silently remaps webcam source `0` → `1` with a warning; undocumented oddity.
-- **L5** `RPPG/rppg/model_utils.py` — downloads (`face_landmarker.task`, Haar XML) without checksum pinning; the `latest` URL is a moving target (reproducibility drift); no timeout on `urlretrieve`.
-- **L6** `AGENTS.md` optimization bullet claims stage-1 path "skips Laplacian/brightness" — **false**: `frame/app/pipeline.py:448` still computes and records them in metadata for every sampled frame (the *use* of the result is skipped in the rPPG stage, not the computation).
-- **L7** `quantum/plots.py` `_sklearn` docstring says "~12 s" import; measured ~2.4 s (stale comment).
-- **L8** Root `result.json` (untracked, gitignored) is a stale demo artifact referencing `FF++/train/FF-synthesis/id0_id1_0005.mp4` with an INCONCLUSIVE verdict — confusing if someone opens it.
-- **L9** `SKILL.md` at repo root is an AI agent skill file (frontend-design guidance) — unrelated repo clutter; likely committed by accident.
-- **L10** `quantum/config.py:73` `VQCConfig.batch_size = 32` with a 10-row train set → always a single batch; benign but misleading.
-- **L11** `quantum/vqc.py:58` `QuantumLayer.forward` calls `self.weights.cpu()` on every forward; could cache on the torch device to avoid per-call copies.
-- **L12** `WORKING/frame/requirements.txt:9` pins `opencv-python==4.6.0.66` while `WORKING/RPPG/requirements.txt:1` requires `>=4.8.0,<5.0.0` — installing per-stage requirements in the wrong order breaks stage 2; only the merged root `requirements.txt` resolves this. Foot-gun documented at root, still present.
+- **L1** ⏳ OPEN `frontend/package.json:2` — `"name": "frontemd"` typo.
+- **L2** ⏳ OPEN `rppg-pipeline/run_on_video.py:7` — docstring says `python examples/run_on_video.py`; actual path is `rppg-pipeline/`.
+- **L3** ⏳ OPEN `rppg-pipeline/streamlit_app.py:119-128` — hardcodes `output/rppg/rppg_classifier.pkl` relative to 3 parents up; works only from repo layout; `min_frames` initial-value logic tied to stale `fps` widget state (cosmetic).
+- **L4** ⏳ OPEN `frame/app/pipeline.py:92-94` — silently remaps webcam source `0` → `1` with a warning; undocumented oddity.
+- **L5** ⏳ OPEN `RPPG/rppg/model_utils.py` — downloads (`face_landmarker.task`, Haar XML) without checksum pinning; the `latest` URL is a moving target (reproducibility drift); no timeout on `urlretrieve`.
+- **L6** ✅ FIXED (pre-plan, 2026-08-13) — `AGENTS.md` optimization bullet and `RPPG/README.md` corrected to state that Laplacian/brightness are still *computed* per frame (only the *use* is skipped in the rPPG stage).
+- **L7** ✅ FIXED — `quantum/plots.py` `_sklearn` docstring now reads "~2.4 s" (measured).
+- **L8** ⏳ OPEN Root `result.json` (untracked, gitignored) is a stale demo artifact referencing `FF++/train/FF-synthesis/id0_id1_0005.mp4` with an INCONCLUSIVE verdict — confusing if someone opens it.
+- **L9** ⏳ OPEN `SKILL.md` at repo root is an AI agent skill file (frontend-design guidance) — unrelated repo clutter; likely committed by accident.
+- **L10** ⏳ OPEN `quantum/config.py:73` `VQCConfig.batch_size = 32` with a 10-row train set → always a single batch; benign but misleading.
+- **L11** ⏳ OPEN `quantum/vqc.py:58` `QuantumLayer.forward` calls `self.weights.cpu()` on every forward; could cache on the torch device to avoid per-call copies.
+- **L12** ⏳ OPEN `WORKING/frame/requirements.txt:9` pins `opencv-python==4.6.0.66` while `WORKING/RPPG/requirements.txt:1` requires `>=4.8.0,<5.0.0` — installing per-stage requirements in the wrong order breaks stage 2; only the merged root `requirements.txt` resolves this. Foot-gun documented at root, still present.
 
 ---
 
 ## 6. Potential Risks / Assumptions (need verification)
 
-- **P1 — DFDC subject leakage (unresolvable from current data).** DFDC archive filenames are random 10-char IDs (`aaagqkcdis.mp4`, …) that encode no subject pairing, so per-clip grouping (`data.py:30-41`) is the best available and *not demonstrably wrong*. However, DFDC contains multiple clips per subject; without the DFDC subject-metadata JSON, real/fake takes of the same person can land in different splits. Mitigation: import the DFDC metadata mapping for true subject IDs.
-- **P2 — Non-finite features at inference.** If a vector contains `-inf`/NaN at inference (see M5), `predict_features` behavior is untested; the scaler will produce NaN → probability NaN → verdict handling unknown. Verify and guard.
-- **P3 — GPU memory under concurrency.** Two simultaneous server jobs each load YOLO (CUDA) + MediaPipe + the VQC — the 4 GB RTX 4050 is near its ceiling; the concurrency cap of 2 is not enforced at the GPU level. Monitor during load tests.
-- **P4 — `pickle.load` of `rppg_classifier.pkl`.** Arbitrary-code execution if the pkl is replaced by anyone with write access to `output/rppg/`; low risk locally, must not move to shared hosting as-is.
-- **P5 — mediapipe version floor.** `mediapipe>=0.10.9` may resolve to a build whose Tasks `FaceLandmarker` API differs from what `face_roi.py` imports (docstring notes 0.10.30+ dropped the legacy API); the model bundle URL is unpinned (`latest`). Pin both for reproducibility.
-- **P6 — `_grouped_train_val_test_split` balance fallback.** When group sizes exceed per-split targets (not the case today: all groups are size 1), `place()` assigns to the least-filled split, which can unbalance classes. Fine for the current data; re-check if DFDC metadata brings multi-clip groups.
+- **P1 — DFDC subject leakage (unresolvable from current data).** ⏳ OPEN. DFDC archive filenames are random 10-char IDs (`aaagqkcdis.mp4`, …) that encode no subject pairing, so per-clip grouping (`data.py:30-41`) is the best available and *not demonstrably wrong*. However, DFDC contains multiple clips per subject; without the DFDC subject-metadata JSON, real/fake takes of the same person can land in different splits. Mitigation: import the DFDC metadata mapping for true subject IDs. Per user decision this stays documentation-only — the one-sentence README note from `fix_plans.md` P1 has not been added yet.
+- **P2 — Non-finite features at inference.** ⏳ OPEN. If a vector contains `-inf`/NaN at inference (see M5), `predict_features` behavior is untested; the scaler will produce NaN → probability NaN → verdict handling unknown. Guard recommended in `fix_plans.md` P2 (not yet applied).
+- **P3 — GPU memory under concurrency.** ⏳ OPEN. Two simultaneous server jobs each load YOLO (CUDA) + MediaPipe + the VQC — the 4 GB RTX 4050 is near its ceiling; the concurrency cap of 2 is not enforced at the GPU level. Monitor during load tests.
+- **P4 — `pickle.load` of `rppg_classifier.pkl`.** ⏳ OPEN. Arbitrary-code execution if the pkl is replaced by anyone with write access to `output/rppg/`; low risk locally, must not move to shared hosting as-is. README/AGENTS trust note (per `fix_plans.md` P4) not yet added.
+- **P5 — mediapipe version floor.** ⏳ OPEN. `mediapipe>=0.10.9` may resolve to a build whose Tasks `FaceLandmarker` API differs from what `face_roi.py` imports (docstring notes 0.10.30+ dropped the legacy API); the model bundle URL is unpinned (`latest`). Pin both for reproducibility.
+- **P6 — `_grouped_train_val_test_split` balance fallback.** ⏳ OPEN. When group sizes exceed per-split targets (not the case today: all groups are size 1), `place()` assigns to the least-filled split, which can unbalance classes. Fine for the current data; re-check if DFDC metadata brings multi-clip groups.
 
 ---
 
@@ -175,18 +216,18 @@ Strengths confirmed: deterministic seeds and split logic, correct `features=None
 
 ## 8. Recommended Fix Plan (priority order)
 
-| # | Severity | Fix | Effort |
-|---|---|---|---|
-| 1 | High (H1) | Reject degenerate signals (SQI≈0 / fallback-heavy) as `features=None`; add warning log | ~30 min |
-| 2 | High (H2) | Guard cross-check predict/proba; validate `n_features_`/`n_classes_` | ~15 min |
-| 3 | High (H3) | Rewrite README data/model sections to the 16-row DFDC reality | ~20 min |
-| 4 | Medium (M1, M6, M10) | Fix doc commands; POS_MSEC==0 fallback; xgboost in requirements | ~45 min |
-| 5 | Medium (M2) | 8→10 sweep + add `hr_half_diff`/`peak_prominence` to `FEATURE_LABELS` | ~20 min |
-| 6 | Medium (M3, M4, M5) | `test_ratio` config; artifact-consistency asserts; docstring/`-inf` handling | ~40 min |
-| 7 | Medium (M7, M8) | Worker crash reporting + parent timeout; seeded caps + sorted CSV | ~40 min |
-| 8 | Medium (M11) | Guard AUC for single-class folds | ~10 min |
-| 9 | Low (L1–L12) | Triage; at minimum fix L6 (AGENTS.md claim) and L8 (remove stale result.json) | ~30 min |
-| 10 | Potential (P1–P6) | DFDC subject metadata, non-finite inference guard, GPU load test, pkl trust note, mediapipe pin | 1–2 days |
+| # | Severity | Fix | Effort | Status |
+|---|---|---|---|---|
+| 1 | High (H1) | Reject degenerate signals (SQI≈0 / fallback-heavy) as `features=None`; add warning log | ~30 min | ✅ Done (`d948d46`) |
+| 2 | High (H2) | Guard cross-check predict/proba; validate `n_features_`/`n_classes_` | ~15 min | ✅ Done (`3f84d00`) |
+| 3 | High (H3) | Rewrite README data/model sections to the 16-row DFDC reality | ~20 min | ✅ Done (`9da797f`) |
+| 4 | Medium (M1, M6, M10) | Fix doc commands; POS_MSEC==0 fallback; xgboost in requirements | ~45 min | ✅ Done (`ce1367c`, `ed51efb`, `1173767`) |
+| 5 | Medium (M2) | 8→10 sweep + add `hr_half_diff`/`peak_prominence` to `FEATURE_LABELS` | ~20 min | ✅ Done (`ec18e8c`) |
+| 6 | Medium (M3, M4, M5) | `test_ratio` config; artifact-consistency asserts; docstring/`-inf` handling | ~40 min | ✅ Done (`5930f93`, `4ad2a6c`, `c1f4848`) |
+| 7 | Medium (M7, M8) | Worker crash reporting + parent timeout; seeded caps + sorted CSV | ~40 min | ✅ Done (`8377760`) |
+| 8 | Medium (M11) | Guard AUC for single-class folds | ~10 min | ✅ Done (`1173767`) |
+| 9 | Low (L1–L12) | Triage; L6 and L7 done; remaining L1–L5, L8–L12 open | ~30 min | ⏳ Open (L6/L7 done) |
+| 10 | Potential (P1–P6) | DFDC subject metadata, non-finite inference guard, GPU load test, pkl trust note, mediapipe pin | 1–2 days | ⏳ Open |
 
 ---
 
