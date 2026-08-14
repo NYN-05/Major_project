@@ -276,10 +276,13 @@ def main() -> int:
     print("[3/3] QUANTUM stage : rPPG features -> QAOA subset -> hybrid VQC")
     quantum = quantum_inference(rppg_stage["features"])
     result["stages"]["quantum"] = quantum
-    print(
-        f"      prob_real = {quantum['prob_real']:.4f} -> {quantum['verdict']} "
-        f"(confidence {quantum['confidence']:.4f})"
-    )
+    if quantum["prob_real"] is None:
+        print(f"      {quantum['verdict']}: {quantum.get('reason', 'no probability produced')}")
+    else:
+        print(
+            f"      prob_real = {quantum['prob_real']:.4f} -> {quantum['verdict']} "
+            f"(confidence {quantum['confidence']:.4f})"
+        )
 
     result["verdict"] = {"label": quantum["verdict"], "confidence": quantum["confidence"]}
     _finish(result, args.out, exit_code=0)

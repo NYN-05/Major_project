@@ -58,6 +58,16 @@ def predict_features(features):
             f"found {scaler.mean_.shape[0]}. Rerun `python -m quantum.pipeline --all` from WORKING/."
         )
     x_scaled = scaler.transform(x)
+    if not np.isfinite(x_scaled).all():
+        return {
+            "prob_real": None,
+            "verdict": "INCONCLUSIVE",
+            "confidence": None,
+            "reason": "rPPG feature vector contains non-finite values after scaling",
+            "selected_features": None,
+            "selected_indices": None,
+            "scaler_file": str(SCALER_FILE),
+        }
     selection = load_selection()
     indices = [int(i) for i in selection["selected_indices"]]
     if not indices or any(i < 0 or i >= len(FEATURE_NAMES) for i in indices):
