@@ -32,21 +32,32 @@ def _sklearn():
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import (
         accuracy_score,
+        average_precision_score,
+        confusion_matrix,
         precision_recall_fscore_support,
         roc_auc_score,
     )
-    from sklearn.model_selection import StratifiedKFold
+    from sklearn.model_selection import GroupKFold, StratifiedKFold
     from sklearn.naive_bayes import GaussianNB
     from sklearn.neural_network import MLPClassifier
     from sklearn.svm import LinearSVC
+
+    try:
+        from sklearn.model_selection import StratifiedGroupKFold
+    except ImportError:  # older sklearn
+        StratifiedGroupKFold = None
 
     return {
         "CalibratedClassifierCV": CalibratedClassifierCV,
         "RandomForestClassifier": RandomForestClassifier,
         "LogisticRegression": LogisticRegression,
         "accuracy_score": accuracy_score,
+        "average_precision_score": average_precision_score,
+        "confusion_matrix": confusion_matrix,
         "precision_recall_fscore_support": precision_recall_fscore_support,
         "roc_auc_score": roc_auc_score,
+        "GroupKFold": GroupKFold,
+        "StratifiedGroupKFold": StratifiedGroupKFold,
         "StratifiedKFold": StratifiedKFold,
         "GaussianNB": GaussianNB,
         "MLPClassifier": MLPClassifier,
@@ -74,16 +85,24 @@ def classification_metrics(y_true, prob_real):
     precision, recall, f1, _ = sk["precision_recall_fscore_support"](
         y_true, predictions, average="binary", zero_division=0
     )
-    if len(set(int(v) for v in y_true)) < 2:
+    n_classes = len(set(int(v) for v in y_true))
+    if n_classes < 2:
         auc_roc = None
+        pr_auc = None
     else:
         auc_roc = float(sk["roc_auc_score"](y_true, prob_real))
+        pr_auc = float(sk["average_precision_score"](y_true, prob_real))
+    tn, fp, fn, tp = sk["confusion_matrix"](y_true, predictions).ravel()
+    specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
     return {
         "accuracy": float(sk["accuracy_score"](y_true, predictions)),
         "precision": float(precision),
         "recall": float(recall),
+        "specificity": specificity,
         "f1": float(f1),
         "auc_roc": auc_roc,
+        "pr_auc": pr_auc,
+        "confusion_matrix": [[int(tn), int(fp)], [int(fn), int(tp)]],
         "ece": expected_calibration_error(y_true, prob_real),
     }
 
@@ -106,20 +125,32 @@ def _aggregate_cv(rows):
     return {"mean": mean, "std": std, "folds": rows}
 
 
-def run_cv(fit_predict, X, y, n_splits=5, seed=42, n_jobs=0):
-    """Stratified K-fold cross-validation for a fit_predict callable.
+def run_cv(fit_predict, X, y, n_splits=5, seed=42, n_jobs=0, groups=None):
+    """Group-aware K-fold cross-validation for a fit_predict callable.
 
     `fit_predict(Xtr, ytr, Xte, yte) -> P(class=1)` is invoked per fold;
     returns _aggregate_cv payload with per-fold metrics plus balanced
-    accuracy. Folds are executed in parallel subprocesses when
-    ``n_jobs`` > 1 (or 0 = auto); training per fold is expensive (VQC),
-    so parallel folds scale wall time down by the worker count.
+    accuracy. When ``groups`` is provided, folds never separate one
+    subject's clips (GroupKFold / StratifiedGroupKFold), which is the
+    honest CV under the subject-grouped split. Folds are executed in
+    parallel subprocesses when ``n_jobs`` > 1 (or 0 = auto).
     """
     sk = _sklearn()
-    skf = sk["StratifiedKFold"](n_splits=n_splits, shuffle=True, random_state=seed)
     X = np.asarray(X)
     y = np.asarray(y)
-    fold_args = [(X[tr], y[tr], X[te], y[te]) for tr, te in skf.split(X, y)]
+    if groups is not None:
+        groups = np.asarray(groups)
+        if sk["StratifiedGroupKFold"] is not None:
+            splitter = sk["StratifiedGroupKFold"](
+                n_splits=n_splits, shuffle=True, random_state=seed
+            )
+        else:
+            splitter = sk["GroupKFold"](n_splits=n_splits)
+        fold_idx = list(splitter.split(X, y, groups))
+    else:
+        skf = sk["StratifiedKFold"](n_splits=n_splits, shuffle=True, random_state=seed)
+        fold_idx = list(skf.split(X, y))
+    fold_args = [(X[tr], y[tr], X[te], y[te]) for tr, te in fold_idx]
 
     if n_splits > 1 and (n_jobs != 1):
         workers = n_jobs if n_jobs > 0 else min(n_splits, os.cpu_count() or 1)
@@ -176,7 +207,9 @@ def _fit_vqc_fold(Xtr, ytr, Xte, yte, cfg):
     return predict_vqc(model, Xte)
 
 
-def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None, X_train=None, y_train=None):
+def evaluate_quantum_model(
+    X_test, y_test, vqc_cfg=None, decision_cfg=None, X_train=None, y_train=None, groups_train=None
+):
     vqc_cfg = vqc_cfg or VQCConfig()
     decision_cfg = decision_cfg or DecisionConfig()
     model = load_vqc_model(X_test.shape[1], vqc_cfg)
@@ -188,7 +221,8 @@ def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None, X_tr
     }
 
     # Cross-validation of the training procedure on the train split (the
-    # hold-out test above is untouched). Reported as mean +/- std.
+    # hold-out test above is untouched). Reported as mean +/- std. Uses
+    # subject-grouped folds when groups are available.
     if _enough_for_cv(y_train, n_splits=5):
         cv_cfg = VQCConfig(**{**vqc_cfg.__dict__, "save_checkpoint": False})
         payload["cv"] = run_cv(
@@ -197,6 +231,7 @@ def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None, X_tr
             y_train,
             seed=vqc_cfg.seed,
             n_jobs=os.cpu_count() or 1,
+            groups=groups_train,
         )
 
     plot_roc_curve(y_test, prob_real, decision_cfg.roc_plot)
@@ -207,11 +242,13 @@ def evaluate_quantum_model(X_test, y_test, vqc_cfg=None, decision_cfg=None, X_tr
     return payload
 
 
-def run_baselines(X_train, y_train, X_test, y_test, decision_cfg=None, seed=42, n_splits=5):
+def run_baselines(
+    X_train, y_train, X_test, y_test, decision_cfg=None, seed=42, n_splits=5, groups_train=None
+):
     """Classical research baselines on the same selected features.
 
     Compared against the QAOA -> VQC decision path on the hold-out test,
-    plus StratifiedKFold cross-validation of each baseline on the train
+    plus subject-grouped cross-validation of each baseline on the train
     split (mean +/- std, balanced accuracy).
     """
     decision_cfg = decision_cfg or DecisionConfig()
@@ -281,7 +318,9 @@ def run_baselines(X_train, y_train, X_test, y_test, decision_cfg=None, seed=42, 
                     m.fit(Xtr, ytr)
                 return m.predict_proba(Xte)[:, 1]
 
-            entry["cv"] = run_cv(_fit_fold, X_train, y_train, n_splits=n_splits, seed=seed, n_jobs=1)
+            entry["cv"] = run_cv(
+                _fit_fold, X_train, y_train, n_splits=n_splits, seed=seed, n_jobs=1, groups=groups_train
+            )
         results[name] = entry
 
     if XGBClassifier is None:

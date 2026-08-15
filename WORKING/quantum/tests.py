@@ -155,6 +155,50 @@ def test_split_determinism():
             )
 
 
+def test_ffpp_source_subject_grouping():
+    """FF++ real + its synthesis must share a group key (no leakage)."""
+    from quantum.data import _infer_subject_key
+
+    real = {"video_path": r"FF++\train\FF-real\id0_0000.mp4"}
+    synth = {"video_path": r"FF++\train\FF-synthesis\id0_id16_0002.mp4"}
+    yt = {"video_path": r"FF++\train\YouTube-real\00000.mp4"}
+    dfdc = {"video_path": r"archive\DFDC_Dataset\Fake\aaaoqepxnf.mp4"}
+    assert _infer_subject_key(real) == _infer_subject_key(synth) == "ffpp:src:id0"
+    assert _infer_subject_key(yt) == "ffpp:yt:00000"
+    assert _infer_subject_key(dfdc) == "clip:" + dfdc["video_path"].replace("\\", "/").lower()
+
+
+def test_no_group_leakage():
+    """A subject group must never straddle train/val/test; assertion fires if so."""
+    from quantum.data import (
+        _assert_no_group_leakage,
+        _grouped_train_val_test_split,
+        _infer_subject_key,
+    )
+
+    rng = np.random.RandomState(9)
+    rows = []
+    for subj in ("id0", "id1", "id2", "id3"):
+        rows.append({"video_path": rf"FF++\train\FF-real\{subj}_0000.mp4"})
+        rows.append({"video_path": rf"FF++\train\FF-synthesis\{subj}_id9_0001.mp4"})
+    groups = np.asarray([_infer_subject_key(r) for r in rows], dtype=object)
+    X = rng.rand(len(rows), 10)
+    y = np.asarray([1, 0, 1, 0, 1, 0, 1, 0])  # quantum: 1 real, 0 fake
+    paths = np.asarray([r["video_path"] for r in rows], dtype=object)
+    split = _grouped_train_val_test_split(X, y, groups, paths, DataConfig())
+    _assert_no_group_leakage(split)  # must not raise
+
+    bad = {f"groups_{s}": split[f"groups_{s}"].copy() for s in ("train", "val", "test")}
+    bad["groups_train"][0] = "leaked_group"
+    bad["groups_test"][0] = "leaked_group"
+    try:
+        _assert_no_group_leakage(bad)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("_assert_no_group_leakage did not fire on a straddling group")
+
+
 def main() -> None:
     checks = [
         test_beta_alive,
@@ -162,6 +206,8 @@ def main() -> None:
         test_real_hamiltonian_verification,
         test_feature_contract_sync,
         test_split_determinism,
+        test_ffpp_source_subject_grouping,
+        test_no_group_leakage,
     ]
     failures = 0
     for check in checks:

@@ -33,3 +33,9 @@ frontend/dist/
 # above must not swallow them.
 !frontend/package.json
 !frontend/package-lock.json
+
+.agents
+.claude
+
+WORKING/RPPG/archive
+*.cmd

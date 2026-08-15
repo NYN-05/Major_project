@@ -36,6 +36,12 @@ def build_parser():
     parser.add_argument("--evaluate", action="store_true", help="Evaluate the trained VQC")
     parser.add_argument("--baselines", action="store_true", help="Train classical baselines")
     parser.add_argument("--all", action="store_true", help="Run the full pipeline in order")
+    parser.add_argument(
+        "--dev-only",
+        action="store_true",
+        help="Development mode: evaluate on the validation split, never the final test split. "
+        "Use a normal run (no flag) only to produce the one frozen test-set evaluation.",
+    )
     return parser
 
 
@@ -123,6 +129,14 @@ def main():
         parser.print_help()
         return 2
 
+    dev_only = bool(getattr(args, "dev_only", False))
+    if dev_only:
+        print("=" * 72)
+        print("  DEV-ONLY MODE: all evaluation below runs on the VALIDATION split.")
+        print("  The final TEST split is isolated and touched only by a normal")
+        print("  run (no --dev-only) once a configuration is frozen.")
+        print("=" * 72)
+
     if args.build_data or args.all:
         print("[1/6] Building dataset from rPPG layer output...")
         build_dataset(data_cfg)
@@ -197,14 +211,19 @@ def main():
         print(f"  Checkpoint (with metadata): {vqc_cfg.checkpoint_file}")
 
     if args.evaluate or args.all:
-        print("[4/6] Evaluating quantum model...")
+        eval_X = X_val[:, indices] if dev_only else X_test[:, indices]
+        eval_y = data["y_val"] if dev_only else data["y_test"]
+        print(
+            f"[4/6] Evaluating quantum model on {'VAL' if dev_only else 'TEST'} split..."
+        )
         result = evaluate_quantum_model(
-            X_test[:, indices],
-            data["y_test"],
+            eval_X,
+            eval_y,
             vqc_cfg,
             decision_cfg,
             X_train=X_train[:, indices],
             y_train=data["y_train"],
+            groups_train=data["groups_train"],
         )
         metrics = result["metrics"]
         print(
@@ -220,13 +239,18 @@ def main():
         print(f"  decision bins: {result['decision_bins']}")
 
     if args.baselines or args.all:
-        print("[5/6] Training classical baselines...")
+        eval_X = X_val[:, indices] if dev_only else X_test[:, indices]
+        eval_y = data["y_val"] if dev_only else data["y_test"]
+        print(
+            f"[5/6] Training classical baselines ({'VAL' if dev_only else 'TEST'} evaluation)..."
+        )
         results = run_baselines(
             X_train[:, indices],
             data["y_train"],
-            X_test[:, indices],
-            data["y_test"],
+            eval_X,
+            eval_y,
             decision_cfg,
+            groups_train=data["groups_train"],
         )
         for name, metrics in results.items():
             print(

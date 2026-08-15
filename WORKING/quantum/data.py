@@ -7,20 +7,33 @@ convention (CSV: 1 = deepfake, 0 = real; quantum: LABEL_REAL = 1,
 LABEL_FAKE = 0), and stores a subject-grouped train/val/test split as
 data.npz for QAOA selection, VQC training, and evaluation.
 
-Subject grouping: the CSV carries no explicit subject IDs. The
-"archive (1)" clips are paired by filename stem (real and fake takes
-of the same subject index, e.g. deepfake/2.mp4 <-> video/2.mp4), so
-those stems are treated as subject groups to keep a subject's real
-and fake takes in the same split (no leakage). DFDC clips have no
-pairing information and are treated as individual groups. The split
-is seeded and balanced per class.
+Subject grouping: the CSV carries no explicit subject IDs, so the
+group key is derived from the clip path. FF++ clips are grouped by
+source subject so a real clip and its synthesized counterpart can
+never straddle train/val/test:
+  - FF-real / FF-synthesis (e.g. id0_0000.mp4, id0_id16_0002.mp4)
+    -> "ffpp:src:<source-subject>" (first "id" token of the stem).
+  - YouTube-real clips (e.g. 00000.mp4) -> "ffpp:yt:<stem>" (each
+    unpaired YouTube clip is its own group).
+DFDC clips carry no pairing or subject information on disk, so each
+is treated as an individual group ("clip:<path>") - a documented
+limitation (DFDC subject-level separation is unrecoverable here).
+The split is seeded and balanced per class, and a leakage assertion
+aborts the build if any group key appears in more than one split.
 """
 
 import csv
+import json
 
 import numpy as np
 
-from quantum.config import DataConfig, FEATURE_NAMES, LABEL_FAKE, LABEL_REAL
+from quantum.config import (
+    DataConfig,
+    FEATURE_NAMES,
+    LABEL_FAKE,
+    LABEL_REAL,
+    OUTPUT_DIR,
+)
 
 RPPG_LABEL_FAKE = 1  # rPPG CSV convention: 1 = deepfake, 0 = real
 
@@ -30,11 +43,20 @@ SPLITS = ("train", "val", "test")
 def _infer_subject_key(row):
     """Derive a subject group key from the video path.
 
-    archive (1) clips are named by subject index (1..5) with one real
-    and one fake take per index, so the stem groups both takes of the
-    same subject. DFDC clip names carry no subject info -> clip id.
+    FF++ clips are grouped by source subject (first "id" token of the
+    filename stem) so a real clip and its synthesized counterpart stay
+    in the same split: id0_0000.mp4 and id0_id16_0002.mp4 -> "ffpp:src:id0".
+    YouTube-real clips (numeric stems, no pairing) are their own group.
+    DFDC clip names carry no subject info -> clip id (documented
+    limitation: DFDC subject-level separation is unrecoverable on disk).
     """
     path = row["video_path"].replace("\\", "/").strip().lower()
+    if "/ff++/" in path or path.startswith("ff++/"):
+        stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        folder = path.rstrip("/").rsplit("/", 2)[-2]
+        if folder == "youtube-real" or not stem.split("_")[0].startswith("id"):
+            return "ffpp:yt:" + stem
+        return "ffpp:src:" + stem.split("_")[0]
     if "archive (1)" in path:
         stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
         return "subj:" + stem
@@ -206,6 +228,48 @@ def _split_by_source(X, y, groups, paths, split_keys):
     return data
 
 
+def _assert_no_group_leakage(split):
+    """Fail loudly if any subject group appears in more than one split.
+
+    Subject grouping (see _infer_subject_key) exists so a person's real
+    and fake takes stay in the same split; if a group key ever straddles
+    train/val/test that is data leakage and the build must abort.
+    """
+    seen = {}
+    for s in SPLITS:
+        for g in split[f"groups_{s}"]:
+            g = str(g)
+            if g in seen and seen[g] != s:
+                raise AssertionError(
+                    f"Subject-group leakage: group '{g}' appears in both "
+                    f"'{seen[g]}' and '{s}' splits. Fix _infer_subject_key."
+                )
+            seen[g] = s
+
+
+def _write_split_manifest(split, cfg):
+    """Record path -> (split, group) so any future split can be reproduced.
+
+    The manifest lives next to data.npz (gitignored) and is consumed by
+    the baseline harness in Phase 1.
+    """
+    manifest = {
+        "seed": cfg.seed,
+        "val_ratio": cfg.val_ratio,
+        "test_ratio": cfg.test_ratio,
+        "filter_implausible": cfg.filter_implausible,
+        "rows": {},
+    }
+    for s in SPLITS:
+        for p, g in zip(split[f"paths_{s}"], split[f"groups_{s}"]):
+            manifest["rows"][str(p)] = {"split": s, "group": str(g)}
+    out = OUTPUT_DIR / "split_manifest.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as fh:
+        json.dump(manifest, fh, indent=2)
+    return out
+
+
 def build_dataset(cfg=None):
     """Build data.npz from the real rPPG feature table (rPPG layer output)."""
     cfg = cfg or DataConfig()
@@ -222,6 +286,9 @@ def build_dataset(cfg=None):
         split = _split_by_source(X, y, groups, paths, split_keys)
     else:
         split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
+    _assert_no_group_leakage(split)
+    manifest_file = _write_split_manifest(split, cfg)
+    print(f"  Split manifest written: {manifest_file}")
     cfg.data_file.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         cfg.data_file,
@@ -231,12 +298,12 @@ def build_dataset(cfg=None):
         y_val=split["y_val"],
         X_test=split["X_test"],
         y_test=split["y_test"],
-        groups_train=split["groups_train"],
-        groups_val=split["groups_val"],
-        groups_test=split["groups_test"],
-        paths_train=split["paths_train"],
-        paths_val=split["paths_val"],
-        paths_test=split["paths_test"],
+        groups_train=np.asarray(split["groups_train"], dtype=str),
+        groups_val=np.asarray(split["groups_val"], dtype=str),
+        groups_test=np.asarray(split["groups_test"], dtype=str),
+        paths_train=np.asarray(split["paths_train"], dtype=str),
+        paths_val=np.asarray(split["paths_val"], dtype=str),
+        paths_test=np.asarray(split["paths_test"], dtype=str),
         feature_names=FEATURE_NAMES,
     )
     print(f"  Built subject-grouped split from {len(X)} real rPPG samples:")
@@ -258,4 +325,10 @@ def load_dataset(path=None):
             f"Dataset not found at {path}. Build it first with: python -m quantum.pipeline --build-data"
         )
     data = np.load(path)
-    return {key: data[key] for key in ("X_train", "y_train", "X_val", "y_val", "X_test", "y_test")}
+    return {
+        key: data[key]
+        for key in (
+            "X_train", "y_train", "X_val", "y_val", "X_test", "y_test",
+            "groups_train", "groups_val", "groups_test",
+        )
+    }
