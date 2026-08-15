@@ -57,7 +57,7 @@ class QAOASelectionConfig:
     max_iter: int = 200
     redundancy_penalty: float = 0.3
     cardinality_penalty: float = 0.5
-    target_features: int = 6
+    target_features: int = 3
     seed: int = 42
     restarts: int = 4
     n_jobs: int = 0

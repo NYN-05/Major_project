@@ -63,7 +63,7 @@ pipeline = RPPGPipeline(
 **Stage-1 handoff path** (used by `run_pipeline.py`):
 - Receives accepted JPEGs from `output/frames/frame_sequences/<video>/frames/`
 - Receives `frame_metadata.jsonl` with per-frame timestamps
-- Runs at stage-1 sample rate (10 fps)
+- Runs at stage-1 sample rate (30 fps)
 - **Skips blur/brightness re-gating** (stage 1 already did this)
 - Still runs MediaPipe per frame; frames with no face → interpolated
 

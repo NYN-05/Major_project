@@ -50,12 +50,16 @@ for _root in (FRAME_ROOT, RPPG_ROOT, WORKING):
 from app.pipeline import run_frame_sampling_quality_layer  # stage 1
 from rppg import RPPGPipeline  # stage 2
 
-from quantum.pipeline import predict_features  # stage 3
+# Stage 3 (quantum.pipeline) imports torch + pennylane (~7 s); it is imported
+# lazily inside quantum_inference() so stage-1/2 progress lines stream to the
+# SSE client immediately instead of blocking on the heavy import stack.
 
 FRAME_WEIGHTS = FRAME_ROOT / "weights" / "yolov8n-face-lindevs.pt"
 RPPG_CLASSIFIER = RPPG_OUTPUT / "rppg_classifier.pkl"
 
 VERDICT_INCONCLUSIVE = "INCONCLUSIVE"
+
+MAX_SIGNAL_POINTS = 600
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +76,7 @@ def run_frames_stage(video_path: Path) -> tuple[dict, dict, dict]:
         image_size=320,
         device="auto",
         use_half=False,
-        sample_fps=10.0,
+        sample_fps=30.0,
         output_root=str(FRAMES_OUTPUT / "frame_sequences"),
         extraction_log=str(FRAMES_OUTPUT / "frame_extraction_log.jsonl"),
         summary_file=str(FRAMES_OUTPUT / "frame_extraction_summary.json"),
@@ -143,7 +147,7 @@ def frame_stats_from_summary(summary: dict) -> dict:
 # Stage 2: rPPG
 # ---------------------------------------------------------------------------
 
-def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None = None) -> tuple[dict, np.ndarray | None]:
+def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None = None) -> tuple[dict, np.ndarray | None, object]:
     """rPPG feature extraction. Uses the stage-1 accepted frames when the
     frame layer produced them (input_mode=stage1_frames); otherwise falls
     back to reading the video directly (input_mode=video_direct)."""
@@ -175,9 +179,9 @@ def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None =
         "warnings": list(result.warnings),
     }
     if result.features is None:
-        return payload, None
+        return payload, None, result
     payload["features"] = result.features.to_dict()
-    return payload, result.to_feature_vector()
+    return payload, result.to_feature_vector(), result
 
 
 def rppg_classifier_crosscheck(vector: np.ndarray) -> dict:
@@ -220,7 +224,35 @@ def quantum_inference(features: dict) -> dict:
     applies the saved training-time QAOA indices to the 10-feature rPPG output
     and returns P(real) plus the KYC verdict (REAL / FAKE / UNCERTAIN).
     """
+    from quantum.pipeline import predict_features  # deferred: torch+pennylane ~7 s
+
     return predict_features(features)
+
+
+def emit_signal(result, path: str | None) -> None:
+    """Write the decimated rPPG waveform JSON for the UI (same schema as the
+    old frontend/dump_signal.py subprocess, which this replaces). The signal
+    is produced in-process from the stage-2 result — no duplicate MediaPipe
+    pass and the fps matches the one actually used for the verdict."""
+    if not path:
+        return
+    payload: dict = {"fps": 0.0, "n": 0, "signal": None, "error": None}
+    if result is not None:
+        payload["fps"] = float(result.fps)
+        payload["n"] = int(result.n_frames_usable)
+        if result.combined_signal is None:
+            payload["error"] = "no signal (insufficient usable frames)"
+        else:
+            sig = np.asarray(result.combined_signal, dtype=np.float64)
+            if len(sig) > MAX_SIGNAL_POINTS:
+                step = int(np.ceil(len(sig) / MAX_SIGNAL_POINTS))
+                sig = sig[::step]
+            payload["signal"] = [
+                None if np.isnan(float(s)) else round(float(s), 6) for s in sig
+            ]
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +266,11 @@ def build_parser():
     parser.add_argument("--source", required=True, help="Path to the input video (mp4/avi/...)")
     parser.add_argument("--method", default="POS", choices=["POS", "CHROM"], help="rPPG reconstruction method")
     parser.add_argument("--out", default=None, help="Output JSON path (default: output/pipeline/pipeline_result.json)")
+    parser.add_argument(
+        "--signal-out",
+        default=None,
+        help="Write the decimated rPPG waveform JSON here (same schema as frontend/dump_signal.py)",
+    )
     return parser
 
 
@@ -256,8 +293,9 @@ def main() -> int:
     )
 
     print(f"[2/3] RPPG stage    : method={args.method}")
-    rppg_stage, vector = run_rppg_stage(video_path, args.method, frame_handoff)
+    rppg_stage, vector, rppg_result = run_rppg_stage(video_path, args.method, frame_handoff)
     result["stages"]["rppg"] = rppg_stage
+    emit_signal(rppg_result, args.signal_out)
     if vector is None:
         result["verdict"] = {
             "label": VERDICT_INCONCLUSIVE,

@@ -17,6 +17,39 @@ def _mutual_info_weights(X, y, seed):
     return mutual_info_classif(X, y, random_state=seed)
 
 
+def _discrimination_weights(X, y, seed=None):
+    """Supervised per-feature discrimination strength (sign-agnostic AUC).
+
+    weight_i = 2*|AUC_i - 0.5| in [0, 1], where AUC_i is the area under
+    the ROC curve of feature i alone separating the two classes (the
+    Mann-Whitney U statistic, computed exactly, no training needed).
+
+    Replaces mutual-information weights: on the weak, noisy rPPG
+    features MI ranked the strongest discriminators (heart_rate_bpm,
+    snr_db) near zero, so the QAOA optimizer systematically selected
+    non-informative features (measured CV AUC 0.484 vs 0.569 for the
+    top-3 discriminators). The sign is dropped because an inverted
+    feature (AUC < 0.5) is as informative as a forward one once the
+    downstream classifier learns its sign.
+    """
+    y = np.asarray(y)
+    pos_mask = y == 1
+    n_pos = int(pos_mask.sum())
+    n_neg = int((~pos_mask).sum())
+    d = X.shape[1]
+    if n_pos == 0 or n_neg == 0:
+        return np.zeros(d, dtype=np.float64)
+    weights = np.zeros(d, dtype=np.float64)
+    for i in range(d):
+        a = np.asarray(X[:, i], dtype=np.float64)[pos_mask]
+        b = np.asarray(X[:, i], dtype=np.float64)[~pos_mask]
+        gt = int((a[:, None] > b[None, :]).sum())
+        eq = int((a[:, None] == b[None, :]).sum())
+        auc = (gt + 0.5 * eq) / (n_pos * n_neg)
+        weights[i] = 2.0 * abs(auc - 0.5)
+    return weights
+
+
 def simulator_device(wires):
     """Fastest available statevector simulator for QAOA circuits.
 
@@ -177,7 +210,7 @@ class QAOASelector:
 
     def select(self, X, y):
         cfg = self.cfg
-        weights = _normalize_weights(_mutual_info_weights(X, y, cfg.seed))
+        weights = _normalize_weights(_discrimination_weights(X, y, cfg.seed))
         correlation = np.abs(np.corrcoef(X.T))
         n_restarts = max(1, cfg.restarts)
         seeds = [cfg.seed + i for i in range(n_restarts)]
@@ -216,14 +249,14 @@ class QAOASelector:
 
 
 def select_classical(X, y, cfg=None):
-    """Classical reference selection: top-k features by mutual information.
+    """Classical reference selection: top-k features by discrimination AUC.
 
     Report-only selector used to sanity-check that the QAOA choice is not
-    worse than a plain MI-greedy pick. Same output schema as
+    worse than a plain supervised-greedy pick. Same output schema as
     QAOASelector.select() so downstream code can consume either.
     """
     cfg = cfg or QAOASelectionConfig()
-    weights = _normalize_weights(_mutual_info_weights(X, y, cfg.seed))
+    weights = _normalize_weights(_discrimination_weights(X, y, cfg.seed))
     order = np.argsort(-weights)
     selected = order[: cfg.target_features]
     marginals = np.zeros(X.shape[1])
@@ -262,7 +295,7 @@ def verify_hamiltonian(X, y, cfg=None):
     max absolute error; the caller must assert it is ~0.
     """
     cfg = cfg or QAOASelectionConfig()
-    weights = _normalize_weights(_mutual_info_weights(X, y, cfg.seed))
+    weights = _normalize_weights(_discrimination_weights(X, y, cfg.seed))
     correlation = np.abs(np.corrcoef(X.T))
     coeffs, ops = _cost_terms(weights, correlation, cfg)
     dev = simulator_device(X.shape[1])

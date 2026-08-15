@@ -166,6 +166,7 @@ def _pump_stdout(proc: subprocess.Popen, job: dict) -> None:
 def _run_job(job: dict, video_path: Path) -> None:
     run_pipeline = WORKING / "run_pipeline.py"
     out_json = RESULTS_DIR / f"pipeline_result_{job['id']}.json"
+    sig_file = RESULTS_DIR / f"signal_{job['id']}.json"
     cmd = [
         sys.executable,
         str(run_pipeline),
@@ -173,6 +174,8 @@ def _run_job(job: dict, video_path: Path) -> None:
         str(video_path),
         "--out",
         str(out_json),
+        "--signal-out",
+        str(sig_file),
     ]
     try:
         proc = subprocess.Popen(
@@ -200,16 +203,17 @@ def _run_job(job: dict, video_path: Path) -> None:
             raise RuntimeError("pipeline produced no result JSON")
         result = json.loads(out_json.read_text(encoding="utf-8"))
         result["video"] = Path(result.get("video", video_path.name)).name
+        # The waveform is emitted by run_pipeline itself (stage-2 signal,
+        # same fps as the verdict), so it is ready at result time — no
+        # background ~30s subprocess re-run and no lost SSE signal event.
+        if sig_file.exists():
+            result["_signal"] = f"pipeline/{sig_file.name}"
+            job["signal"] = result["_signal"]
         job["result"] = result
         job["video"] = video_path.name
         job["done"] = True
-        # Verdict first; the optional signal-waveform dump continues in
-        # the background so the result is not delayed by ~30s.
         job["queue"].put(("result", result))
-        _write_canonical(result, signal_rel=None)
-        threading.Thread(
-            target=_signal_dump_worker, args=(job, video_path, result), daemon=True
-        ).start()
+        _write_canonical(result)
     except Exception as exc:  # noqa: BLE001 - surface to the UI
         job["error"] = str(exc)
         job["done"] = True
@@ -222,68 +226,15 @@ def _run_job(job: dict, video_path: Path) -> None:
         JOB_SLOTS.release()
 
 
-def _write_canonical(result: dict, signal_rel: str | None) -> None:
+def _write_canonical(result: dict) -> None:
     """Keep the '/api/previous' result file in sync with the last run
-    (including the signal rel once the background dump finishes)."""
+    (including the '_signal' rel when run_pipeline produced a waveform)."""
     try:
         canonical = dict(result)
-        canonical["_signal"] = signal_rel
+        canonical["_signal"] = canonical.get("_signal")
         CANONICAL_RESULT.write_text(json.dumps(canonical), encoding="utf-8")
     except OSError:
         pass
-
-
-def _signal_dump_worker(job: dict, video_path: Path, result: dict) -> None:
-    """Best-effort background signal reconstruction (~30s). Emits a
-    'signal' SSE event with the artifact rel path when ready."""
-    try:
-        rel = _dump_signal(job, video_path.name)
-        if rel:
-            job["signal"] = rel
-            job["queue"].put(("signal", rel))
-            _write_canonical(result, signal_rel=rel)
-        else:
-            # Log failure for debugging
-            with open(RESULTS_DIR / f"signal_debug_{job['id']}.log", "w") as f:
-                f.write(f"Signal dump failed for {video_path.name}\n")
-    except Exception as e:
-        with open(RESULTS_DIR / f"signal_debug_{job['id']}.log", "w") as f:
-            f.write(f"Signal dump exception: {e}\n")
-
-
-def _dump_signal(job: dict, video_name: str) -> str | None:
-    """Reuse the stage-1 accepted frames to reconstruct the real pulse
-    waveform for the verdict rig (best-effort; ~30s extra)."""
-    # video_name is the sanitized inbox filename (e.g., "abc12345_id0_0003.mp4")
-    # The frame sequence directory uses the same stem.
-    stem = Path(video_name).stem
-    frames_dir = OUTPUT_ROOT / "frames" / "frame_sequences" / stem / "frames"
-    metadata = OUTPUT_ROOT / "frames" / "frame_sequences" / stem / "frame_metadata.jsonl"
-    if not frames_dir.is_dir():
-        # Fallback: try without job prefix (for backward compat)
-        fallback_stem = stem.split("_", 1)[-1] if "_" in stem else stem
-        frames_dir = OUTPUT_ROOT / "frames" / "frame_sequences" / fallback_stem / "frames"
-        metadata = OUTPUT_ROOT / "frames" / "frame_sequences" / fallback_stem / "frame_metadata.jsonl"
-        if not frames_dir.is_dir():
-            return None
-    sig_file = RESULTS_DIR / f"signal_{job['id']}.json"
-    cmd = [
-        sys.executable,
-        str(HERE / "dump_signal.py"),
-        "--frames-dir",
-        str(frames_dir),
-        "--metadata",
-        str(metadata),
-        "--out",
-        str(sig_file),
-    ]
-    try:
-        subprocess.run(cmd, cwd=str(WORKING), timeout=120, capture_output=True, text=True)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-    if sig_file.exists():
-        return f"pipeline/{sig_file.name}"
-    return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -531,6 +482,13 @@ class Handler(BaseHTTPRequestHandler):
         q = job["queue"]
         try:
             while True:
+                # Late/reconnected client: a finished job must emit its
+                # terminal event and close immediately. Otherwise an
+                # EventSource reconnect after completion would pin this
+                # thread in q.get() forever (one leaked thread per reconnect).
+                if job["done"]:
+                    self._drain_terminal(job, q)
+                    return
                 try:
                     kind, payload = q.get(timeout=20)
                 except queue.Empty:
@@ -541,6 +499,21 @@ class Handler(BaseHTTPRequestHandler):
                     return
         except (BrokenPipeError, ConnectionResetError):
             return
+
+    def _drain_terminal(self, job: dict, q: queue.Queue) -> None:
+        """Emit any events still queued, then the terminal event."""
+        while True:
+            try:
+                kind, payload = q.get_nowait()
+            except queue.Empty:
+                break
+            self._sse(kind, payload)
+            if kind in ("result", "error"):
+                return
+        if job["error"] is not None:
+            self._sse("error", job["error"])
+        elif job["result"] is not None:
+            self._sse("result", job["result"])
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003 - stdlib signature
         if fmt.startswith("GET /api") or fmt.startswith("POST /api"):

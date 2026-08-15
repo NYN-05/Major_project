@@ -4,11 +4,23 @@ Each helper writes a single PNG (Agg backend, no GUI) and closes its
 figure so callers can loop over many plots without leaking memory.
 """
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
+
+
+def _plt():
+    """Deferred matplotlib import (~0.76 s on this host).
+
+    Keep it (and the Agg backend selection) inside the plot functions
+    so `import quantum.pipeline` stays fast for QAOA spawn workers and
+    server restarts; only evaluation that actually renders figures pays
+    the import cost.
+    """
+    import matplotlib  # noqa: PLC0415
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt  # noqa: PLC0415
+
+    return plt
 
 
 def _sklearn():
@@ -25,6 +37,7 @@ def _sklearn():
 def plot_roc_curve(y_true, prob_real, path):
     if len(set(int(v) for v in y_true)) < 2:
         return
+    plt = _plt()
     ConfusionMatrixDisplay, roc_auc_score, roc_curve = _sklearn()
     fpr, tpr, _ = roc_curve(y_true, prob_real)
     auc = roc_auc_score(y_true, prob_real)
@@ -42,6 +55,7 @@ def plot_roc_curve(y_true, prob_real, path):
 
 
 def plot_confusion_matrix(y_true, predictions, path):
+    plt = _plt()
     ConfusionMatrixDisplay, _, _ = _sklearn()
     fig, ax = plt.subplots(figsize=(5, 4))
     ConfusionMatrixDisplay.from_predictions(y_true, predictions, ax=ax, colorbar=False)
@@ -54,6 +68,7 @@ def plot_confusion_matrix(y_true, predictions, path):
 
 def plot_calibration_curve(y_true, prob_real, path, n_bins=10):
     """Reliability diagram: observed vs predicted probability per bin."""
+    plt = _plt()
     bins = np.linspace(0.0, 1.0, n_bins + 1)
     centers, observed, counts = [], [], []
     for lo, hi in zip(bins[:-1], bins[1:]):

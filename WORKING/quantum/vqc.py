@@ -168,14 +168,19 @@ def _sanitize_metadata(obj):
 
 
 def _val_metrics(model, X_val, y_val, cfg):
-    """Validation loss (same focal loss as training) + accuracy, eval-mode."""
+    """Validation loss (same focal loss as training) + accuracy, eval-mode.
+
+    Single forward pass: the logits feed both the loss and the probability
+    threshold (previously the val set was evaluated twice per epoch).
+    """
     model.eval()
     device = next(model.parameters()).device
     with torch.no_grad():
         X = torch.tensor(np.asarray(X_val, dtype=np.float32), device=device)
         y = torch.tensor(np.asarray(y_val, dtype=np.float32), device=device)
-        val_loss = float(focal_loss(model(X), y, cfg).item())
-        probs = predict_vqc(model, X_val)
+        logits = model(X)
+        val_loss = float(focal_loss(logits, y, cfg).item())
+        probs = torch.sigmoid(logits).cpu().numpy()
     val_acc = float(((probs >= 0.5).astype(int) == np.asarray(y_val)).mean())
     return val_loss, val_acc
 

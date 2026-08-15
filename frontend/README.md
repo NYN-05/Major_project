@@ -123,7 +123,7 @@ The UI reads artifacts from `WORKING/output/` via `/api/files` and `/api/artifac
 ## Notes
 
 - Videos are stored temporarily in `WORKING/output/frontend_inbox/`
-- Each job runs the pipeline at 10 fps sampling; verdicts take 1–3 minutes
+- Each job runs the pipeline at 30 fps sampling; verdicts take 1–4 minutes
   depending on video length
 - A run's evidence (frames, plots, waveform) is readable from the artifact
   endpoints at any time — `/api/health` lists what exists

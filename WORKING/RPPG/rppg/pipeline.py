@@ -120,18 +120,44 @@ class RPPGPipeline:
 
     # -- frame quality ---------------------------------------------------
 
-    def _assess_frame(self, frame_bgr: np.ndarray, idx: int, face_found: bool) -> FrameQuality:
+    def _assess_frame(
+        self,
+        frame_bgr: np.ndarray,
+        idx: int,
+        face_found: bool,
+        compute_quality: bool = True,
+    ) -> FrameQuality:
+        if not face_found:
+            # Without a face the frame can never be usable; blur/brightness
+            # cannot change that, so skip the expensive Laplacian entirely.
+            return FrameQuality(
+                frame_index=idx,
+                is_usable=False,
+                blur_score=0.0,
+                brightness=0.0,
+                face_found=False,
+            )
+        if not compute_quality:
+            # Caller already quality-gated these frames (stage 1); only the
+            # face gate matters here, so skip blur/brightness.
+            return FrameQuality(
+                frame_index=idx,
+                is_usable=True,
+                blur_score=0.0,
+                brightness=0.0,
+                face_found=True,
+            )
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         blur = _blur_score(gray)
         bright = _brightness(gray)
         lo, hi = self.brightness_range
-        usable = face_found and (blur >= self.blur_threshold) and (lo <= bright <= hi)
+        usable = (blur >= self.blur_threshold) and (lo <= bright <= hi)
         return FrameQuality(
             frame_index=idx,
             is_usable=usable,
             blur_score=blur,
             brightness=bright,
-            face_found=face_found,
+            face_found=True,
         )
 
     # -- main entry point --------------------------------------------------
@@ -151,7 +177,6 @@ class RPPGPipeline:
         left_trace, right_trace, forehead_trace = [], [], []
 
         frame_idx = 0
-        kept_idx = 0
 
         with FaceROIExtractor() as extractor:
             while True:
@@ -178,7 +203,6 @@ class RPPGPipeline:
                     forehead_trace.append(None)
 
                 frame_idx += 1
-                kept_idx += 1
 
         cap.release()
 
@@ -230,8 +254,8 @@ class RPPGPipeline:
                 frame_id = _frame_sort_key(path)
                 source_idx = source_ids.get(frame_id, frame_id)
                 face = extractor.detect(frame, source_idx)
-                q = self._assess_frame(frame, source_idx, face.found)
-                q.is_usable = face.found  # blur/brightness already gated by stage 1
+                # Stage 1 already gated blur/brightness, so skip that compute here.
+                q = self._assess_frame(frame, source_idx, face.found, compute_quality=False)
                 quality_log.append(q)
 
                 if face.found:
@@ -283,9 +307,26 @@ class RPPGPipeline:
         right_sig = self._roi_to_pulse(right_arr, fps, warnings, "right cheek")
         forehead_sig = self._roi_to_pulse(forehead_arr, fps, warnings, "forehead")
 
-        combined_raw = combine_roi_signals(
-            [left_sig, right_sig, forehead_sig], weights=self.roi_weights
-        )
+        try:
+            combined_raw = combine_roi_signals(
+                [left_sig, right_sig, forehead_sig], weights=self.roi_weights
+            )
+        except ValueError:
+            # Every ROI trace collapsed (e.g. sparse usable frames in a long
+            # clip pushed each ROI below its 30% valid-sample floor). Treat
+            # as no-features (INCONCLUSIVE) rather than crashing inference.
+            warnings.append(
+                "No valid ROI signals to combine; treating as no-features (INCONCLUSIVE)."
+            )
+            return RPPGResult(
+                fps=fps,
+                n_frames_total=n_total,
+                n_frames_usable=n_usable,
+                features=None,
+                combined_signal=None,
+                quality_log=quality_log,
+                warnings=warnings,
+            )
         combined_clean = clean_signal(combined_raw, fs=fps, low_hz=self.low_hz, high_hz=self.high_hz)
 
         left_clean = clean_signal(left_sig, fs=fps, low_hz=self.low_hz, high_hz=self.high_hz) if left_sig is not None else None

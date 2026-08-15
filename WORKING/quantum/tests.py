@@ -22,7 +22,7 @@ from quantum.qaoa import (
     _cost_terms,
     _make_circuits,
     _normalize_weights,
-    _mutual_info_weights,
+    _discrimination_weights,
     verify_hamiltonian,
 )
 
@@ -35,7 +35,7 @@ def _synthetic_problem(n=6, seed=0):
     rng = np.random.RandomState(seed)
     X = rng.rand(20, n)
     y = np.asarray([0] * 10 + [1] * 10)
-    weights = _normalize_weights(_mutual_info_weights(X, y, 42))
+    weights = _normalize_weights(_discrimination_weights(X, y, 42))
     correlation = np.abs(np.corrcoef(X.T))
     return weights, correlation, QAOASelectionConfig()
 

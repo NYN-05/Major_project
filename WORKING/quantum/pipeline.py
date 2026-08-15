@@ -164,7 +164,7 @@ def main():
         comparison_file.parent.mkdir(parents=True, exist_ok=True)
         with open(comparison_file, "w") as fh:
             json.dump(comparison, fh, indent=2)
-        print(f"  Classical MI-greedy reference: {classical['selected_features']}")
+        print(f"  Classical AUC-greedy reference: {classical['selected_features']}")
         print(f"  Overlap with QAOA: {comparison['overlap_count']} features (see {comparison_file})")
     else:
         selection = load_selection(qaoa_cfg.selection_file)

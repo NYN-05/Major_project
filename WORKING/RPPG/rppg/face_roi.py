@@ -293,11 +293,15 @@ if _MEDIAPIPE_AVAILABLE:
 
             pts = face.landmarks_px
 
+            # Skin mask is shared by all three ROIs; compute it once per frame
+            # instead of inside the region() closure (3x/frame previously).
+            skin = self._skin_mask(frame_bgr) if self.skin_mask_enabled else None
+
             def region(idx_list) -> Optional[np.ndarray]:
                 region_pts = pts[idx_list]
                 mask = self._polygon_mask((h, w), region_pts)
-                if self.skin_mask_enabled:
-                    mask = cv2.bitwise_and(mask, self._skin_mask(frame_bgr))
+                if skin is not None:
+                    mask = cv2.bitwise_and(mask, skin)
                 if cv2.countNonZero(mask) < 25:
                     return None
                 return mask
@@ -320,11 +324,13 @@ if _MEDIAPIPE_AVAILABLE:
         def mean_rgb(frame_bgr: np.ndarray, mask: Optional[np.ndarray]) -> Optional[np.ndarray]:
             if mask is None:
                 return None
-            pixels = frame_bgr[mask > 0]
-            if pixels.size == 0:
+            if cv2.countNonZero(mask) == 0:
                 return None
-            mean_bgr = pixels.mean(axis=0)
-            return mean_bgr[::-1]
+            # cv2.mean avoids materializing the masked pixel array
+            # (frame_bgr[mask > 0]) that the old fancy-index version built
+            # per ROI per frame.
+            mean_bgr = cv2.mean(frame_bgr, mask)
+            return np.array([mean_bgr[2], mean_bgr[1], mean_bgr[0]])
 else:
     class FaceROIExtractor:
         """Fallback lightweight face ROI extractor using OpenCV Haar cascades.
@@ -404,8 +410,10 @@ else:
         def mean_rgb(frame_bgr: np.ndarray, mask: Optional[np.ndarray]) -> Optional[np.ndarray]:
             if mask is None:
                 return None
-            pixels = frame_bgr[mask > 0]
-            if pixels.size == 0:
+            if cv2.countNonZero(mask) == 0:
                 return None
-            mean_bgr = pixels.mean(axis=0)
-            return mean_bgr[::-1]
+            # cv2.mean avoids materializing the masked pixel array
+            # (frame_bgr[mask > 0]) that the old fancy-index version built
+            # per ROI per frame.
+            mean_bgr = cv2.mean(frame_bgr, mask)
+            return np.array([mean_bgr[2], mean_bgr[1], mean_bgr[0]])
