@@ -1,10 +1,10 @@
 # Frame Sampling & Quality Layer (Stage 1)
 
 **Component 1** of the deepfake-verification system under `WORKING/`:
-`frame` (this directory, stage 1) -> `RPPG/` (stage 2) -> `quantum/` (stage 3).
+`frame/` (this directory, stage 1) → `RPPG/` (stage 2) → `quantum/` (stage 3).
 
-It is invoked automatically by `WORKING/run_pipeline.py` (stage 1: frame sampling
-+ quality assessment feeding the rPPG and quantum stages).
+Invoked automatically by `WORKING/run_pipeline.py` (stage 1: frame sampling
++ quality assessment feeding the rPPG and quantum stages at **30 fps**).
 
 ## Project Structure
 
@@ -34,12 +34,12 @@ WORKING/frame/
 
 ```
 Input video
-  -> FrameIngestor (sample at --sample-fps, default 10 FPS)
-  -> FaceDetector (YOLO face detection)
-  -> FrameQualityAssessor (blur/dark/bright/face-size/pose gates)
-  -> Accepted frames saved as JPEGs to output/frames/frame_sequences/<video>/frames/
-  -> Per-frame metadata JSONL to output/frames/frame_sequences/<video>/frame_metadata.jsonl
-  -> Summary JSON to output/frames/frame_extraction_summary.json
+  → FrameIngestor (sample at --sample-fps, default 10 FPS standalone; 30 FPS via run_pipeline.py)
+  → FaceDetector (YOLO face detection)
+  → FrameQualityAssessor (blur/dark/bright/face-size/pose gates)
+  → Accepted frames saved as JPEGs to output/frames/frame_sequences/<video>/frames/
+  → Per-frame metadata JSONL to output/frames/frame_sequences/<video>/frame_metadata.jsonl
+  → Summary JSON to output/frames/frame_extraction_summary.json
 ```
 
 ## Output Contract (for Stage 2 rPPG)
@@ -87,12 +87,6 @@ This automatically runs Stage 1 (frame sampling + quality) and passes accepted f
 ```bash
 # From WORKING/frame/
 python app/pipeline.py --source test.mp4 --save-metadata
-```
-
-Or extraction-only mode (same entry point; extraction flags switch the mode):
-
-```bash
-python app/pipeline.py --source test.mp4 --sample-fps 10 --save-quality-examples
 ```
 
 ### Main Options (app/pipeline.py — face pipeline mode)

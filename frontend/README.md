@@ -78,6 +78,9 @@ npm run preview           # Serves built app (still expects /api on :8000)
 - **Concurrency cap**: Max 2 simultaneous jobs (returns 429 on overflow)
 - **Job TTL**: 1 hour; frame sequences: 24 hours
 - **Sanitized filenames**: `{job8}_{stem}.ext` for thumbnail consistency
+- **CORS**: Restricted to localhost origins (`localhost:5173`, `localhost:8000`)
+- **Hard timeout**: 30 minutes per pipeline run (worker killed)
+- **Upload streaming**: 64 KB chunks (no 200 MB in-memory buffer)
 
 ## Frontend State Machine
 
@@ -95,10 +98,10 @@ idle
 
 ## Pipeline Stages (as shown in UI)
 
-1. **Upload** - Video received, validated
-2. **Frames** - Frame sampling + YOLO face detection + quality gates
-3. **rPPG** - MediaPipe ROIs -> POS/CHROM pulse -> 10 physiological features
-4. **Quantum** - QAOA feature selection -> Hybrid VQC -> P(real)
+1. **Upload** - Video received, validated (magic-byte check, 200 MB limit)
+2. **Frames** - Frame sampling at 30 fps + YOLO face detection + quality gates
+3. **rPPG** - MediaPipe ROIs → POS/CHROM pulse → 10 physiological features
+4. **Quantum** - QAOA feature selection (10 → 3) → Hybrid VQC → P(real)
 5. **Verdict** - Decision bins: REAL (≥0.7), FAKE (≤0.3), UNCERTAIN
 6. **Artifacts** - Result JSON, signal waveform, frame thumbnails, plots
 
@@ -118,7 +121,7 @@ The UI reads artifacts from `WORKING/output/` via `/api/files` and `/api/artifac
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `FRONTEND_PORT` | Backend API port | `8000` |
-| `WORKING_ROOT` | Path to WORKING directory | `../WORKING` (relative to frontend/) |
+| `FRONTEMD_PORT` | Deprecated alias for `FRONTEND_PORT` | `8000` |
 
 ## Notes
 
@@ -128,6 +131,8 @@ The UI reads artifacts from `WORKING/output/` via `/api/files` and `/api/artifac
 - A run's evidence (frames, plots, waveform) is readable from the artifact
   endpoints at any time — `/api/health` lists what exists
 - No JS errors expected; console 404s = missing frame thumbnails for stale runs (gitignored)
+- The UI drives the **existing** Python pipeline untouched — the backend spawns
+  `WORKING/run_pipeline.py` as a subprocess. No existing project code is modified.
 
 ## Verified E2E Flow
 

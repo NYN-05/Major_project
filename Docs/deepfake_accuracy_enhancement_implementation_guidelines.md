@@ -1,8 +1,12 @@
+le 
+
+
 # Deepfake Detection Accuracy Enhancement
+
 ## Full Implementation Report and Engineering Guidelines
 
-**Project:** Deepfake Detection in Low-Resolution KYC Videos Using rPPG and Hybrid Quantum Machine Learning  
-**Implementation Objective:** Improve genuine real/fake discrimination while preserving rPPG and hybrid quantum ML as the central contribution.  
+**Project:** Deepfake Detection in Low-Resolution KYC Videos Using rPPG and Hybrid Quantum Machine Learning
+**Implementation Objective:** Improve genuine real/fake discrimination while preserving rPPG and hybrid quantum ML as the central contribution.
 **Primary Operating Objective:** KYC-risk-aware detection with `REAL`, `FAKE`, and `UNCERTAIN / MANUAL REVIEW` outcomes.
 
 ---

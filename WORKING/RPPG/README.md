@@ -1,13 +1,16 @@
 # rPPG Physiological Feature Extraction (Stage 2)
 
 **Component 2** of the deepfake-verification system under `WORKING/`:
-`frame` (stage 1) -> `RPPG/` (this directory, stage 2) -> `quantum/` (stage 3).
+`frame/` (stage 1) → `RPPG/` (this directory, stage 2) → `quantum/` (stage 3).
 
 Extracts 10 physiological features from facial video via remote photoplethysmography (rPPG).
 The feature table `output/rppg/dataset_features.csv` is the **direct data source** for the quantum
 decision layer (`WORKING/quantum/`): it consumes the 10 rPPG features as-is (no synthetic data),
-flips the label convention (CSV 1 = fake -> quantum 0 = fake), and builds its
+flips the label convention (CSV `1 = fake` → quantum `0 = fake`), and builds its
 training/eval splits from this table.
+
+Current table: **3445 rows** @30 fps (1883 real / 1562 fake) from DFDC archive + FaceForensics++,
+rebuilt 2026-08-15.
 
 ## Project Structure
 
@@ -115,26 +118,19 @@ exits with code 3.
 
 ```bash
 # From WORKING/RPPG/
-python rppg-pipeline/extract_dataset_features.py \
-  --workers 0            # 0 = all CPU cores (~12 vid/s on this host)
-  --target-fps 10        # stage-1 sample rate the pipeline is designed for
-  --min-usable-frames 30 # training-table gate (inference keeps 48)
-  --method POS
+# Full extraction (DFDC + FF++, 3445 rows @30 fps):
+python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0
 
-# Optional flags
-#   --include-ffpp    include FaceForensics++ clips (FF-synthesis fakes, FF-real/YouTube-real reals)
-#   --max-per-class N cap samples per class (smoke test)
-#   --output <path>   redirect the output CSV (probe runs)
+# Optional flags:
+#   --max-per-class N   cap samples per class (smoke test)
+#   --output <path>     redirect the output CSV (probe runs)
 ```
 
 Reads videos from (see `collect_samples()`):
-- `archive/DFDC_Dataset/Fake/` (DFDC phone-style face-swaps)
-- `archive/DFDC_Dataset/Real/`
-- `FF++/` at the repo root, only with `--include-ffpp`
-- legacy `archive (1)` CSV layout
+- `archive/DFDC_Dataset/Fake/` and `Real/` (DFDC phone-style face-swaps)
+- `FF++/` at the repo root (train/val/test: FF-real + YouTube-real reals, FF-synthesis fakes) via `--include-ffpp`
 
-MediaPipe/TFLite C++ stderr logging is silenced in worker processes, so the
-progress bar stays readable during bulk extraction.
+The legacy `archive (1)` CSV layout is absent on disk.
 
 Writes: `WORKING/output/rppg/dataset_features.csv` (relative to `WORKING/`)
 
@@ -151,18 +147,14 @@ python rppg-pipeline/probe_features.py --ffpp --max-per-class 120 --workers 8
 
 ### Dataset Findings (Validated Aug 2026)
 
-- **Current training table** (`output/rppg/dataset_features.csv`): **16 labeled DFDC clips
-  (9 real / 7 fake)** — `archive/DFDC_Dataset/Real|Fake`, DFDC archive only. This is the
-  **direct, exclusive data source for the quantum layer**; FF++ is NOT used (gitignored,
-  `--include-ffpp` off by default).
-- **Quality caveats**: all 16 rows carry **negative SNR** (−1.4 to −8.1 dB) — the pulse is
-  buried in noise across the whole set; HR features lie on a coarse ~24.3 BPM grid
-  (short compressed clips + coarse PSD binning at 10 fps). With a 10-row train set, all
-  metrics are indicative only.
+- **Current training table** (`output/rppg/dataset_features.csv`): **3445 labeled clips
+  @30 fps (1883 real / 1562 fake)** — DFDC archive + FaceForensics++ (`--include-ffpp`).
+  This is the **direct, exclusive data source for the quantum layer**; no synthetic data.
+- **Quality caveats**: per-feature |AUC−0.5| ≤ ~0.06 — rPPG features carry limited class
+  signal because face-swap fakes transplant the source person's genuine skin/vascular
+  signal. The rPPG features are near chance-level on this task.
 - Historical probe runs (2,797 DFDC preview clips) showed rPPG features at **chance level**
-  (AUC 0.47–0.53) — face-swap fakes transplant the source person's genuine skin/vascular
-  signal. That probe motivated the current small, honest DFDC table; it does not change
-  the fact that the trained model consumes exactly the 16 rows above.
+  (AUC 0.47–0.53), confirming the physiological-signal limitation.
 
 ### Train rPPG Classifier (Side Path - Not Used for Final Verdict)
 
@@ -285,16 +277,15 @@ Measure heart-rate error against contact-PPG reference; report MAE/RMSE.
 - Strong occlusion, masks, or very poor lighting → unreliable features
 - Very low frame rates reduce usable heart-rate range
 - Heavy compression distorts skin-tone cues, weakens rPPG
-- Classifier only as good as extracted features and training data quality
-- The training table is only 16 rows (9 real / 7 fake, all negative-SNR DFDC clips) —
-  metrics are smoke tests, not deployment guarantees; QAOA mutual-information weights
-  go degenerate on tiny tables (data-quantity issue, not a code bug)
+- Per-feature |AUC−0.5| ≤ ~0.06 on the current dataset — rPPG features carry
+  limited class signal for deepfake detection (face-swap fakes transplant
+  the source person's genuine skin/vascular signal)
 
 ## Recommended Workflow
 
-1. Add new videos to `archive/DFDC_Dataset/Fake|Real` (the current quantum-relevant data source)
-2. Probe the dataset first: `python rppg-pipeline/probe_features.py --max-per-class N --workers 8`
-3. Regenerate features: `python rppg-pipeline/extract_dataset_features.py --workers 0 --target-fps 10 --min-usable-frames 30`
+1. Add new videos to `archive/DFDC_Dataset/Fake|Real` or `FF++/`
+2. Probe the dataset first: `python rppg-pipeline/probe_features.py --ffpp --max-per-class N --workers 8`
+3. Regenerate features: `python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0`
 4. Retrain classifier (optional): `python rppg-pipeline/train_classifier.py`
 5. Rerun quantum pipeline: `python -m quantum.pipeline --all` (from `WORKING/`)
 6. Test end-to-end: `python run_pipeline.py --source <video> --method POS`
