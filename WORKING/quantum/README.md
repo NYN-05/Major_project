@@ -63,14 +63,28 @@ python -m quantum.tests                             # self-checks (run after any
 
 ## Performance notes
 
-- **QAOA device:** `qaoa.simulator_device()` prefers `lightning.qubit`
-  (SIMD statevector; falls back to `default.qubit`). Cost circuits
-  precompute `PauliRot` gates. Restarts (default 4) run in
-  parallel via `ProcessPoolExecutor`. Full selection: ~15 s.
-- **Training device:** the torch head of `HybridModel` runs on CUDA when
-  available; the PennyLane QNode stays on `default.qubit` + `backprop`
-  (measured fastest). Inference: ~275 ms cold / 32 ms cached.
+- **QAOA device (GPU-first):** `qaoa.simulator_device(wires, cfg)` returns
+  `(dev, backend)` with backend in {torch, lightning, default}.
+  `QAOASelectionConfig.device="auto"` (default) prefers the CUDA-capable
+  torch backend (`default.qubit.torch`) gated by a one-time probe
+  (`qaoa._probe_gpu_device`): float64 precision (Hamiltonian ≡ classical
+  cost within 1e-6) AND per-call cost ≤ ~3× lightning.qubit. On PennyLane
+  >= 0.39 the torch device no longer exists, so the probe fails and QAOA
+  runs on `lightning.qubit` (SIMD C++ statevector; falls back to
+  `default.qubit`). Cost circuits precompute `PauliRot` gates. Restarts
+  (default 4) run in parallel via `ProcessPoolExecutor`. Full selection:
+  ~15 s.
+- **Training device (GPU-first):** the torch head of `HybridModel` runs
+  on CUDA when available; the QNode simulator is chosen by
+  `VQCConfig.qnode_backend` ("auto" prefers the CUDA torch backend,
+  falling back to `default.qubit` + `backprop`, measured fastest among
+  CPU backends). On PennyLane >= 0.39 the QNode is CPU. Measured
+  CUDA-head gain: 15-epoch VQC train 12.44 s (CUDA head) vs 14.35 s
+  (CPU-only head), min of 2 (`Scrape/bench_gpu_backends.py`). Inference:
+  ~275 ms cold / 32 ms cached.
 - **Lazy imports:** sklearn and xgboost are imported lazily so QAOA spawn
   workers and module imports stay cheap.
 - `lightning.gpu` is not installable on Windows (cuQuantum/custatevec has
-  no Windows wheels) — CPU SIMD is the ceiling for circuit simulation.
+  no Windows wheels; building `cuquantum-python` requires the full CUDA
+  Toolkit) and PennyLane >= 0.39 removed `default.qubit.torch` — CPU SIMD
+  is the circuit-simulation ceiling here.
