@@ -135,6 +135,7 @@ if _MEDIAPIPE_AVAILABLE:
             min_tracking_confidence: float = 0.5,
             smoothing_alpha: float = 0.6,
             skin_mask_enabled: bool = True,
+            motion_comp: bool = True,
             model_path: Optional[str] = None,
         ):
             if not _MEDIAPIPE_AVAILABLE:
@@ -164,6 +165,8 @@ if _MEDIAPIPE_AVAILABLE:
             self._landmarker = FaceLandmarker.create_from_options(options)
             self._smoother = LandmarkSmoother(alpha=smoothing_alpha)
             self.skin_mask_enabled = skin_mask_enabled
+            self.motion_comp = motion_comp
+            self._ref_pts: Optional[np.ndarray] = None  # full landmark set at reference pose
             self._last_timestamp_ms = -1
             # Haar fallback for environments/models that fail to detect
             self._fallback_cascade = _load_haar_cascade()
@@ -226,6 +229,7 @@ if _MEDIAPIPE_AVAILABLE:
 
         def reset_tracking(self):
             self._smoother.reset()
+            self._ref_pts = None
 
         # -- ROI extraction --------------------------------------------------
 
@@ -293,12 +297,38 @@ if _MEDIAPIPE_AVAILABLE:
 
             pts = face.landmarks_px
 
+            # Motion compensation: rigidly transform the reference-pose ROI
+            # polygons to the current frame (inverse of the landmark-based
+            # affine fit), so the same anatomical patch is sampled every
+            # frame despite head rotation/scale changes. The polygons keep
+            # their reference geometry (no landmark-jitter deformation), and
+            # mean_rgb still samples the original frame with these masks.
+            pts_for_masks = pts
+            if self.motion_comp:
+                if self._ref_pts is None:
+                    self._ref_pts = pts.copy()
+                else:
+                    cur_stab = pts[STABILIZATION_IDX]
+                    ref_stab = self._ref_pts[STABILIZATION_IDX]
+                    M, inliers = cv2.estimateAffinePartial2D(
+                        cur_stab, ref_stab, method=cv2.RANSAC
+                    )
+                    if (
+                        M is not None
+                        and inliers is not None
+                        and int(np.count_nonzero(inliers)) >= 3
+                    ):
+                        M_inv = cv2.invertAffineTransform(M).astype(np.float32)
+                        pts_for_masks = cv2.transform(
+                            self._ref_pts.reshape(-1, 1, 2), M_inv
+                        ).reshape(-1, 2)
+
             # Skin mask is shared by all three ROIs; compute it once per frame
             # instead of inside the region() closure (3x/frame previously).
             skin = self._skin_mask(frame_bgr) if self.skin_mask_enabled else None
 
             def region(idx_list) -> Optional[np.ndarray]:
-                region_pts = pts[idx_list]
+                region_pts = pts_for_masks[idx_list]
                 mask = self._polygon_mask((h, w), region_pts)
                 if skin is not None:
                     mask = cv2.bitwise_and(mask, skin)

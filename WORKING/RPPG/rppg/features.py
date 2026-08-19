@@ -14,6 +14,12 @@ Features implemented
   * Spectral entropy
   * Mean absolute deviation (MAD) of the waveform
   * Peak prominence-based signal quality index
+  * Systolic peak width (morphology)
+  * Diastolic notch ratio (morphology)
+  * Forehead-cheek phase lag (spatial)
+  * Signal-to-motion ratio (artifact rejection)
+  * Peak amplitude variability (natural variation)
+  * Pulse transit time proxy (inter-ROI timing)
 """
 
 from dataclasses import dataclass, asdict
@@ -35,6 +41,16 @@ class RPPGFeatures:
     left_right_cheek_correlation: float
     hr_half_diff: float
     peak_prominence: float
+    systolic_peak_width: float
+    diastolic_notch_ratio: float
+    forehead_cheek_phase_lag: float
+    signal_to_motion_ratio: float
+    peak_amplitude_variability: float
+    pulse_transit_time_proxy: float
+    hr_window_std: float
+    sqi_window_std: float
+    entropy_window_std: float
+    max_hr_deviation_bpm: float
 
     def to_vector(self) -> np.ndarray:
         """Fixed-order numeric feature vector for ML/quantum encoding."""
@@ -50,6 +66,16 @@ class RPPGFeatures:
                 self.left_right_cheek_correlation,
                 self.hr_half_diff,
                 self.peak_prominence,
+                self.systolic_peak_width,
+                self.diastolic_notch_ratio,
+                self.forehead_cheek_phase_lag,
+                self.signal_to_motion_ratio,
+                self.peak_amplitude_variability,
+                self.pulse_transit_time_proxy,
+                self.hr_window_std,
+                self.sqi_window_std,
+                self.entropy_window_std,
+                self.max_hr_deviation_bpm,
             ],
             dtype=np.float64,
         )
@@ -67,6 +93,16 @@ class RPPGFeatures:
             "left_right_cheek_correlation",
             "hr_half_diff",
             "peak_prominence",
+            "systolic_peak_width",
+            "diastolic_notch_ratio",
+            "forehead_cheek_phase_lag",
+            "signal_to_motion_ratio",
+            "peak_amplitude_variability",
+            "pulse_transit_time_proxy",
+            "hr_window_std",
+            "sqi_window_std",
+            "entropy_window_std",
+            "max_hr_deviation_bpm",
         ]
 
     def to_dict(self) -> Dict[str, float]:
@@ -107,6 +143,7 @@ def estimate_snr(
     low_hz: float = 0.7,
     high_hz: float = 4.0,
     harmonic_width_hz: float = 0.2,
+    shoulder_hz: float = 0.45,
     psd: Optional[tuple] = None,
 ) -> float:
     """
@@ -115,6 +152,11 @@ def estimate_snr(
     Higher SNR indicates a cleaner, more trustworthy pulse signal --
     genuine faces typically yield higher SNR than manipulated/flat
     deepfake regions under rPPG extraction.
+
+    The signal windows sit at +/- `harmonic_width_hz` around the
+    fundamental (and its first harmonic); the excluded `shoulder_hz`
+    band counts the local spectral floor around each peak as noise, so
+    sharp, concentrated peaks score higher than flat spectra.
     """
     freqs, psd = psd if psd is not None else _welch_psd(trace, fs)
     band_mask = (freqs >= low_hz) & (freqs <= high_hz)
@@ -123,12 +165,13 @@ def estimate_snr(
 
     hr_freq = freqs[band_mask][np.argmax(psd[band_mask])]
 
-    def near(f_target):
-        return (freqs >= f_target - harmonic_width_hz) & (freqs <= f_target + harmonic_width_hz)
+    def near(f_target, width):
+        return (freqs >= f_target - width) & (freqs <= f_target + width)
 
-    signal_mask = near(hr_freq) | near(2 * hr_freq)
+    signal_mask = near(hr_freq, harmonic_width_hz) | near(2 * hr_freq, harmonic_width_hz)
+    noise_mask = ~(near(hr_freq, shoulder_hz) | near(2 * hr_freq, shoulder_hz))
     signal_power = psd[signal_mask & band_mask].sum()
-    noise_power = psd[band_mask].sum() - signal_power
+    noise_power = psd[noise_mask & band_mask].sum()
     noise_power = max(noise_power, 1e-12)
 
     snr = 10 * np.log10(signal_power / noise_power) if signal_power > 0 else float("nan")
@@ -215,6 +258,61 @@ def peak_prominence(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: 
     return float(pb.max() / pb.mean())
 
 
+def _window_stability(
+    trace: np.ndarray,
+    fs: float,
+    low_hz: float = 0.7,
+    high_hz: float = 4.0,
+    window_s: float = 2.0,
+    max_windows: int = 5,
+) -> dict:
+    """
+    Per-window HR / SQI / spectral-entropy statistics -> stability features.
+
+    A genuine recording keeps a stable pulse across the clip; deepfake or
+    heavily corrupted signals drift between windows (blending seams, lost
+    pulse fidelity). Splits the trace into up to `max_windows` equal
+    non-overlapping windows (at least 2), computes HR/SQI/entropy per
+    window on the shared periodogram, and returns their std plus the max
+    per-window HR deviation from the median. Any key is NaN when fewer
+    than two windows yield a finite value.
+    """
+    trace = np.asarray(trace, dtype=np.float64)
+    n = len(trace)
+    out = {
+        "hr_window_std": float("nan"),
+        "sqi_window_std": float("nan"),
+        "entropy_window_std": float("nan"),
+        "max_hr_deviation_bpm": float("nan"),
+    }
+    if n < 2 * fs:
+        return out
+    wlen = max(1, int(round(window_s * fs)))
+    n_windows = min(max_windows, max(2, n // wlen))
+    stride = n // n_windows
+    hrs, sqis, ents = [], [], []
+    for i in range(n_windows):
+        seg = trace[i * stride:(i + 1) * stride]
+        psd = _welch_psd(seg, fs)
+        hr = estimate_heart_rate(seg, fs, low_hz, high_hz, psd=psd)
+        sqi = signal_quality_index(seg, fs, psd=psd)
+        ent = spectral_entropy(seg, fs, low_hz, high_hz, psd=psd)
+        if np.isfinite(hr):
+            hrs.append(hr)
+        if np.isfinite(sqi):
+            sqis.append(sqi)
+        if np.isfinite(ent):
+            ents.append(ent)
+    if len(hrs) >= 2:
+        out["hr_window_std"] = float(np.std(hrs))
+        out["max_hr_deviation_bpm"] = float(np.max(np.abs(np.asarray(hrs) - np.median(hrs))))
+    if len(sqis) >= 2:
+        out["sqi_window_std"] = float(np.std(sqis))
+    if len(ents) >= 2:
+        out["entropy_window_std"] = float(np.std(ents))
+    return out
+
+
 def signal_quality_index(trace: np.ndarray, fs: float, psd: Optional[tuple] = None) -> float:
     """
     Pulse-signal quality score in [0, 1], combining:
@@ -257,6 +355,121 @@ def signal_quality_index(trace: np.ndarray, fs: float, psd: Optional[tuple] = No
         concentration = 0.0
 
     return float(0.5 * regularity + 0.5 * concentration)
+
+
+def systolic_peak_width(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0) -> float:
+    """
+    Width (ms) of the systolic peak in the pulse waveform. Real pulses
+    have consistent peak widths; deepfake signals often show distorted
+    morphology with wider or irregular peaks.
+    """
+    trace = np.asarray(trace, dtype=np.float64)
+    if len(trace) < 8:
+        return float("nan")
+    from scipy.signal import find_peaks
+    min_dist = max(1, int(fs / high_hz))
+    peaks, _ = find_peaks(trace, distance=min_dist, prominence=0.1 * np.std(trace))
+    if len(peaks) < 2:
+        return float("nan")
+    widths_samples, _, _, _ = signal.peak_widths(trace, peaks, rel_height=0.5)
+    widths_ms = (widths_samples / fs) * 1000.0
+    return float(np.median(widths_ms))
+
+
+def diastolic_notch_ratio(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0) -> float:
+    """
+    Ratio of dicrotic notch depth to systolic peak height. Real arterial
+    pulses show a distinct dicrotic notch; synthetic signals often lack
+    this morphological feature (ratio near 0).
+    """
+    from scipy.signal import find_peaks
+    trace = np.asarray(trace, dtype=np.float64)
+    if len(trace) < 16:
+        return float("nan")
+    min_dist = max(1, int(fs / high_hz))
+    systolic_peaks, _ = find_peaks(trace, distance=min_dist, prominence=0.05 * np.std(trace))
+    if len(systolic_peaks) < 2:
+        return float("nan")
+    notch_depths = []
+    for i in range(len(systolic_peaks) - 1):
+        start = systolic_peaks[i]
+        end = systolic_peaks[i + 1]
+        segment = trace[start:end]
+        if len(segment) > 3:
+            min_idx = np.argmin(segment[1:-1]) + 1
+            peak_val = trace[start]
+            notch_val = segment[min_idx]
+            if peak_val > notch_val:
+                depth = (peak_val - notch_val) / (peak_val + 1e-12)
+                notch_depths.append(depth)
+    if not notch_depths:
+        return 0.0
+    return float(np.mean(notch_depths))
+
+
+def forehead_cheek_phase_lag(forehead_signal: Optional[np.ndarray], cheek_signal: Optional[np.ndarray], fs: float) -> float:
+    """
+    Phase lag (ms) between forehead and cheek pulse signals. Real blood
+    flow propagation creates a measurable delay; deepfake signals lack
+    this physiological timing.
+    """
+    if forehead_signal is None or cheek_signal is None:
+        return float("nan")
+    n = min(len(forehead_signal), len(cheek_signal))
+    if n < 32:
+        return float("nan")
+    fh = forehead_signal[:n]
+    ch = cheek_signal[:n]
+    if fh.std() < 1e-8 or ch.std() < 1e-8:
+        return float("nan")
+    correlation = np.correlate(fh - fh.mean(), ch - ch.mean(), mode="full")
+    lags = np.arange(-n + 1, n)
+    lag_samples = lags[np.argmax(correlation)]
+    return float(abs(lag_samples) / fs * 1000.0)
+
+
+def signal_to_motion_ratio(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0, psd: Optional[tuple] = None) -> float:
+    """
+    Ratio of physiological signal power to motion artifact power.
+    Real videos have higher SMR (clean pulse); deepfakes often have
+    motion artifacts that corrupt the rPPG signal.
+    """
+    freqs, psd = psd if psd is not None else _welch_psd(trace, fs)
+    physio_band = (freqs >= low_hz) & (freqs <= high_hz)
+    motion_band = (freqs >= 0.1) & (freqs < low_hz)
+    physio_power = psd[physio_band].sum() if physio_band.any() else 0
+    motion_power = psd[motion_band].sum() if motion_band.any() else 1e-12
+    return float(10 * np.log10(max(physio_power, 1e-12) / max(motion_power, 1e-12)))
+
+
+def peak_amplitude_variability(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0) -> float:
+    """
+    Coefficient of variation of systolic peak amplitudes. Real pulses
+    show natural amplitude variation; deepfake signals often have
+    unnaturally consistent or erratic amplitudes.
+    """
+    from scipy.signal import find_peaks
+    trace = np.asarray(trace, dtype=np.float64)
+    if len(trace) < 16:
+        return float("nan")
+    min_dist = max(1, int(fs / high_hz))
+    peaks, _ = find_peaks(trace, distance=min_dist, prominence=0.05 * np.std(trace))
+    if len(peaks) < 3:
+        return float("nan")
+    amplitudes = trace[peaks]
+    mean_amp = np.mean(amplitudes)
+    if mean_amp < 1e-8:
+        return float("nan")
+    return float(np.std(amplitudes) / mean_amp)
+
+
+def pulse_transit_time_proxy(sig_a: Optional[np.ndarray], sig_b: Optional[np.ndarray], fs: float) -> float:
+    """
+    Proxy for pulse transit time: time delay (ms) between two ROI
+    signals. Real blood flow has measurable propagation delays;
+    deepfake signals lack this physiological timing structure.
+    """
+    return forehead_cheek_phase_lag(sig_a, sig_b, fs)
 
 
 def region_correlation(sig_a: Optional[np.ndarray], sig_b: Optional[np.ndarray]) -> float:
@@ -303,6 +516,10 @@ def compute_features(
     sqi = signal_quality_index(combined_signal, fs, psd=shared_psd)
     hrd = hr_half_diff(combined_signal, fs, low_hz, high_hz)
     ppr = peak_prominence(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
+    spw = systolic_peak_width(combined_signal, fs, low_hz, high_hz)
+    dnr = diastolic_notch_ratio(combined_signal, fs, low_hz, high_hz)
+    smr = signal_to_motion_ratio(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
+    pav = peak_amplitude_variability(combined_signal, fs, low_hz, high_hz)
 
     cheek_corr_vals = [
         region_correlation(left_cheek_signal, forehead_signal),
@@ -315,6 +532,18 @@ def compute_features(
     if np.isnan(left_right_corr):
         left_right_corr = 0.0
 
+    lag_vals = [
+        forehead_cheek_phase_lag(forehead_signal, left_cheek_signal, fs),
+        forehead_cheek_phase_lag(forehead_signal, right_cheek_signal, fs),
+    ]
+    lag_vals = [l for l in lag_vals if not np.isnan(l)]
+    phase_lag = float(np.mean(lag_vals)) if lag_vals else float("nan")
+    ptt = pulse_transit_time_proxy(forehead_signal, left_cheek_signal, fs)
+    if np.isnan(ptt):
+        ptt = pulse_transit_time_proxy(forehead_signal, right_cheek_signal, fs)
+
+    win = _window_stability(combined_signal, fs, low_hz, high_hz)
+
     features = RPPGFeatures(
         heart_rate_bpm=hr,
         snr_db=snr,
@@ -326,21 +555,20 @@ def compute_features(
         left_right_cheek_correlation=float(left_right_corr),
         hr_half_diff=hrd,
         peak_prominence=ppr,
+        systolic_peak_width=spw,
+        diastolic_notch_ratio=dnr,
+        forehead_cheek_phase_lag=phase_lag,
+        signal_to_motion_ratio=smr,
+        peak_amplitude_variability=pav,
+        pulse_transit_time_proxy=ptt,
+        hr_window_std=win["hr_window_std"],
+        sqi_window_std=win["sqi_window_std"],
+        entropy_window_std=win["entropy_window_std"],
+        max_hr_deviation_bpm=win["max_hr_deviation_bpm"],
     )
     raw_nan_count = sum(
         1
-        for name in (
-            "heart_rate_bpm",
-            "snr_db",
-            "prv_std_ms",
-            "spectral_entropy",
-            "mad",
-            "signal_quality_index",
-            "cheek_forehead_correlation",
-            "left_right_cheek_correlation",
-            "hr_half_diff",
-            "peak_prominence",
-        )
+        for name in RPPGFeatures.feature_names()
         if not np.isfinite(getattr(features, name))
     )
     features._raw_nan_count = raw_nan_count  # transient; excluded from asdict()/to_vector()
@@ -365,6 +593,16 @@ def _fill_nan_with_median(features: RPPGFeatures) -> None:
         "signal_quality_index": 0.0,
         "hr_half_diff": 0.0,
         "peak_prominence": 1.0,
+        "systolic_peak_width": 350.0,
+        "diastolic_notch_ratio": 0.0,
+        "forehead_cheek_phase_lag": 0.0,
+        "signal_to_motion_ratio": 0.0,
+        "peak_amplitude_variability": 0.0,
+        "pulse_transit_time_proxy": 0.0,
+        "hr_window_std": 0.0,
+        "sqi_window_std": 0.0,
+        "entropy_window_std": 0.0,
+        "max_hr_deviation_bpm": 0.0,
     }
     for name in fallbacks:
         value = getattr(features, name)

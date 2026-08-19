@@ -38,6 +38,7 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rppg import RPPGPipeline  # noqa: E402
+from rppg.face_roi import FaceROIExtractor  # noqa: E402
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
@@ -48,7 +49,14 @@ ITEM_TIMEOUT_S = 600
 _WORKER: dict = {}
 
 
-def _init_worker(method: str, target_fps: Optional[float], blur_threshold: float, min_usable_frames: int) -> None:
+def _init_worker(
+    method: str,
+    target_fps: Optional[float],
+    blur_threshold: float,
+    min_usable_frames: int,
+    min_sqi: float,
+    max_nan_features: int,
+) -> None:
     """Per-process initializer: creates one RPPGPipeline per worker.
 
     MediaPipe/TFLite log to C++ stderr from every worker; fd 2 is
@@ -67,11 +75,68 @@ def _init_worker(method: str, target_fps: Optional[float], blur_threshold: float
         blur_threshold=blur_threshold,
         min_usable_frames=min_usable_frames,
     )
+    _WORKER["min_sqi"] = min_sqi
+    _WORKER["max_nan_features"] = max_nan_features
+
+
+def _init_worker_gpu(
+    method: str,
+    target_fps: Optional[float],
+    blur_threshold: float,
+    min_usable_frames: int,
+    min_sqi: float,
+    max_nan_features: int,
+) -> None:
+    """Per-process initializer for GPU workers: creates RPPGPipeline +
+    GPUFaceDetector + FaceROIExtractor (for trace accumulation)."""
+    try:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), 2)
+    except OSError:
+        pass
+    os.environ.setdefault("GLOG_minloglevel", "2")
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    # Ensure torch lib (cuDNN) is on PATH before ORT loads CUDA provider
+    try:
+        import torch as _torch  # noqa: F401
+        _torch_lib = os.path.join(os.path.dirname(_torch.__file__), "lib")
+        if os.path.isdir(_torch_lib):
+            os.add_dll_directory(_torch_lib)
+            os.environ["PATH"] = _torch_lib + os.pathsep + os.environ.get("PATH", "")
+    except ImportError:
+        pass
+    _WORKER["pipeline"] = RPPGPipeline(
+        method=method,
+        target_fps=target_fps,
+        blur_threshold=blur_threshold,
+        min_usable_frames=min_usable_frames,
+    )
+    _WORKER["min_sqi"] = min_sqi
+    _WORKER["max_nan_features"] = max_nan_features
+    from rppg.gpu_face_detector import GPUFaceDetector
+    _WORKER["gpu_detector"] = GPUFaceDetector(conf_threshold=0.25)
+    _WORKER["roi_extractor"] = FaceROIExtractor()
+
+
+def _gate_result(result, min_sqi: float, max_nan_features: int) -> Optional[str]:
+    """Return a gate reason if this clip's features are too poor to keep.
+
+    Rows with an essentially absent pulse (low SQI) or multiple raw NaNs
+    (median-filled) are garbage for the classifier; gating them at the
+    dataset build is stricter than the downstream implausibility filter.
+    Returns None when the clip passes both gates.
+    """
+    raw_nan = int(getattr(result.features, "_raw_nan_count", 0))
+    if raw_nan > max_nan_features:
+        return f"nan_features={raw_nan} > {max_nan_features}"
+    sqi = float(result.features.signal_quality_index)
+    if sqi < min_sqi:
+        return f"sqi={sqi:.4f} < {min_sqi}"
+    return None
 
 
 def _process_one(item: Tuple[int, Path, str, Path]) -> dict:
     """Process a single video inside a worker process. Returns a feature
-    dict, or a dict with an 'error'/'no_features' marker."""
+    dict, or a dict with an 'error'/'no_features'/'gated' marker."""
     label, video_path, source, root = item
     entry: dict = {"label": label, "video_path": str(video_path), "source": source}
     try:
@@ -82,12 +147,129 @@ def _process_one(item: Tuple[int, Path, str, Path]) -> dict:
     if result.features is None:
         entry["no_features"] = True
         entry["usable_frames"] = result.n_frames_usable
+        entry["total_frames"] = len(result.quality_log)
+        entry["no_face"] = sum(1 for q in result.quality_log if not q.face_found)
         return entry
+    gate = _gate_result(result, _WORKER["min_sqi"], _WORKER["max_nan_features"])
+    if gate is not None:
+        entry["gated"] = True
+        entry["gate_reason"] = gate
+        return entry
+    return _feature_entry(result, label, video_path, root, source)
+
+
+def _process_one_gpu(item: Tuple[int, Path, str, Path]) -> dict:
+    """GPU-accelerated variant of _process_one.
+
+    Uses GPUFaceDetector (YuNet via ONNX Runtime CUDA) for face
+    detection instead of MediaPipe, then falls back to the existing
+    ROI extraction and signal/feature computation.
+    """
+    import cv2
+    label, video_path, source, root = item
+    entry: dict = {"label": label, "video_path": str(video_path), "source": source}
+    pipeline = _WORKER["pipeline"]
+    gpu_det = _WORKER["gpu_detector"]
+    roi_ext = _WORKER["roi_extractor"]
+
+    try:
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            entry["error"] = f"Cannot open video: {video_path}"
+            return entry
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        sample_stride = max(1, round(fps / pipeline.target_fps)) if pipeline.target_fps else 1
+
+        left_trace: list = []
+        right_trace: list = []
+        forehead_trace: list = []
+        quality_log: list = []
+        warnings: list = []
+
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % sample_stride != 0:
+                frame_idx += 1
+                continue
+
+            # GPU face detection (YuNet ONNX Runtime CUDA)
+            face = gpu_det.detect(frame, frame_idx)
+
+            # Reuse pipeline's quality assessment
+            q = pipeline._assess_frame(frame, frame_idx, face.found)
+            quality_log.append(q)
+
+            if q.is_usable:
+                rois = roi_ext.extract_rois(frame, face)
+                left_trace.append(roi_ext.mean_rgb(frame, rois.left_cheek))
+                right_trace.append(roi_ext.mean_rgb(frame, rois.right_cheek))
+                forehead_trace.append(roi_ext.mean_rgb(frame, rois.forehead))
+            else:
+                left_trace.append(None)
+                right_trace.append(None)
+                forehead_trace.append(None)
+
+            frame_idx += 1
+
+        cap.release()
+
+        result = pipeline._finalize(
+            left_trace, right_trace, forehead_trace, fps, warnings, quality_log,
+        )
+    except Exception as exc:  # noqa: BLE001
+        entry["error"] = f"{type(exc).__name__} (pid {os.getpid()}): {exc}"
+        return entry
+
+    if result.features is None:
+        entry["no_features"] = True
+        entry["usable_frames"] = result.n_frames_usable
+        entry["total_frames"] = len(result.quality_log)
+        entry["no_face"] = sum(1 for q in result.quality_log if not q.face_found)
+        return entry
+    gate = _gate_result(result, _WORKER["min_sqi"], _WORKER["max_nan_features"])
+    if gate is not None:
+        entry["gated"] = True
+        entry["gate_reason"] = gate
+        return entry
+    return _feature_entry(result, label, video_path, root, source)
+
+
+def _feature_entry(result, label: int, video_path: Path, root: Path, source: str) -> dict:
+    """Build one CSV row from a successful RPPG result."""
     feat = result.features.to_dict()
     feat["label"] = label
     feat["video_path"] = str(video_path.relative_to(root)) if video_path.is_relative_to(root) else str(video_path)
     feat["source"] = source
     return feat
+
+
+def _fail_summary(result) -> str:
+    """Human-readable reason breakdown for clips with features=None.
+
+    Uses the frame quality log: usable frames, frames where no face was
+    found, and frames rejected by the blur/brightness gate.
+    """
+    n_usable = result.n_frames_usable
+    n_no_face = sum(1 for q in result.quality_log if not q.face_found)
+    n_total = len(result.quality_log)
+    n_quality = max(0, n_total - n_usable - n_no_face)
+    return f"(usable={n_usable}/{n_total}: no_face={n_no_face}, quality_rejected={n_quality})"
+
+
+def _write_features_csv(features_list: List[dict], out_csv_path: Path) -> None:
+    """Write the accumulated feature rows to CSV, sorted by video_path.
+
+    Called after every successful extraction, so the CSV is created after
+    the first video and refreshed after each subsequent one. A full rewrite
+    of a few thousand rows costs tens of ms — negligible next to the
+    per-clip MediaPipe runtime.
+    """
+    out_df = pd.DataFrame(features_list)
+    out_df = out_df.sort_values("video_path").reset_index(drop=True)
+    out_df.to_csv(out_csv_path, index=False)
 
 
 def _repo_root() -> Path:
@@ -200,6 +382,10 @@ def main() -> None:
     parser.add_argument("--include-ffpp", action="store_true", help="Also include FaceForensics++ clips (FF-synthesis fakes, FF-real/YouTube-real reals)")
     parser.add_argument("--output", default=None, help="Optional output CSV path")
     parser.add_argument("--workers", type=int, default=1, help="Number of parallel worker processes (0 = all CPU cores)")
+    parser.add_argument("--min-sqi", type=float, default=0.10, help="Drop clips whose signal_quality_index is below this (0 disables)")
+    parser.add_argument("--max-nan-features", type=int, default=1, help="Drop clips with more than this many median-filled (raw-NaN) features")
+    parser.add_argument("--gpu", action="store_true", help="Use GPU-accelerated face detection (YuNet via ONNX Runtime CUDA) instead of MediaPipe")
+    parser.add_argument("--gpu-workers", type=int, default=None, help="Number of GPU worker processes (default: 8 when --gpu is set)")
     args = parser.parse_args()
 
     samples = collect_samples(max_per_class=args.max_per_class, include_ffpp=args.include_ffpp)
@@ -210,8 +396,27 @@ def main() -> None:
     root = _repo_root()
     out_csv_path = Path(args.output) if args.output else _output_dir() / "dataset_features.csv"
     out_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_csv_path.exists():
+        out_csv_path.unlink()
+        print(f"Fresh extraction: removed existing {out_csv_path}")
 
-    if args.workers == 0:
+    use_gpu = args.gpu
+    if use_gpu:
+        # Validate GPU availability before spawning workers
+        try:
+            import onnxruntime as _ort
+            if "CUDAExecutionProvider" not in _ort.get_available_providers():
+                print("WARNING: CUDA provider not available in onnxruntime. Falling back to CPU.")
+                use_gpu = False
+        except ImportError:
+            print("WARNING: onnxruntime-gpu not installed. Falling back to CPU.\n"
+                  "  Install with: pip install onnxruntime-gpu>=1.18.1,<1.27.0")
+            use_gpu = False
+
+    if use_gpu:
+        n_workers = args.gpu_workers if args.gpu_workers else min(8, os.cpu_count() or 8)
+        print(f"[gpu] Using GPU face detection (YuNet ONNX Runtime CUDA) with {n_workers} workers")
+    elif args.workers == 0:
         n_workers = max(1, os.cpu_count() or 1)
     else:
         n_workers = args.workers
@@ -219,10 +424,10 @@ def main() -> None:
     items = [(label, video_path, source, root) for label, video_path, source in samples]
 
     features_list = []
-    stats = {"processed": 0, "no_features": 0, "failed": 0}
+    stats = {"processed": 0, "no_features": 0, "failed": 0, "gated": 0}
     t_start = time.time()
 
-    if n_workers <= 1:
+    if n_workers <= 1 and not use_gpu:
         pipeline = RPPGPipeline(
             method=args.method,
             target_fps=args.target_fps,
@@ -239,23 +444,28 @@ def main() -> None:
                 stats["failed"] += 1
                 continue
             if result.features is None:
-                print("  -> Failed to extract features (insufficient frames or no face).")
+                print(f"  -> Failed to extract features: {video_path.name} {_fail_summary(result)}")
                 stats["no_features"] += 1
                 continue
-            feat_dict = result.features.to_dict()
-            feat_dict["label"] = label
-            feat_dict["video_path"] = str(video_path.relative_to(root)) if video_path.is_relative_to(root) else str(video_path)
-            feat_dict["source"] = source
-            features_list.append(feat_dict)
+            gate = _gate_result(result, args.min_sqi, args.max_nan_features)
+            if gate is not None:
+                print(f"  -> Gated (low signal quality): {video_path.name} ({gate})")
+                stats["gated"] += 1
+                continue
+            entry = _feature_entry(result, label, video_path, root, source)
+            features_list.append(entry)
+            _write_features_csv(features_list, out_csv_path)
             stats["processed"] += 1
     else:
-        print(f"Extracting with {n_workers} parallel workers ...")
+        worker_fn = _process_one_gpu if use_gpu else _process_one
+        init_fn = _init_worker_gpu if use_gpu else _init_worker
+        print(f"Extracting with {n_workers} parallel workers {'(GPU)' if use_gpu else '(CPU)'} ...")
         with mp.Pool(
             n_workers,
-            initializer=_init_worker,
-            initargs=(args.method, args.target_fps, args.blur_threshold, args.min_usable_frames),
+            initializer=init_fn,
+            initargs=(args.method, args.target_fps, args.blur_threshold, args.min_usable_frames, args.min_sqi, args.max_nan_features),
         ) as pool:
-            results = iter(pool.imap_unordered(_process_one, items, chunksize=1))
+            results = iter(pool.imap_unordered(worker_fn, items, chunksize=1))
             done = 0
             while done < len(items):
                 try:
@@ -271,31 +481,46 @@ def main() -> None:
                 done += 1
                 error = entry.pop("error", None)
                 no_features = entry.pop("no_features", None)
+                gated = entry.pop("gated", None)
                 if error:
                     stats["failed"] += 1
                     print(f"  -> Error processing {Path(entry['video_path']).name}: {error}")
                 elif no_features:
                     stats["no_features"] += 1
-                    print(f"  -> Failed to extract features: {Path(entry['video_path']).name} (usable={entry.get('usable_frames')})")
+                    n_usable = entry.get("usable_frames", 0)
+                    n_total = entry.get("total_frames", 0)
+                    n_no_face = entry.get("no_face", 0)
+                    n_quality = max(0, n_total - n_usable - n_no_face)
+                    print(
+                        f"  -> Failed to extract features: {Path(entry['video_path']).name} "
+                        f"(usable={n_usable}/{n_total}: no_face={n_no_face}, quality_rejected={n_quality})"
+                    )
+                elif gated:
+                    stats["gated"] += 1
+                    print(
+                        f"  -> Gated (low signal quality): {Path(entry['video_path']).name} "
+                        f"({entry.get('gate_reason', 'unknown')})"
+                    )
                 else:
                     features_list.append(entry)
+                    _write_features_csv(features_list, out_csv_path)
                     stats["processed"] += 1
                 if stats["processed"] > 0 and stats["processed"] % 100 == 0:
-                    done = stats["processed"] + stats["failed"] + stats["no_features"]
+                    done = stats["processed"] + stats["failed"] + stats["no_features"] + stats["gated"]
                     rate = done / (time.time() - t_start)
                     remain = int((len(items) - done) / rate) if rate > 0 else 0
-                    print(f"    ... {stats['processed']} ok / {stats['failed']} err / {stats['no_features']} no-feat | "
+                    print(f"    ... {stats['processed']} ok / {stats['failed']} err / "
+                          f"{stats['no_features']} no-feat / {stats['gated']} gated | "
                           f"{rate:.2f} vid/s | ETA ~{remain/60:.0f} min")
 
     if not features_list:
         print("No features extracted from any videos.")
         return
 
-    out_df = pd.DataFrame(features_list)
-    out_df = out_df.sort_values("video_path").reset_index(drop=True)
-    out_df.to_csv(out_csv_path, index=False)
-    print(f"\nSuccessfully extracted features for {len(out_df)} videos.")
-    print(f"Features saved to {out_csv_path}")
+    print(f"\nSuccessfully extracted features for {len(features_list)} videos "
+          f"({stats['gated']} gated by signal quality, {stats['no_features']} with no features, "
+          f"{stats['failed']} errors).")
+    print(f"Features saved to {out_csv_path} (created after the first video, updated after each subsequent one).")
 
 
 if __name__ == "__main__":
