@@ -35,7 +35,9 @@ frontend/dist/
 !frontend/package-lock.json
 
 .agents
-.claude
+.github
+.specify
 
 WORKING/RPPG/archive
 *.cmd
+*.ps1
