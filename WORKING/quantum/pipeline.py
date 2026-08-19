@@ -154,6 +154,13 @@ def main():
     selection = None
     if args.select or args.all:
         print("[2/6] Running QAOA feature selection (train split only)...")
+        from quantum.qaoa import simulator_device
+
+        qaoa_dev, qaoa_backend = simulator_device(len(FEATURE_NAMES), qaoa_cfg)
+        print(
+            f"  QAOA simulator: {qaoa_backend}"
+            f"{' (' + str(getattr(qaoa_dev, 'short_name', '')) + ')' if qaoa_dev else ''}"
+        )
         error = verify_hamiltonian(X_train, data["y_train"], qaoa_cfg)
         assert error < 1e-6, (
             f"Hamiltonian verification FAILED (max error {error:.2e}): "
@@ -186,9 +193,11 @@ def main():
     indices = [int(i) for i in selection["selected_indices"]]
     if args.train or args.all:
         print(f"[3/6] Training hybrid VQC on {len(indices)} QAOA-selected features...")
-        from quantum.vqc import resolve_device
+        from quantum.vqc import qnode_backend_name, resolve_device
 
-        print(f"  Device: {resolve_device()} (torch head on GPU, PennyLane QNode on CPU)")
+        print(
+            f"  Torch device: {resolve_device()} | QNode simulator: {qnode_backend_name(vqc_cfg)}"
+        )
         train_vqc(
             X_train[:, indices],
             data["y_train"].astype(float),

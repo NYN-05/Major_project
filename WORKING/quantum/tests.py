@@ -103,7 +103,7 @@ def test_real_hamiltonian_verification():
     from quantum.data import _load_rppg_rows
 
     X, y, _, _, _, _ = _load_rppg_rows(csv_file, DataConfig())
-    assert X.shape[1] == len(FEATURE_NAMES) == 10
+    assert X.shape[1] == len(FEATURE_NAMES) == 20
     assert set(y.tolist()) <= {0, 1}
     error = verify_hamiltonian(X, y, QAOASelectionConfig())
     assert error < 1e-6, f"verify_hamiltonian error on real data: {error:.2e}"
@@ -199,6 +199,74 @@ def test_no_group_leakage():
         raise AssertionError("_assert_no_group_leakage did not fire on a straddling group")
 
 
+def test_qaoa_sim_matches_pennylane():
+    """Torch-native QAOA simulator must reproduce PennyLane cost/marginals."""
+    from quantum.qaoa_sim import QAOASimulator
+
+    weights, correlation, cfg = _synthetic_problem(n=8)
+    coeffs, ops = _cost_terms(weights, correlation, cfg)
+    n_wires = len(weights)
+
+    sim = QAOASimulator(n_wires, cfg, weights=weights, correlation=correlation)
+    cost_circuit, marginals_circuit = _make_circuits(coeffs, ops, n_wires)
+
+    rng = np.random.RandomState(5)
+    for _ in range(4):
+        params = rng.uniform(0.0, 0.5, size=2 * cfg.p_layers)
+        qml_cost = float(cost_circuit(params))
+        sim_cost = sim.cost(params)
+        assert abs(qml_cost - sim_cost) < 1e-6, (
+            f"QAOA sim cost {sim_cost:.9f} != PL {qml_cost:.9f} at params {params}"
+        )
+        pl_marginals = np.asarray(marginals_circuit(params)).flatten()
+        sim_marginals = sim.marginals(params)
+        diff = np.abs(pl_marginals - sim_marginals).max()
+        assert diff < 1e-6, f"QAOA sim marginals differ from PL: max |diff| = {diff:.3e}"
+
+
+def test_torch_layer_matches_pennylane():
+    """QuantumLayerTorch forward must match the PennyLane QuantumLayer."""
+    import torch
+
+    from quantum.vqc import QuantumLayer, QuantumLayerTorch
+    from quantum.config import VQCConfig
+
+    n = 4
+    cfg = VQCConfig(qml_layers=3)
+    torch_layer = QuantumLayerTorch(n, cfg)
+    pl_layer = QuantumLayer(n, cfg)
+    pl_layer.weights.data = torch_layer.weights.data.clone()
+
+    rng = np.random.RandomState(11)
+    x = torch.tensor(rng.randn(6, n).astype(np.float32))
+    with torch.no_grad():
+        out_torch = torch_layer(x)
+        out_pl = pl_layer(x)
+    diff = float(torch.max(torch.abs(out_torch - out_pl)))
+    assert diff < 1e-5, (
+        f"torch layer output diverges from PennyLane: max |diff| = {diff:.3e}"
+    )
+
+
+def test_checkpoint_state_dict_compat():
+    """The torch layer must expose quantum.weights with the PL shape so
+    existing hybrid_vqc.pt checkpoints load unchanged."""
+    import torch
+
+    from quantum.vqc import HybridModel
+    from quantum.config import VQCConfig
+
+    n = 4
+    cfg = VQCConfig(qml_layers=3)
+    model = HybridModel(n, cfg)
+    state = model.state_dict()
+    assert "quantum.weights" in state, f"missing quantum.weights: {list(state)}"
+    expected = (cfg.qml_layers, n, 3)
+    assert tuple(state["quantum.weights"].shape) == expected, (
+        f"weights shape {tuple(state['quantum.weights'].shape)} != {expected}"
+    )
+
+
 def main() -> None:
     checks = [
         test_beta_alive,
@@ -208,6 +276,9 @@ def main() -> None:
         test_split_determinism,
         test_ffpp_source_subject_grouping,
         test_no_group_leakage,
+        test_qaoa_sim_matches_pennylane,
+        test_torch_layer_matches_pennylane,
+        test_checkpoint_state_dict_compat,
     ]
     failures = 0
     for check in checks:

@@ -225,12 +225,23 @@ def evaluate_quantum_model(
     # subject-grouped folds when groups are available.
     if _enough_for_cv(y_train, n_splits=5):
         cv_cfg = VQCConfig(**{**vqc_cfg.__dict__, "save_checkpoint": False})
+        # On GPU hosts the fold trainers use CUDA themselves; running folds
+        # in parallel would open one CUDA context per worker on a shared
+        # card (OOM risk on 6 GB). The GPU is the parallelism: folds run
+        # sequentially on it. CPU hosts keep parallel folds.
+        try:
+            import torch  # noqa: PLC0415
+
+            gpu_host = torch.cuda.is_available()
+        except Exception:
+            gpu_host = False
+        n_jobs = 1 if gpu_host else (os.cpu_count() or 1)
         payload["cv"] = run_cv(
             functools.partial(_fit_vqc_fold, cfg=cv_cfg),
             X_train,
             y_train,
             seed=vqc_cfg.seed,
-            n_jobs=os.cpu_count() or 1,
+            n_jobs=n_jobs,
             groups=groups_train,
         )
 
@@ -292,6 +303,9 @@ def run_baselines(
             early_stopping_rounds=20,
             random_state=seed,
             n_jobs=-1,
+            **(lambda: ({"tree_method": "hist", "device": "cuda"}
+                if XGBClassifier is not None
+                else {}))(),
         ),
     }
 

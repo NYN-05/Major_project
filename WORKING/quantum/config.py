@@ -4,7 +4,7 @@ from pathlib import Path
 LABEL_REAL = 1
 LABEL_FAKE = 0
 
-# Feature contract: the raw 10-feature vector produced by the rPPG layer
+# Feature contract: the raw 20-feature vector produced by the rPPG layer
 # (same names/order as RPPGFeatures.feature_names() in RPPG/rppg/features.py).
 FEATURE_NAMES = [
     "heart_rate_bpm",
@@ -17,6 +17,16 @@ FEATURE_NAMES = [
     "left_right_cheek_correlation",
     "hr_half_diff",
     "peak_prominence",
+    "systolic_peak_width",
+    "diastolic_notch_ratio",
+    "forehead_cheek_phase_lag",
+    "signal_to_motion_ratio",
+    "peak_amplitude_variability",
+    "pulse_transit_time_proxy",
+    "hr_window_std",
+    "sqi_window_std",
+    "entropy_window_std",
+    "max_hr_deviation_bpm",
 ]
 
 FEATURE_MEANINGS = {
@@ -30,6 +40,16 @@ FEATURE_MEANINGS = {
     "left_right_cheek_correlation": "Pearson correlation between left and right cheek pulse signals",
     "hr_half_diff": "Absolute difference between first-half and second-half heart rates (BPM)",
     "peak_prominence": "Spectral peak-to-mean ratio of the in-band pulse spectrum",
+    "systolic_peak_width": "Median half-height width (ms) of systolic peaks in the pulse waveform",
+    "diastolic_notch_ratio": "Mean dicrotic-notch depth relative to systolic peak height",
+    "forehead_cheek_phase_lag": "Time lag (ms) between forehead and cheek pulse signals",
+    "signal_to_motion_ratio": "Log ratio of physiological-band to motion-band spectral power (dB)",
+    "peak_amplitude_variability": "Coefficient of variation of systolic peak amplitudes",
+    "pulse_transit_time_proxy": "Inter-ROI propagation delay (ms) as a pulse transit time proxy",
+    "hr_window_std": "Std of per-window heart rate estimates (BPM) - pulse stability across the clip",
+    "sqi_window_std": "Std of per-window signal quality index - pulse-quality stability",
+    "entropy_window_std": "Std of per-window spectral entropy - spectral stability",
+    "max_hr_deviation_bpm": "Max per-window HR deviation from the median HR (BPM)",
 }
 
 QUANTUM_ROOT = Path(__file__).resolve().parent
@@ -61,6 +81,12 @@ class QAOASelectionConfig:
     seed: int = 42
     restarts: int = 4
     n_jobs: int = 0
+    # Simulator backend: "auto" uses the torch-native statevector sim
+    # (fast, float64 complex128; see qaoa_sim.QAOASimulator); "torch"
+    # forces the torch sim; "pennylane" uses the legacy PennyLane QNode
+    # path (lightning.qubit on CPU). "lightning"/"default" are accepted
+    # as aliases for "pennylane" for backward compat.
+    device: str = "auto"
     selection_file: Path = field(default_factory=lambda: OUTPUT_DIR / "qaoa_selection.json")
 
 
@@ -83,6 +109,14 @@ class VQCConfig:
     min_delta: float = 1e-4
     clip_grad: float = 1.0
     broadcast_qnode: bool = True
+    # Quantum circuit backend: "auto" uses the torch-native layer
+    # (fast, complex128, differentiable; see vqc.QuantumLayerTorch);
+    # "pennylane" uses the legacy PennyLane QNode path (default.qubit
+    # on CPU with backprop). The torch head (weights, loss, optimizer)
+    # always runs on resolve_device() regardless of this flag.
+    qnode_impl: str = "auto"
+    # Legacy field kept for backward compat with saved metadata.
+    qnode_backend: str = "auto"
     save_checkpoint: bool = True
     seed: int = 42
     checkpoint_file: Path = field(default_factory=lambda: OUTPUT_DIR / "hybrid_vqc.pt")
