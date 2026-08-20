@@ -197,6 +197,85 @@ def decision_bins(y_true, prob_real, cfg=None):
     }
 
 
+def analyze_threshold_behavior(y_true, prob_real, cfg=None):
+    """Analyze how thresholds affect predictions.
+
+    Returns dict with threshold sweep analysis to diagnose whether
+    100% UNCERTAIN is due to weak discrimination or conservative thresholds.
+
+    Case A: Scores separate classes but 0.3/0.7 is too conservative
+    Case B: Scores do not separate classes (discrimination problem)
+    """
+    cfg = cfg or DecisionConfig()
+
+    # Sort scores and compute metrics at each threshold
+    indices = np.argsort(-prob_real)  # descending order
+    sorted_probs = prob_real[indices]
+    sorted_y = y_true[indices]
+
+    # Compute running metrics at each threshold (descending prob_real)
+    tps = np.cumsum(sorted_y)  # true positives (REAL) at each threshold
+    fps = np.cumsum(1 - sorted_y)  # false positives (FAKE predicted as REAL)
+    n_pos = int(sorted_y.sum())  # total REAL samples
+    n_neg = int((1 - sorted_y).sum())  # total FAKE samples
+    fn_s = n_pos - tps  # false negatives (REAL misclassified)
+    tn_s = n_neg - fps  # true negatives (FAKE correctly identified)
+
+    # REAL recall and precision at each threshold
+    with np.errstate(divide="ignore", invalid="ignore"):
+        recall = np.where((tps + fn_s) > 0, tps / (tps + fn_s), 0.0)
+        precision = np.where((tps + fps) > 0, tps / (tps + fps), 0.0)
+        specificity_arr = np.where((tn_s + fps) > 0, tn_s / (tn_s + fps), 0.0)
+
+    # FAKE recall = proportion of FAKE samples with prob_real <= fake_max_prob
+    fake_recall_direct = (
+        float((prob_real <= cfg.fake_max_prob).sum()) / n_neg if n_neg > 0 else 0.0
+    )
+
+    # Score ranges per class
+    fake_thresholds = sorted_probs[sorted_y == 0]  # scores of FAKE samples
+    real_thresholds = sorted_probs[sorted_y == 1]  # scores of REAL samples
+
+    analysis = {
+        "n_total": int(len(prob_real)),
+        "n_real": n_pos,
+        "n_fake": n_neg,
+        "n_uncertain_at_03_07": int(
+            ((prob_real > cfg.fake_max_prob) & (prob_real < cfg.real_min_prob)).sum()
+        ),
+        "fake_max_prob": cfg.fake_max_prob,
+        "real_min_prob": cfg.real_min_prob,
+        "score_range": [float(prob_real.min()), float(prob_real.max())],
+        "fake_scores": float(fake_thresholds.min()) if len(fake_thresholds) > 0 else None,
+        "real_scores": float(real_thresholds.max()) if len(real_thresholds) > 0 else None,
+        "proportion_fake_below_03": float((prob_real < cfg.fake_max_prob).sum()) / len(prob_real),
+        "proportion_real_above_07": float((prob_real >= cfg.real_min_prob).sum()) / len(prob_real),
+        "fake_recall_direct": fake_recall_direct,
+        "real_recall": float(recall[-1]) if len(recall) > 0 else 0.0,
+        "specificity": float(specificity_arr[-1]) if len(specificity_arr) > 0 else 0.0,
+        "precision_at_last": float(precision[-1]) if len(precision) > 0 else 0.0,
+    }
+
+    # Diagnosis: Case A or Case B
+    # Case A: Some samples have prob_real >= 0.7 or <= 0.3, but 0.3/0.7 threshold misses them
+    # Case B: All (or almost all) prob_real are between 0.3 and 0.7
+
+    n_real_above_07 = analysis["proportion_real_above_07"] * analysis["n_total"]
+    n_fake_below_03 = analysis["proportion_fake_below_03"] * analysis["n_total"]
+
+    if n_real_above_07 == 0 and n_fake_below_03 == 0:
+        analysis["diagnosis"] = "Case B: Scores do not separate classes - all probabilities concentrated in uncertain region"
+        analysis["recommendation"] = "Proceed upstream to rPPG and feature improvement (Phase 4-6)"
+    elif analysis["n_uncertain_at_03_07"] < analysis["n_total"]:
+        analysis["diagnosis"] = "Case A: Scores partially separate classes - some confident predictions possible"
+        analysis["recommendation"] = "Threshold adjustment could increase coverage, but discrimination is limited (AUC ~0.53)"
+    else:
+        analysis["diagnosis"] = "Case B: Scores do not separate classes"
+        analysis["recommendation"] = "Proceed upstream to rPPG and feature improvement"
+
+    return analysis
+
+
 def _fit_vqc_fold(Xtr, ytr, Xte, yte, cfg):
     """Module-level CV fold worker: train a VQC on the fold, return P(real).
 

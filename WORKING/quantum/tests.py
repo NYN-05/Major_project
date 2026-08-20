@@ -7,6 +7,8 @@ raises AssertionError on failure; main() reports results.
 These guard the two audited QAOA defects (dead beta mixer, Hamiltonian
 != classical cost), the duplicated feature contract, and dataset
 determinism.
+
+Additional setup: WORKING directory must be in sys.path for quantum imports.
 """
 
 from __future__ import annotations
@@ -14,9 +16,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+# Ensure WORKING root is importable for quantum.* modules
+WORKING_ROOT = str(Path(__file__).resolve().parent.parent)
+if WORKING_ROOT not in sys.path:
+    sys.path.insert(0, WORKING_ROOT)
+
 import numpy as np
 
 from quantum.config import FEATURE_NAMES, DataConfig, QAOASelectionConfig
+from quantum.data import SPLITS
 from quantum.qaoa import (
     _classical_cost,
     _cost_terms,
@@ -265,6 +273,40 @@ def test_checkpoint_state_dict_compat():
     assert tuple(state["quantum.weights"].shape) == expected, (
         f"weights shape {tuple(state['quantum.weights'].shape)} != {expected}"
     )
+
+
+def test_label_conversion():
+    """Test explicit label conversion functions.
+
+    Verifies:
+    - CSV 0 -> quantum -> REAL
+    - CSV 1 -> quantum -> FAKE
+    - quantum 1 -> display REAL
+    - quantum 0 -> display FAKE
+    """
+    from quantum.data import csv_to_quantum_label, quantum_to_display_label
+    from quantum.config import LABEL_REAL, LABEL_FAKE
+
+    # CSV 0 (real) -> quantum 1 (REAL)
+    q_label = csv_to_quantum_label(0)
+    assert q_label == LABEL_REAL, f"CSV 0 -> expected quantum {LABEL_REAL}, got {q_label}"
+    display = quantum_to_display_label(q_label)
+    assert display == "REAL", f"quantum 1 -> expected REAL, got {display}"
+
+    # CSV 1 (fake) -> quantum 0 (FAKE)
+    q_label = csv_to_quantum_label(1)
+    assert q_label == LABEL_FAKE, f"CSV 1 -> expected quantum {LABEL_FAKE}, got {q_label}"
+    display = quantum_to_display_label(q_label)
+    assert display == "FAKE", f"quantum 0 -> expected FAKE, got {display}"
+
+    # Edge case: invalid CSV label raises
+    try:
+        csv_to_quantum_label(2)
+        assert False, "Should have raised ValueError for invalid CSV label"
+    except ValueError:
+        pass  # expected
+
+    print("PASS test_label_conversion")
 
 
 def main() -> None:

@@ -36,8 +36,50 @@ from quantum.config import (
 )
 
 RPPG_LABEL_FAKE = 1  # rPPG CSV convention: 1 = deepfake, 0 = real
+LABEL_REAL = 1  # quantum convention: 1 = real
+LABEL_FAKE = 0  # quantum convention: 0 = fake
 
 SPLITS = ("train", "val", "test")
+
+def csv_to_quantum_label(csv_label):
+    """Convert rPPG CSV label to quantum convention.
+
+    rPPG CSV: 1 = deepfake, 0 = real
+    Quantum:  LABEL_REAL = 1, LABEL_FAKE = 0
+
+    The conversion is ``y = 1 - csv_label``:
+        - CSV 1 (deepfake)  -> quantum 0 (LABEL_FAKE)
+        - CSV 0 (real)      -> quantum 1 (LABEL_REAL)
+
+    Args:
+        csv_label: int, either 0 or 1 from the rPPG feature CSV
+
+    Returns:
+        int: quantum convention label (0 = fake, 1 = real)
+    """
+    if csv_label not in (0, 1):
+        raise ValueError(f"CSV label must be 0 or 1, got {csv_label}")
+    return 1 - csv_label
+
+
+def quantum_to_display_label(label):
+    """Convert quantum label to display/verdict label.
+
+    Quantum: LABEL_REAL = 1, LABEL_FAKE = 0
+    Display:   REAL, FAKE, or UNCERTAIN based on probability thresholds
+
+    Args:
+        label: int, quantum convention label (0 = fake, 1 = real)
+
+    Returns:
+        str: display label ('REAL', 'FAKE', or 'UNCERTAIN')
+    """
+    if label == LABEL_REAL:
+        return "REAL"
+    elif label == LABEL_FAKE:
+        return "FAKE"
+    else:
+        raise ValueError(f"Invalid quantum label: {label}")
 
 
 def _infer_subject_key(row):

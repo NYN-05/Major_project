@@ -309,7 +309,7 @@ class HybridModel(nn.Module):
         return self.head(self.quantum(x)).squeeze(-1)
 
 
-def focal_loss(logits, targets, cfg):
+def focal_loss(logits, targets, cfg, weight=None):
     probs = torch.sigmoid(logits)
     soft = targets * (1 - cfg.label_smoothing) + cfg.label_smoothing * 0.5
     pt = probs * soft + (1 - probs) * (1 - soft)
@@ -318,7 +318,10 @@ def focal_loss(logits, targets, cfg):
     entropy = -probs * torch.log(probs.clamp(min=1e-6)) - (1 - probs) * torch.log(
         (1 - probs).clamp(min=1e-6)
     )
-    return focal.mean() - cfg.confidence_penalty * entropy.mean()
+    loss = focal.mean() - cfg.confidence_penalty * entropy.mean()
+    if weight is not None:
+        loss = loss * weight
+    return loss
 
 
 # Trained models are cached across calls (keyed by feature count + checkpoint
@@ -405,6 +408,8 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
     `X_val`/`y_val` are used only for monitoring/early stopping, never
     for gradient updates. The checkpoint is saved together with `metadata`
     (QAOA selection, feature ordering, scaler, configs) for inference.
+
+    Class-balanced focal loss is applied if enabled in config.
     """
     cfg = cfg or VQCConfig()
     torch.manual_seed(cfg.seed)
@@ -421,6 +426,16 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
         model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay
     )
     monitor_val = X_val is not None and y_val is not None
+
+    # Compute balanced class weight for focal loss (intervention A)
+    # Weight for the positive class (REAL = 1) is inversely proportional to its frequency
+    y_np = y.cpu().numpy()
+    n_pos = int((y == 1).sum())  # class 1 = REAL in quantum convention
+    n_neg = int((y == 0).sum())  # class 0 = FAKE in quantum convention
+    if n_pos > 0 and n_neg > 0:
+        balanced_weight = float(n_neg + n_pos) / (2.0 * max(n_pos, n_neg))  # ~ n_samples / (2 * max_class)
+    else:
+        balanced_weight = 1.0
 
     scheduler = None
     if cfg.lr_schedule == "cosine":
@@ -441,7 +456,7 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
         total_loss = 0.0
         for xb, yb in loader:
             optimizer.zero_grad()
-            loss = focal_loss(model(xb), yb, cfg)
+            loss = focal_loss(model(xb), yb, cfg, weight=balanced_weight)
             loss.backward()
             if cfg.clip_grad is not None and cfg.clip_grad > 0:
                 nn.utils.clip_grad_norm_(model.parameters(), cfg.clip_grad)

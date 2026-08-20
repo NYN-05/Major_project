@@ -10,11 +10,11 @@ This document explains the **quantum layer** (stage 3 of the 3-stage pipeline) f
 
 The project detects deepfake videos for KYC (Know-Your-Customer) onboarding using **physiological evidence** — a real face shows a faint periodic color change caused by blood flow (remote photoplethysmography, rPPG); a synthesized face does not. The pipeline has three stages:
 
-| Stage | What it does | Output |
-|---|---|---|
-| 1. Frame (`WORKING/frame/`) | Samples frames, detects faces (YOLO), filters blur/brightness | Accepted JPEGs + metadata |
-| 2. rPPG (`WORKING/RPPG/`) | Extracts pulse signals from face ROIs (POS/CHROM), computes 10–20 physiological features | 20-feature vector per video |
-| 3. **Quantum (`WORKING/quantum/`)** | **QAOA feature selection + hybrid VQC classification** | `P(real)` → **REAL / FAKE / UNCERTAIN** |
+| Stage                                      | What it does                                                                              | Output                                           |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| 1. Frame (`WORKING/frame/`)              | Samples frames, detects faces (YOLO), filters blur/brightness                             | Accepted JPEGs + metadata                        |
+| 2. rPPG (`WORKING/RPPG/`)                | Extracts pulse signals from face ROIs (POS/CHROM), computes 10–20 physiological features | 20-feature vector per video                      |
+| 3.**Quantum (`WORKING/quantum/`)** | **QAOA feature selection + hybrid VQC classification**                              | `P(real)` → **REAL / FAKE / UNCERTAIN** |
 
 The quantum layer does two jobs:
 
@@ -23,7 +23,7 @@ The quantum layer does two jobs:
 
 The layer is fully **simulated** on classical hardware (PennyLane statevector simulator + a custom torch-native simulator written for this project) — no quantum hardware is required to run it, which makes it deployable today while the algorithms are genuine quantum algorithms that transfer directly to quantum processors.
 
-**Honest headline result (frozen baseline, 2026-08-18):** the layer runs end-to-end and is verification-clean (Hamiltonian ≡ classical cost to <1e-6, 7/7 regression tests pass), but current test metrics hover near chance (VQC test AUC 0.543, best classical baseline GNB 0.570, CV AUC 0.528). The bottleneck is the rPPG features themselves — per-feature discrimination strength |AUC−0.5| ≤ ~0.06 — not the quantum layer. The decision bins are therefore 100% UNCERTAIN at the 0.3/0.7 thresholds. This is presented transparently in §5.
+**Honest headline result (frozen baseline, 2026-08-19):** the layer runs end-to-end and is verification-clean (Hamiltonian ≡ classical cost to <1e-6, 10/10 regression tests pass), but current test metrics hover near chance (VQC test AUC 0.535, best classical baseline logistic regression 0.582, CV AUC 0.556). The bottleneck is the rPPG features themselves — per-feature discrimination strength |AUC−0.5| ≤ ~0.06 — not the quantum layer. The decision bins are therefore 100% UNCERTAIN at the 0.3/0.7 thresholds. This is presented transparently in §5.
 
 ---
 
@@ -41,15 +41,15 @@ This section explains every quantum concept the layer uses, in plain language wi
 
 Quantum gates are unitary operations on qubits — the quantum analogue of logic gates. The gates used in this project:
 
-| Gate | Matrix / effect | Where it is used in the project |
-|---|---|---|
-| **Hadamard (H)** | H = 1/√2 [[1,1],[1,−1]]; maps |0⟩ → (|0⟩+|1⟩)/√2, creating superposition | Initial state of the QAOA ansatz: |+⟩^n (all 2ⁿ subsets equally weighted) and of the VQC circuit |
-| **Pauli-X (X)** | X = [[0,1],[1,0]]; the quantum NOT | Basis-state preparation in `verify_hamiltonian`; the QAOA **mixer** (as R_x rotations) |
-| **Pauli-Z (Z)** | Z = [[1,0],[0,−1]]; flips the phase of |1⟩ | Observable of the cost Hamiltonian and of VQC outputs ⟨Z_i⟩ |
-| **Pauli-Y (Y)** | Y = [[0,−i],[i,0]] | Component of the entangling gates in the VQC ansatz |
-| **RY(θ), RZ(φ)** | Single-qubit rotations by Euler angles | VQC **angle embedding** (RY per feature) and the strongly-entangling ansatz's Rot(φ,θ,ω) = RZ(ω)RY(θ)RZ(φ) |
-| **CNOT** | Controlled-NOT: flips target iff control is |1⟩ | Creates **entanglement** between qubits in the VQC ansatz |
-| **PauliRot(2γc, P, wires)** | exp(−iγc·P) for a Pauli string P | The QAOA **cost layer**: applies the evolution under the Hamiltonian term by term |
+| Gate                               | Matrix / effect                             | Where it is used in the project                                                                                       |
+| ---------------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Hadamard (H)**             | H = 1/√2[[1,1],[1,−1]]; maps                             | 0⟩ → (                                                                                                              |
+| **Pauli-X (X)**              | X =[[0,1],[1,0]]; the quantum NOT                        | Basis-state preparation in`verify_hamiltonian`; the QAOA **mixer** (as R_x rotations)                         |
+| **Pauli-Z (Z)**              | Z =[[1,0],[0,−1]]; flips the phase of                     | 1⟩                                                                                                                   |
+| **Pauli-Y (Y)**              | Y =[[0,−i],[i,0]]                                         | Component of the entangling gates in the VQC ansatz                                                                   |
+| **RY(θ), RZ(φ)**           | Single-qubit rotations by Euler angles      | VQC**angle embedding** (RY per feature) and the strongly-entangling ansatz's Rot(φ,θ,ω) = RZ(ω)RY(θ)RZ(φ) |
+| **CNOT**                     | Controlled-NOT: flips target iff control is | 1⟩                                                                                                                   |
+| **PauliRot(2γc, P, wires)** | exp(−iγc·P) for a Pauli string P         | The QAOA**cost layer**: applies the evolution under the Hamiltonian term by term                                |
 
 ### 2.3 Entanglement
 
@@ -125,7 +125,7 @@ with closed-form expressions for lin_i, quad_ij, const (implemented in `qaoa._co
 
 **Marginal probabilities → selection.** After optimization, the final state has amplitude on many subsets. The probability that qubit i is |1⟩ — `P(b_i = 1) = (1 − ⟨Z_i⟩)/2` — is the **marginal probability** of feature i. The k features with the highest marginals are selected. This is a nice quantum property: the answer is read out as a probability distribution over all subsets, not a single greedy decision.
 
-**Restarts.** QAOA is not convex; the optimizer (COBYLA, max 200 iterations) can land in a local optimum. Four restarts with different seeds (42–45) run and the lowest-cost result wins. Restart seeds 42 and 45 got stuck at cost ≈ +10, seed 43 at −0.098, seed 44 found the best cost −0.707.
+**Restarts.** QAOA is not convex; the optimizer (COBYLA, max 200 iterations) can land in a local optimum. Four restarts with different seeds (42–45) run and the lowest-cost result wins. Restart seeds 42 and 45 got stuck at cost ≈ +10, seed 43 at −0.098, seed 44 found the best cost −0.767.
 
 ### 2.8 Loss function (VQC training)
 
@@ -151,7 +151,7 @@ The model is a pipeline: **quantum circuit (parameterized, differentiable) → c
 ### 3.1 Data flow diagram
 
 ```
-WORKING/output/rppg/dataset_features.csv   (3471 rows @ 30 fps: 1920 real / 1551 fake*)
+WORKING/output/rppg/dataset_features.csv   (3473 rows @ 30 fps: 1921 real / 1552 fake*)
         │  label flip (rPPG: 1=fake → quantum: LABEL_REAL=1)
         ▼
 data.py ──► plausibility filter (30 ≤ HR ≤ 220, finite values)
@@ -166,7 +166,7 @@ qaoa.py ──► discrimination weights (Mann-Whitney AUC) + |correlation| matr
         │  Hamiltonian encoding (_cost_terms) + verify_hamiltonian (< 1e-6)
         │  QAOA (3 layers, COBYLA, 4 restarts) → marginal probabilities
         ▼
-qaoa_selection.json  (20 → 3 features: signal_quality_index, peak_prominence, entropy_window_std)
+qaoa_selection.json  (20 → 3 features: cheek_forehead_correlation, left_right_cheek_correlation, signal_to_motion_ratio)
         │
 vqc.py ──► HybridModel on the 3 selected features (angle embedding + SEL ansatz + head)
         │  AdamW, focal loss, cosine LR, early stopping, CUDA head
@@ -180,15 +180,15 @@ pipeline.predict_features(features) ──► P(real) ──► REAL / FAKE / UN
         └────────  inference replays: scaler → selection → VQC  (exact train-time transform)
 ```
 
-*Split counts (verified from `data.npz`): the 3471-row table splits into train 2083 / val 694 / test 694. Test = 310 fake / 384 real under quantum labels (~55% real ratio, mirrored in train/val).
+*Split counts (verified from `data.npz`): the 3473-row table splits into train 2083 / val 694 / test 694. Test = 310 fake / 384 real under quantum labels (~55% real ratio, mirrored in train/val).
 
 ### 3.2 Label conventions (do not unify between stages)
 
-| Layer | Convention |
-|---|---|
-| rPPG CSV (`dataset_features.csv`) | `1 = fake`, `0 = real` |
-| Quantum layer (`config.py`) | `LABEL_REAL = 1`, `LABEL_FAKE = 0` — `data.py` flips with `y = 1 − csv_label` |
-| rPPG RandomForest cross-check (`run_pipeline.py`) | `1 = DEEPFAKE` |
+| Layer                                               | Convention                                                                              |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| rPPG CSV (`dataset_features.csv`)                 | `1 = fake`, `0 = real`                                                              |
+| Quantum layer (`config.py`)                       | `LABEL_REAL = 1`, `LABEL_FAKE = 0` — `data.py` flips with `y = 1 − csv_label` |
+| rPPG RandomForest cross-check (`run_pipeline.py`) | `1 = DEEPFAKE`                                                                        |
 
 ### 3.3 Subject grouping and leakage prevention
 
@@ -257,7 +257,7 @@ Turns the rPPG CSV into `data.npz` (numpy, gitignored).
 - `QAOASelector.select` (368) — orchestrates: weights → correlation matrix → Hamiltonian → 4 parallel restarts (ProcessPoolExecutor) of COBYLA → best state → marginal probabilities → top-k features.
 - `_restart_worker` (326) — one full COBYLA run; module-level for pickling; uses `qaoa_sim.QAOASimulator` when available (~20× faster).
 - `select_classical` (432) — classical greedy reference (top-k by weight) for fair comparison.
-- `compare_selections` (456) — overlap report (current run: **0 features overlap** with the classical pick).
+- `compare_selections` (456) — overlap report (current run: **2 features overlap** with the classical pick — both correlation features).
 - `verify_hamiltonian` (470) — max |⟨b|H|b⟩ − C(b)| over all-zeros, all-ones, all single-bit, and 8 random bitstrings; the pipeline hard-asserts < 1e-6.
 - `save_selection` / `load_selection` (536/544) — JSON artifact I/O.
 
@@ -278,12 +278,12 @@ A pure-PyTorch, exact (complex128) simulator of the QAOA circuit:
 - `resolve_device` (29) — CUDA if available, else CPU (torch side).
 - `QuantumLayerTorch` (125) — the default quantum layer: exact torch-native statevector simulator of `AngleEmbedding(RY) → StronglyEntanglingLayers → ⟨Z_i⟩`, complex128, batched (a (batch, 2ⁿ) state is evolved in parallel — `_apply_wire_rotation` uses bit-index reshapes; `_apply_cnot` uses index masks). Same `weights` parameter name/shape as the PennyLane `QuantumLayer` so checkpoints are interchangeable.
 - `QuantumLayer` (61) — legacy PennyLane QNode path (default.qubit + backprop), kept behind `qnode_impl="pennylane"` for cross-verification. Broadcasts batches through the circuit; CPU-weight caching with `_version`/`data_ptr` invalidation so autograd still flows to CUDA head weights.
-- `HybridModel` (278) — quantum layer (n qubits = n features) + head `Linear(n→8) → ReLU → Dropout(0.2) → Linear(8→1)`; forward = head(quantum(x)).
-- `focal_loss` (297) — §2.8.
-- `train_vqc` (384) — AdamW (lr 1e-2, wd 1e-2), cosine-annealed LR, gradient clipping at 1.0, early stopping on val loss (patience 12, min_delta 1e-4) with restore of the best-validation checkpoint; checkpoint bundles `state_dict` + metadata (selection, scaler, configs) sanitized for `weights_only=True` loading.
-- `load_vqc_model` (317) — cached by (n_features, path, mtime, size); max 8 entries.
-- `predict_vqc` (343) — sigmoid logits under `no_grad` → P(real).
-- `_val_metrics` (366) — single-forward val loss + accuracy (one forward instead of two).
+- `HybridModel` (293) — quantum layer (n qubits = n features) + head `Linear(n→8) → ReLU → Dropout(0.2) → Linear(8→1)`; forward = head(quantum(x)).
+- `focal_loss` (312) — §2.8.
+- `train_vqc` (399) — AdamW (lr 1e-2, wd 1e-2), cosine-annealed LR, gradient clipping at 1.0, early stopping on val loss (patience 12, min_delta 1e-4) with restore of the best-validation checkpoint; checkpoint bundles `state_dict` + metadata (selection, scaler, configs) sanitized for `weights_only=True` loading.
+- `load_vqc_model` (332) — cached by (n_features, path, mtime, size); max 8 entries.
+- `predict_vqc` (358) — sigmoid logits under `no_grad` → P(real).
+- `_val_metrics` (381) — single-forward val loss + accuracy (one forward instead of two).
 
 ### 4.7 `evaluation.py` — metrics, CV, baselines
 
@@ -307,15 +307,18 @@ A pure-PyTorch, exact (complex128) simulator of the QAOA circuit:
 
 ### 4.10 `tests.py` — regression self-checks (no pytest)
 
-Run with `python -m quantum.tests`; exit 0 = all pass (currently 7/7). They guard the two audited QAOA defects and the fragile contracts:
+Run with `python -m quantum.tests`; exit 0 = all pass (currently 10/10). They guard the two audited QAOA defects and the fragile contracts:
 
-1. `test_beta_alive` — perturbing β must change the cost (a refactor once drove the mixer with γ, making the ansatz degenerate).
-2. `test_hamiltonian_matches_classical` — ⟨b|H|b⟩ = C(b) on every bitstring of a synthetic problem.
-3. `test_real_hamiltonian_verification` — same on the real dataset (< 1e-6).
-4. `test_feature_contract_sync` — `FEATURE_NAMES` identical to `RPPGFeatures.feature_names()`.
-5. `test_split_determinism` — same seed → identical splits.
-6. `test_ffpp_source_subject_grouping` — FF++ real+synth clips share a group key.
-7. `test_no_group_leakage` — no group straddles two splits.
+1. `test_beta_alive` (43) — perturbing β must change the cost (a refactor once drove the mixer with γ, making the ansatz degenerate).
+2. `test_hamiltonian_matches_classical` (66) — ⟨b|H|b⟩ = C(b) on every bitstring of a synthetic problem.
+3. `test_real_hamiltonian_verification` (98) — same on the real dataset (< 1e-6).
+4. `test_feature_contract_sync` (112) — `FEATURE_NAMES` identical to `RPPGFeatures.feature_names()`.
+5. `test_split_determinism` (125) — same seed → identical splits.
+6. `test_ffpp_source_subject_grouping` (158) — FF++ real+synth clips share a group key.
+7. `test_no_group_leakage` (171) — no group straddles two splits.
+8. `test_qaoa_sim_matches_pennylane` (202) — the torch-native QAOA simulator reproduces PennyLane cost and marginals to < 1e-6 on a synthetic problem.
+9. `test_torch_layer_matches_pennylane` (227) — `QuantumLayerTorch` forward output matches the PennyLane `QuantumLayer` to < 1e-5 (same weights).
+10. `test_checkpoint_state_dict_compat` (251) — `quantum.weights` keeps the exact PennyLane shape `(qml_layers, n, 3)` so existing `hybrid_vqc.pt` checkpoints load unchanged.
 
 ### 4.11 `sweep.py` — hyperparameter search harness (dev tool)
 
@@ -327,90 +330,90 @@ Empty package marker.
 
 ---
 
-## 5. Performance Results (Frozen Baseline, 2026-08-18)
+## 5. Performance Results (Frozen Baseline, 2026-08-19)
 
-All numbers below come from the regenerated artifacts in `WORKING/output/quantum/` (`metrics_quantum.json`, `metrics_baselines.json`, `qaoa_selection.json`). Data: 3471 real rPPG rows (1920 real / 1551 fake), subject-grouped 60/20/20 split (train 2083 / val 694 / test 694).
+All numbers below come from the regenerated artifacts in `WORKING/output/quantum/` (`metrics_quantum.json`, `metrics_baselines.json`, `qaoa_selection.json`). Data: 3473 real rPPG rows (1921 real / 1552 fake) × 20 features, subject-grouped 60/20/20 split (train 2083 / val 694 / test 694).
 
 ### 5.1 QAOA feature selection
 
-| Parameter | Value |
-|---|---|
-| Selected features (20 → 3) | `signal_quality_index`, `peak_prominence`, `entropy_window_std` |
-| Best cost (restart seed 44) | **−0.7072** |
-| All restart costs | [10.26, −0.098, −0.707, 9.74] |
-| COBYLA success flag | false (no convergence; best iterate used — normal for COBYLA on this landscape) |
-| Configuration | p=3 layers, max_iter=200, rp=0.3, cp=0.5, k=3, 4 restarts |
-| Classical greedy reference | `cheek_forehead_correlation`, `left_right_cheek_correlation`, `prv_std_ms` |
-| Overlap QAOA ↔ classical | **0 features** |
-| Marginal probability of selected features | 0.182, 0.177, 0.174 (highest of 20; range 0.145–0.182) |
+| Parameter                                 | Value                                                                                        |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Selected features (20 → 3)               | `cheek_forehead_correlation`, `left_right_cheek_correlation`, `signal_to_motion_ratio` |
+| Best cost (restart seed 44)               | **−0.7669**                                                                           |
+| All restart costs                         | [11.73, −0.098, −0.767, 9.83]                                                              |
+| COBYLA success flag                       | false (no convergence; best iterate used — normal for COBYLA on this landscape)             |
+| Configuration                             | p=3 layers, max_iter=200, rp=0.3, cp=0.5, k=3, 4 restarts, torch-native simulator            |
+| Classical greedy reference                | `cheek_forehead_correlation`, `left_right_cheek_correlation`, `prv_std_ms`             |
+| Overlap QAOA ↔ classical                 | **2 features** (both correlation features)                                             |
+| Marginal probability of selected features | 0.689, 0.686, 0.684 (highest of 20; range 0.634–0.689)                                      |
 
-Interpretation: the marginals are close together (0.145–0.182) — no feature clearly dominates, consistent with the weak per-feature signal. QAOA and the classical greedy pick choose disjoint sets; neither lifts downstream AUC above ~0.57, confirming the selection problem itself is not the bottleneck.
+Interpretation: the two correlation features are strong by every metric — QAOA and the classical greedy pick agree on them, and they dominate the marginals. `signal_to_motion_ratio` (one of the 10 new morphology/stability features) replaces `prv_std_ms` as the third pick. The marginals remain closely packed (0.634–0.689) and downstream AUC still hovers near 0.55–0.58, consistent with weak per-feature signal.
 
 ### 5.2 Hybrid VQC — held-out test set (694 rows)
 
-| Metric | Value |
-|---|---|
-| Accuracy | 0.5533 |
-| Precision / Recall | 0.5533 / 1.0000 |
-| Specificity | **0.0000** |
-| F1 | 0.7124 |
-| **AUC-ROC** | **0.5433** |
-| PR-AUC | 0.5628 |
-| ECE (calibration) | 0.0605 |
-| Balanced accuracy | 0.5000 |
-| Confusion matrix | [[TN 0, FP 310], [FN 0, TP 384]] |
+| Metric             | Value            |
+| ------------------ | ---------------- |
+| Accuracy           | 0.5519           |
+| Precision / Recall | 0.5527 / 0.9974  |
+| Specificity        | **0.0000** |
+| F1                 | 0.7112           |
+| **AUC-ROC**  | **0.5353** |
+| PR-AUC             | 0.5821           |
+| ECE (calibration)  | 0.0675           |
+| Balanced accuracy  | 0.4987           |
+| Confusion matrix   | [[TN 0, FP 310], [FN 1, TP 383]]                 |
 
-The VQC is a **majority-class predictor**: it assigns every test sample P(real) > 0.5 (recall 1.0, specificity 0.0 — nothing is ever classified fake at the 0.5 threshold).
+The VQC is a **majority-class predictor**: it assigns nearly every test sample P(real) > 0.5 (recall 0.997, specificity 0.0 — one real sample slips below the 0.5 line, nothing is ever classified fake).
 
 ### 5.3 Decision bins (the deployed verdict behavior)
 
-| Bin | Count | Rate |
-|---|---|---|
-| REAL (P ≥ 0.7) | 0 | 0% |
-| FAKE (P ≤ 0.3) | 0 | 0% |
-| **UNCERTAIN** (0.3 < P < 0.7) | **694** | **100%** |
-| Confirmed accuracy | n/a (no confirmed predictions) | |
+| Bin                                 | Count                          | Rate           |
+| ----------------------------------- | ------------------------------ | -------------- |
+| REAL (P ≥ 0.7)                     | 0                              | 0%             |
+| FAKE (P ≤ 0.3)                     | 0                              | 0%             |
+| **UNCERTAIN** (0.3 < P < 0.7) | **694**                  | **100%** |
+| Confirmed accuracy                  | n/a (no confirmed predictions) |                |
 
 Every model probability falls inside [0.3, 0.7]. The layer therefore refuses to commit — the safety-correct behavior for KYC when evidence is weak — and `run_pipeline.py` maps this to an INCONCLUSIVE outcome for the end-to-end product.
 
 ### 5.4 VQC — 5-fold grouped CV (train split; procedure stability)
 
-| Fold | Accuracy | AUC-ROC | ECE | Specificity |
-|---|---|---|---|---|
-| 1 | 0.5374 | 0.5511 | 0.0771 | 0.0 |
-| 2 | 0.5627 | 0.4784 | 0.0517 | 0.0 |
-| 3 | 0.5534 | 0.5333 | 0.0583 | 0.0 |
-| 4 | 0.5514 | 0.5574 | 0.0647 | 0.0 |
-| 5 | 0.5614 | 0.5221 | 0.0628 | 0.0 |
-| **Mean ± Std** | **0.5533 ± 0.009** | **0.5285 ± 0.028** | 0.0629 ± 0.008 | 0.0 ± 0.0 |
+| Fold                  | Accuracy                  | AUC-ROC                   | ECE             | Specificity |
+| --------------------- | ------------------------- | ------------------------- | --------------- | ----------- |
+| 1                     | 0.5374                    | 0.5589                    | 0.0738          | 0.0         |
+| 2                     | 0.5627                    | 0.5380                    | 0.0513          | 0.0         |
+| 3                     | 0.5534                    | 0.5769                    | 0.0646          | 0.0         |
+| 4                     | 0.5514                    | 0.5300                    | 0.0587          | 0.0         |
+| 5                     | 0.5614                    | 0.5746                    | 0.0660          | 0.0         |
+| **Mean ± Std** | **0.5533 ± 0.009** | **0.5557 ± 0.019** | 0.0629 ± 0.008 | 0.0 ± 0.0  |
 
 Every fold is also a majority-class predictor — this is a property of the features, not of one lucky/unlucky split.
 
 ### 5.5 Classical baselines (same 3 selected features)
 
-| Model | Test Acc | Test AUC | PR-AUC | ECE | Specificity | CV AUC |
-|---|---|---|---|---|---|---|
-| **Gaussian NB** | **0.5807** | **0.5698** | **0.6000** | 0.0140 | 0.1516 | 0.5008 |
-| Logistic Regression | 0.5533 | 0.5443 | 0.5634 | 0.0515 | 0.4419 | 0.4859 |
-| MLP (32,16) | 0.5576 | 0.5202 | 0.5617 | **0.0114** | 0.1452 | 0.4900 |
-| Random Forest | 0.5014 | 0.4773 | 0.5476 | 0.1777 | 0.3387 | 0.4837 |
-| XGBoost | 0.5259 | 0.4980 | 0.5453 | 0.0823 | 0.2419 | 0.4592 |
-| Linear SVC | 0.5533 | 0.4239 | 0.5019 | 0.0178 | 0.0000 | 0.5141 |
-| **Hybrid VQC** | 0.5533 | 0.5433 | 0.5628 | 0.0605 | 0.0000 | 0.5285 |
+| Model                         | Test Acc         | Test AUC         | PR-AUC           | ECE              | Specificity      | CV AUC           |
+| ----------------------------- | ---------------- | ---------------- | ---------------- | ---------------- | ---------------- | ---------------- |
+| **Logistic Regression** | 0.5519           | **0.5822** | **0.6254** | 0.0538           | **0.5323** | **0.5677** |
+| Linear SVC                    | **0.5663** | 0.5814           | 0.6245           | **0.0106** | 0.1903           | **0.5679** |
+| Gaussian NB                   | 0.5591           | 0.5676           | 0.6109           | 0.0285           | 0.2323           | 0.5663           |
+| XGBoost                       | 0.5389           | 0.5464           | 0.6088           | 0.0790           | 0.3935           | 0.5343           |
+| Random Forest                 | 0.5187           | 0.5357           | 0.6120           | 0.1222           | 0.3903           | 0.5349           |
+| MLP (32,16)                   | 0.5130           | 0.5283           | 0.5787           | 0.1063           | 0.3452           | 0.5466           |
+| **Hybrid VQC**          | 0.5519           | 0.5353           | 0.5821           | 0.0675           | 0.0000           | 0.5557           |
 
-### 5.6 Training dynamics (`training_log.jsonl`, 16 epochs)
+### 5.6 Training dynamics (`training_log.jsonl`, 27 epochs)
 
-- Train loss: 0.0629 → 0.0578 (converged, monotone).
-- Val loss: 0.0587 → 0.0578 (oscillates within the min_delta band — early stopping never fired).
-- Val accuracy: **locked at 0.5533** every epoch (the majority-class fraction — the model learns nothing beyond the base rate).
-- Cosine LR: 0.0100 → 0.0092.
+- Train loss: 0.0634 → 0.0571 (converged, monotone).
+- Val loss: 0.0587 → 0.0577 (oscillates within the min_delta band — early stopping never fired).
+- Val accuracy: locked at 0.5533 (the majority-class fraction) for 25 epochs, then creeps to 0.5562 in the last two — the model learns nothing beyond the base rate.
+- Cosine LR: 0.0100 → 0.0076.
 
 ### 5.7 Honest interpretation (for judges)
 
-1. **The ceiling is in the features, not the model.** Per-feature discrimination |AUC−0.5| ≤ ~0.06 (the normalized weights range 0.025–1.0, but even the strongest features are weak). Every model — quantum or classical, on 3 or 20 features — lands between 0.50 and 0.57 AUC. Increasing the dataset 8.2× (421 → 3445 → 3471 rows, adding FF++) did not lift the ceiling, which is the classic signature of an input-signal problem.
-2. **The VQC is an honest learner here.** It converges to the Bayes-optimal decision under weak signal: predict the majority class. Its AUC (0.543) actually beats MLP, RF, XGBoost, and LinearSVC on the same features, and its CV AUC (0.5285) beats all baselines' CV AUC. Only Gaussian NB edges it out on the test split.
+1. **The ceiling is in the features, not the model.** Per-feature discrimination |AUC−0.5| ≤ ~0.06 (the normalized weights range 0.025–1.0, but even the strongest features are weak). Every model — quantum or classical, on 3 or 20 features — lands between 0.50 and 0.58 AUC. Growing the dataset (421 → 3445 → 3473 rows, adding FF++) and doubling the feature set (10 → 20, adding morphology/stability features) did not lift the ceiling, which is the classic signature of an input-signal problem.
+2. **The VQC is an honest learner here.** It converges to the Bayes-optimal decision under weak signal: predict the majority class (recall 0.997, specificity 0.0). Its CV AUC (0.5557) beats MLP, RF, and XGBoost but trails logistic regression / linear SVC / GNB (~0.566–0.568), which exploit the weak signal slightly better on these three features. The VQC's value proposition — entanglement-representable feature interactions — cannot show through when the features carry almost no class information.
 3. **100% UNCERTAIN is a feature, not a bug, for KYC.** When the physiological evidence cannot separate real from fake, the system declines to authenticate rather than risk a false acceptance. The 0.3/0.7 thresholds are the next lever (an explicit, documented research item).
-4. **The quantum mechanics are verified.** Hamiltonian ≡ classical cost to < 1e-6 (hard assert), the beta mixer is provably alive, QAOA is not worse than the classical greedy pick at selection quality (both pick weak-but-valid feature sets), and all 7 regression tests pass. The layer's correctness is not in question; the underlying physiological signal is.
+4. **The quantum mechanics are verified.** Hamiltonian ≡ classical cost to < 1e-6 (hard assert), the beta mixer is provably alive, QAOA agrees with the classical greedy pick on 2 of 3 features, the torch-native simulators reproduce the PennyLane circuits to float rounding, and all 10 regression tests pass. The layer's correctness is not in question; the underlying physiological signal is.
 
 ---
 
@@ -426,6 +429,7 @@ These are the layer's quality gates — each is automatic or test-enforced:
 6. **Inference replays training exactly** — scaler, selection, and model are saved with training-time metadata; `predict_features` validates shapes/ranges and raises actionable errors when artifacts are out of sync.
 7. **Train-only statistics** — the scaler is fitted on the training split only; the test split is touched only by the final frozen evaluation (a `--dev-only` mode exists to protect it during development).
 8. **Deterministic reproduction** — seeds fixed (42), split manifest records path → split/group, QAOA restarts are seeded.
+9. **Simulator equivalence** — tests 8 & 9 prove the torch-native QAOA simulator and the torch-native VQC layer reproduce the PennyLane circuits to float rounding; test 10 proves checkpoint compatibility.
 
 ---
 
@@ -455,18 +459,18 @@ python run_pipeline.py --source path/to/video.mp4 --method POS
 
 ### Artifacts (all gitignored, under `WORKING/output/quantum/`)
 
-| Artifact | Contents |
-|---|---|
-| `data.npz` | subject-grouped train/val/test feature matrices + labels + groups + paths |
-| `split_manifest.json` | path → (split, group) for reproducibility |
-| `feature_scaler.json` | train-fitted z-score means/scales |
-| `qaoa_selection.json` | selected indices/features, marginals, weights, cost, restarts |
-| `selection_comparison.json` | QAOA vs classical greedy overlap |
-| `hybrid_vqc.pt` | model state_dict + metadata (selection, scaler, configs) + training summary |
-| `training_log.jsonl` | per-epoch train loss, val loss/acc, LR |
-| `metrics_quantum.json` | test metrics, balanced accuracy, decision bins, 5-fold CV |
-| `metrics_baselines.json` | six classical baselines, test + CV |
-| `roc_curve.png`, `confusion_matrix.png`, `calibration_curve.png` | evaluation figures |
+| Artifact                                                               | Contents                                                                    |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `data.npz`                                                           | subject-grouped train/val/test feature matrices + labels + groups + paths   |
+| `split_manifest.json`                                                | path → (split, group) for reproducibility                                  |
+| `feature_scaler.json`                                                | train-fitted z-score means/scales                                           |
+| `qaoa_selection.json`                                                | selected indices/features, marginals, weights, cost, restarts               |
+| `selection_comparison.json`                                          | QAOA vs classical greedy overlap                                            |
+| `hybrid_vqc.pt`                                                      | model state_dict + metadata (selection, scaler, configs) + training summary |
+| `training_log.jsonl`                                                 | per-epoch train loss, val loss/acc, LR                                      |
+| `metrics_quantum.json`                                               | test metrics, balanced accuracy, decision bins, 5-fold CV                   |
+| `metrics_baselines.json`                                             | six classical baselines, test + CV                                          |
+| `roc_curve.png`, `confusion_matrix.png`, `calibration_curve.png` | evaluation figures                                                          |
 
 ---
 
@@ -479,13 +483,13 @@ A: Two reasons. (1) Feature selection is a combinatorial optimization problem ov
 A: No — on exact classical statevector simulators (PennyLane and a custom torch-native simulator). This is deliberate: deterministic, reproducible, deployable in a KYC product today. The circuits are hardware-ready: the ansatz and Hamiltonian encoding transfer unchanged to real processors.
 
 **Q: The accuracy looks low — does this mean the project failed?**
-A: No — it means the experiment produced a clear, honest result: the rPPG physiological features carry almost no class signal (per-feature |AUC−0.5| ≤ 0.06; all models, classical and quantum, plateau at 0.50–0.57 AUC even after an 8.2× dataset increase). The quantum layer correctly learns the majority class and refuses to commit (100% UNCERTAIN), which is the safe behavior for KYC. The research conclusion is that Phase-2 work must improve the rPPG method itself (method/ROI probing), not the classifier.
+A: No — it means the experiment produced a clear, honest result: the rPPG physiological features carry almost no class signal (per-feature |AUC−0.5| ≤ 0.06; all models, classical and quantum, plateau at 0.50–0.58 AUC even after an 8.2× dataset increase and a doubling of the feature set to 20). The quantum layer correctly learns the majority class and refuses to commit (100% UNCERTAIN), which is the safe behavior for KYC. The research conclusion is that Phase-2 work must improve the rPPG method itself (method/ROI probing), not the classifier.
 
 **Q: Why 3 features? Why these three?**
-A: k=3 was validated empirically: a 3-feature QAOA pick reached CV AUC 0.569 vs 0.484 for the old 6-feature pick (the extra features diluted the signal). The specific three (signal_quality_index, peak_prominence, entropy_window_std) are chosen by QAOA as the best trade-off of individual discrimination, low redundancy, and exact cardinality — a purely data-driven choice, cross-checked against a classical greedy selector.
+A: k=3 was validated empirically: a 3-feature QAOA pick reached CV AUC 0.569 vs 0.484 for the old 6-feature pick (the extra features diluted the signal). The specific three (cheek_forehead_correlation, left_right_cheek_correlation, signal_to_motion_ratio) are chosen by QAOA as the best trade-off of individual discrimination, low redundancy, and exact cardinality — a purely data-driven choice that agrees with the classical greedy selector on 2 of 3 features.
 
 **Q: How do you know the quantum part is doing what you claim?**
-A: Four independent gates: (1) the Hamiltonian is provably equal to the classical cost (verified < 1e-6 over 30+ bitstrings, hard-asserted in the pipeline); (2) a regression test proves the β mixer is alive; (3) 7/7 self-checks pass; (4) the torch-native simulator reproduces the PennyLane circuit to float rounding.
+A: Four independent gates: (1) the Hamiltonian is provably equal to the classical cost (verified < 1e-6 over 30+ bitstrings, hard-asserted in the pipeline); (2) a regression test proves the β mixer is alive; (3) 10/10 self-checks pass, including simulator-equivalence tests proving the torch-native circuits reproduce the PennyLane ones to float rounding; (4) the same verification carries over to the checkpoints, which load unchanged.
 
 **Q: Is this a hybrid model or two separate quantum steps?**
 A: Both, and they are cleanly separated: QAOA is a quantum *optimizer* that picks features once at build time; the VQC is a quantum *classifier* trained end-to-end with PyTorch. Both are variational (hybrid quantum-classical) algorithms.

@@ -20,7 +20,7 @@ The UI drives the **existing** Python pipeline untouched — the backend spawns
 ```
 frontend/
 ├── server.py          # stdlib API backend (upload -> subprocess -> SSE -> artifacts)
-├── dump_signal.py     # Reconstructs rPPG waveform from stage-1 frames for UI visualization
+├── dump_signal.py     # Standalone utility: reconstructs rPPG waveform from stage-1 frames (the pipeline itself writes the waveform via run_pipeline.py --signal-out, served as result._signal)
 ├── src/
 │   ├── App.jsx        # Main app: verdict rig, progress rail, evidence cards
 │   ├── api.js         # Thin fetch/EventSource client
@@ -100,8 +100,8 @@ idle
 
 1. **Upload** - Video received, validated (magic-byte check, 200 MB limit)
 2. **Frames** - Frame sampling at 30 fps + YOLO face detection + quality gates
-3. **rPPG** - MediaPipe ROIs → POS/CHROM pulse → 10 physiological features
-4. **Quantum** - QAOA feature selection (10 → 3) → Hybrid VQC → P(real)
+3. **rPPG** - MediaPipe ROIs → POS/CHROM pulse → 20 physiological features
+4. **Quantum** - QAOA feature selection (20 → 3) → Hybrid VQC → P(real)
 5. **Verdict** - Decision bins: REAL (≥0.7), FAKE (≤0.3), UNCERTAIN
 6. **Artifacts** - Result JSON, signal waveform, frame thumbnails, plots
 

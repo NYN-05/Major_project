@@ -3,14 +3,14 @@
 **Component 2** of the deepfake-verification system under `WORKING/`:
 `frame/` (stage 1) → `RPPG/` (this directory, stage 2) → `quantum/` (stage 3).
 
-Extracts 10 physiological features from facial video via remote photoplethysmography (rPPG).
+Extracts 20 physiological features from facial video via remote photoplethysmography (rPPG).
 The feature table `output/rppg/dataset_features.csv` is the **direct data source** for the quantum
-decision layer (`WORKING/quantum/`): it consumes the 10 rPPG features as-is (no synthetic data),
+decision layer (`WORKING/quantum/`): it consumes the 20 rPPG features as-is (no synthetic data),
 flips the label convention (CSV `1 = fake` → quantum `0 = fake`), and builds its
 training/eval splits from this table.
 
-Current table: **3445 rows** @30 fps (1883 real / 1562 fake) from DFDC archive + FaceForensics++,
-rebuilt 2026-08-15.
+Current table: **3473 rows** @30 fps (1921 real / 1552 fake) from DFDC archive + FaceForensics++,
+rebuilt 2026-08-19.
 
 ## Project Structure
 
@@ -18,16 +18,18 @@ rebuilt 2026-08-15.
 WORKING/RPPG/
 ├── rppg/                      # Core rPPG library
 │   ├── __init__.py
-│   ├── face_roi.py           # MediaPipe face landmarks -> ROI extraction (cheeks, forehead)
+│   ├── face_roi.py           # MediaPipe face landmarks -> motion-compensated ROI extraction (cheeks, forehead; RANSAC stabilization + EMA smoothing, skin-mask-refined polygons)
+│   ├── gpu_face_detector.py  # YuNet ONNX face detector (GPU via ONNX Runtime CUDA EP) for extraction-time face finding
 │   ├── pipeline.py           # RPPGPipeline: video/frames -> features + signals
 │   ├── signal_extraction.py  # POS/CHROM pulse reconstruction (vectorized)
 │   ├── preprocessing.py      # Detrend, bandpass, normalize (cached filters)
-│   ├── features.py           # 10-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations, HR half-diff, peak prominence)
+│   ├── features.py           # 20-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations, HR half-diff, peak prominence, morphology, phase lag, motion, stability)
 │   └── model_utils.py        # MediaPipe Face Landmarker + Haar cascade download/caching (SHA-256 verified)
 ├── rppg-pipeline/            # Training & demo scripts
-│   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/ (+ FF++ via --include-ffpp)
+│   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/ (+ FF++ via --include-ffpp; --gpu for YuNet)
 │   ├── probe_features.py            # Per-feature AUC probe on a dataset (signal-level study)
 │   ├── train_classifier.py         # Train rPPG RandomForest (side path)
+│   ├── retrain_dfdc.py             # DFDC-only RandomForest retrain with checkpointing
 │   ├── run_on_video.py             # Single video inference
 │   ├── batch_run.py                # Batch processing
 │   ├── run_live_webcam.py          # Webcam demo
@@ -35,7 +37,8 @@ WORKING/RPPG/
 │   ├── debug_run.py                # Debug utilities
 │   ├── _check_video.py             # Video validation
 │   ├── _make_test_video.py         # Synthetic test video generator
-│   └── retrain_dfdc.py             # DFDC retraining script
+│   └── Scrape/                     # Extraction logs / scratch
+├── train_rppg_full.ps1      # One-shot PowerShell: full extraction + classifier retrain
 ├── requirements.txt
 └── README.md
 ```
@@ -79,7 +82,7 @@ pipeline = RPPGPipeline(
 | `fps` | float | Effective sampling rate |
 | `n_frames_total` | int | Total frames processed |
 | `n_frames_usable` | int | Frames with face detected |
-| `features` | `RPPGFeatures \| None` | **10-feature vector (or None if < 48 usable frames / degenerate signal)** |
+| `features` | `RPPGFeatures \| None` | **20-feature vector (or None if < 48 usable frames / degenerate signal)** |
 | `combined_signal` | `np.ndarray \| None` | Cleaned combined pulse waveform |
 | `left_cheek_signal` | `np.ndarray \| None` | Cleaned left cheek pulse |
 | `right_cheek_signal` | `np.ndarray \| None` | Cleaned right cheek pulse |
@@ -87,7 +90,7 @@ pipeline = RPPGPipeline(
 | `quality_log` | `List[FrameQuality]` | Per-frame quality records |
 | `warnings` | `List[str]` | Runtime warnings |
 
-### 10 Physiological Features (`rppg/features.py`)
+### 20 Physiological Features (`rppg/features.py`)
 
 | Feature | Description | Units/Range |
 |---------|-------------|-------------|
@@ -101,6 +104,16 @@ pipeline = RPPGPipeline(
 | `left_right_cheek_correlation` | Pearson r between left & right cheek pulses | -1 to 1 |
 | `hr_half_diff` | Abs. HR difference between first/second halves of the pulse (stability marker) | BPM (0 = stable) |
 | `peak_prominence` | Spectral peak-to-mean ratio of the in-band PSD (dominance of the pulse peak) | ratio (>>1 = strong pulse) |
+| `systolic_peak_width` | Median half-height width of systolic peaks (morphology) | ms |
+| `diastolic_notch_ratio` | Mean dicrotic-notch depth relative to systolic peak height (morphology) | ratio |
+| `forehead_cheek_phase_lag` | Time lag between forehead and cheek pulse signals | ms |
+| `signal_to_motion_ratio` | Log ratio of physiological-band to motion-band spectral power | dB |
+| `peak_amplitude_variability` | Coefficient of variation of systolic peak amplitudes | ratio |
+| `pulse_transit_time_proxy` | Inter-ROI propagation delay (pulse transit time proxy) | ms |
+| `hr_window_std` | Std of per-window HR estimates (pulse stability across the clip) | BPM |
+| `sqi_window_std` | Std of per-window signal quality index | 0-1 |
+| `entropy_window_std` | Std of per-window spectral entropy | 0-1 |
+| `max_hr_deviation_bpm` | Max per-window HR deviation from median HR | BPM |
 
 **Feature order is fixed** - must match `FEATURE_NAMES` in `quantum/config.py` and `RPPGFeatures.feature_names()`.
 
@@ -118,12 +131,16 @@ exits with code 3.
 
 ```bash
 # From WORKING/RPPG/
-# Full extraction (DFDC + FF++, 3445 rows @30 fps):
+# Full extraction (DFDC + FF++, 3473 rows @30 fps):
 python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0
 
 # Optional flags:
-#   --max-per-class N   cap samples per class (smoke test)
-#   --output <path>     redirect the output CSV (probe runs)
+#   --max-per-class N     cap samples per class (smoke test)
+#   --output <path>       redirect the output CSV (probe runs)
+#   --gpu                 GPU-accelerated face detection (YuNet via ONNX Runtime CUDA)
+#   --gpu-workers N       GPU worker processes (default 8 when --gpu)
+#   --min-sqi N           drop clips below this signal quality index (default 0.10)
+#   --max-nan-features N  drop clips with more than N median-filled features (default 1)
 ```
 
 Reads videos from (see `collect_samples()`):
@@ -136,9 +153,9 @@ Writes: `WORKING/output/rppg/dataset_features.csv` (relative to `WORKING/`)
 
 ### Featurability Probe (`probe_features.py`)
 
-Signal-level study of how much class signal each of the 10 features actually
+Signal-level study of how much class signal each of the 20 features actually
 carries on a dataset — no classifier involved. Emits per-feature AUC (real vs
-fake) per method (POS/CHROM) per target fps, plus an all-10-feature oracle AUC,
+fake) per method (POS/CHROM) per target fps, plus an all-20-feature oracle AUC,
 and a table ranking features.
 
 ```bash
@@ -147,14 +164,20 @@ python rppg-pipeline/probe_features.py --ffpp --max-per-class 120 --workers 8
 
 ### Dataset Findings (Validated Aug 2026)
 
-- **Current training table** (`output/rppg/dataset_features.csv`): **3445 labeled clips
-  @30 fps (1883 real / 1562 fake)** — DFDC archive + FaceForensics++ (`--include-ffpp`).
-  This is the **direct, exclusive data source for the quantum layer**; no synthetic data.
-- **Quality caveats**: per-feature |AUC−0.5| ≤ ~0.06 — rPPG features carry limited class
-  signal because face-swap fakes transplant the source person's genuine skin/vascular
-  signal. The rPPG features are near chance-level on this task.
+- **Current training table** (`output/rppg/dataset_features.csv`): **3473 labeled clips
+  @30 fps (1921 real / 1552 fake)** — DFDC archive + FaceForensics++ (`--include-ffpp`),
+  rebuilt 2026-08-19. This is the **direct, exclusive data source for the quantum layer**;
+  no synthetic data.
+- **Quality caveats**: across all 20 features, per-feature |AUC−0.5| ≤ ~0.06 — rPPG
+  features carry limited class signal because face-swap fakes transplant the source
+  person's genuine skin/vascular signal. The rPPG features are near chance-level on
+  this task; growing the table (421 → 3445 → 3473 rows) and doubling the feature set
+  (10 → 20) did not lift the ceiling.
 - Historical probe runs (2,797 DFDC preview clips) showed rPPG features at **chance level**
   (AUC 0.47–0.53), confirming the physiological-signal limitation.
+- The documented next lever is the Phase-4 rPPG method/ROI probe (POS vs CHROM vs
+  green-channel; ROI configurations) from the remediation plan
+  (`Docs/DEEPFAKE_KYC_SEQUENTIAL_REMEDIATION_PLAN.md`), not classifier changes.
 
 ### Train rPPG Classifier (Side Path - Not Used for Final Verdict)
 
@@ -221,7 +244,15 @@ The `FaceROIExtractor` in `face_roi.py` uses MediaPipe to detect 468 facial land
 - **Right cheek**: Landmarks around right cheek region
 - **Forehead**: Landmarks above eyebrows
 
-Per-ROI mean RGB traces are accumulated, then fed to POS/CHROM for pulse reconstruction.
+ROIs are **motion-compensated**: landmark stabilization runs RANSAC on stabilization
+landmarks with EMA smoothing (`TrackedFace`), so ROIs track the face across frames,
+and the cheek/forehead polygons are refined by a YCrCb skin mask. Per-ROI mean RGB
+traces (via `cv2.mean`, no masked-array allocation) are accumulated, then fed to
+POS/CHROM for pulse reconstruction.
+
+For dataset extraction, face finding can instead use the GPU-accelerated **YuNet ONNX
+detector** (`gpu_face_detector.py`, ONNX Runtime CUDA EP; `--gpu` flag) — useful for
+long extractions where MediaPipe CPU inference is the bottleneck.
 
 ## Signal Extraction Methods
 
@@ -277,7 +308,7 @@ Measure heart-rate error against contact-PPG reference; report MAE/RMSE.
 - Strong occlusion, masks, or very poor lighting → unreliable features
 - Very low frame rates reduce usable heart-rate range
 - Heavy compression distorts skin-tone cues, weakens rPPG
-- Per-feature |AUC−0.5| ≤ ~0.06 on the current dataset — rPPG features carry
+- Per-feature |AUC−0.5| ≤ ~0.06 across all 20 features on the current dataset — rPPG features carry
   limited class signal for deepfake detection (face-swap fakes transplant
   the source person's genuine skin/vascular signal)
 
