@@ -1,4 +1,3 @@
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -6,7 +5,6 @@ import cv2
 import torch
 from ultralytics import YOLO
 
-FACE_WEIGHTS_URL = "https://github.com/lindevs/yolov8-face/releases/latest/download/yolov8n-face-lindevs.pt"
 DEFAULT_WEIGHTS_FILENAME = "yolov8n-face-lindevs.pt"
 
 
@@ -50,13 +48,14 @@ class FaceDetector:
     def _load_model(self, weights_path: Path) -> YOLO:
         weights_path.parent.mkdir(parents=True, exist_ok=True)
         if not weights_path.exists():
-            if weights_path.name == DEFAULT_WEIGHTS_FILENAME:
-                urllib.request.urlretrieve(FACE_WEIGHTS_URL, str(weights_path))
-            else:
-                raise FileNotFoundError(
-                    f"Model weights not found: {weights_path}. "
-                    "Pass a valid --weights path or choose an available --model."
-                )
+            raise FileNotFoundError(
+                f"YOLO face weights not found at {weights_path}.\n"
+                "The weights file must be bundled in the repo (WORKING/frame/weights/).\n"
+                "If missing, download manually from:\n"
+                "  https://github.com/lindevs/yolov8-face/releases/latest/download/yolov8n-face-lindevs.pt\n"
+                "and place it at:\n"
+                f"  {weights_path}"
+            )
         return YOLO(str(weights_path))
 
     def detect(self, frame) -> list[FaceDetection]:

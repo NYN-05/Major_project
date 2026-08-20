@@ -23,8 +23,12 @@ WORKING/frame/weights/yolov9e-face-lindevs.pt
 *.json
 *.mp4
 
-# Regenerated pipeline output (any directory named "output" at any level)
-output/
+# Bundled inference models (needed offline, ~10 MB total)
+!WORKING/frame/weights/yolov8n-face-lindevs.pt
+
+# Regenerated pipeline output — frame sequences are large (378 MB) and regenerated per video
+WORKING/output/frames/
+*.log
 
 # Node/Vite build output
 frontend/dist/
@@ -33,6 +37,16 @@ frontend/dist/
 # above must not swallow them.
 !frontend/package.json
 !frontend/package-lock.json
+
+# Track RPPG dataset and quantum artifacts (small, regenerated, needed for reproducibility)
+# Blocks: *.csv, *.json, *.pkl, *.pt, output/ all override these; negations re-include specific paths
+!WORKING/output/rppg/dataset_features.csv
+!WORKING/output/quantum/
+!WORKING/output/quantum/*.json
+!WORKING/output/quantum/*.jsonl
+!WORKING/output/quantum/*.npz
+!WORKING/output/quantum/*.pt
+!WORKING/output/quantum/*.png
 
 .agents
 .github
