@@ -116,7 +116,7 @@ export const GLOSSARY = {
   qaoa: "Quantum Approximate Optimization Algorithm — used on this pipeline to select the 6 most informative features from the 10 extracted ones.",
   vqc: "Variational Quantum Circuit — a parameterized quantum circuit (PennyLane) whose weights are trained classically; the hybrid decision layer.",
   probability: "Probability of live — the model's estimate that the recording comes from a real, living person (0–1).",
-  confidence: "Confidence — how decisive the verdict is (0–1), derived from how far the probability sits from the decision boundary.",
+  confidence: "Confidence — the model's estimate that the recording is live (0–1), identical to the probability of live.",
   snr: "Signal-to-noise ratio of the extracted pulse in decibels; negative values mean the pulse is buried in noise.",
   prv: "Pulse rate variability — beat-to-beat variation in milliseconds; real physiology fluctuates naturally.",
   entropy: "Spectral entropy of the pulse spectrum; low entropy = clean periodic pulse, high entropy = noisy or irregular.",

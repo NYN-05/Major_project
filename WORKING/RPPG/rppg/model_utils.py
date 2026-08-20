@@ -100,7 +100,7 @@ def ensure_haar_cascade(dest_path: str = None) -> str:
         _verify(Path(dest_path), HAAR_SHA256, "haarcascade_frontalface_default.xml")
         return dest_path
 
-    cv2_cascade = Path(cv2.data.haarcascade_frontalface_default)
+    cv2_cascade = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
     return _find_file(
         [_BUNDLED_HAAR_CASCADE, _CACHE_HAAR_CASCADE, cv2_cascade],
         "haarcascade_frontalface_default.xml",

@@ -101,7 +101,7 @@ def predict_features(features):
     return {
         "prob_real": prob_real,
         "verdict": verdict,
-        "confidence": round(2.0 * abs(prob_real - 0.5), 6),
+        "confidence": round(prob_real, 6),
         "selected_features": selection["selected_features"],
         "selected_indices": indices,
         "scaler_file": str(SCALER_FILE),

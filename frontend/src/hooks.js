@@ -52,32 +52,3 @@ export function useSignalFile(fileUrl, rel) {
   }, [fileUrl, rel]);
   return signal;
 }
-
-export function useThumbs(artifacts, stem) {
-  const [thumbs, setThumbs] = useState([]);
-  useEffect(() => {
-    let alive = true;
-    if (!stem) {
-      setThumbs([]);
-      return undefined;
-    }
-    artifacts(`frames/frame_sequences/${stem}/frames`)
-      .then((list) => {
-        const files = (Array.isArray(list) ? list : list?.files ?? [])
-          .filter((f) => /\.(jpe?g|png)$/i.test(f.name ?? f))
-          .map((f) =>
-            typeof f === "string"
-              ? { name: f.split("/").pop(), rel: f }
-              : { name: f.name, rel: f.rel }
-          );
-        if (alive) setThumbs(files.slice(0, 8));
-      })
-      .catch(() => {
-        if (alive) setThumbs([]);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [artifacts, stem]);
-  return thumbs;
-}

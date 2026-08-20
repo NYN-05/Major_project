@@ -46,7 +46,6 @@ export default function ProcessingView({ stageIdx, elapsed, videoName, lines }) 
   const status = humanStatus(lines);
   const target = stageIdx === 0 ? 0 : stageIdx / 3;
   const pct = Math.round(target * 100);
-  const lastLines = lines.slice(-4);
 
   return (
     <motion.section
@@ -94,19 +93,6 @@ export default function ProcessingView({ stageIdx, elapsed, videoName, lines }) 
             style={stageIdx === 0 ? undefined : { transform: `scaleX(${pct / 100})` }}
           />
         </div>
-      </div>
-
-      <div className="log-panel">
-        <div className="log-head">Live pipeline log</div>
-        {lastLines.length ? (
-          <ol className="log-lines mono" aria-live="polite">
-            {lastLines.map((l, i) => (
-              <li key={`${l}-${i}`}>{l.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")}</li>
-            ))}
-          </ol>
-        ) : (
-          <p className="log-empty mono">waiting for pipeline output…</p>
-        )}
       </div>
     </motion.section>
   );

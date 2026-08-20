@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { RefreshCw } from "lucide-react";
-import { PLAIN, probabilityWord, clamp01, TONE_ICON, GLOSSARY } from "../lib.js";
-import Tip from "./Tip.jsx";
+import { PLAIN, clamp01, TONE_ICON } from "../lib.js";
 
 function ConfidenceRing({ value, tone }) {
   const reduced = useReducedMotion();
@@ -32,7 +31,7 @@ function ConfidenceRing({ value, tone }) {
 
   return (
     <div className="conf-wrap">
-      <div className="conf-ring" role="img" aria-label={`confidence ${Math.round(frac * 100)} percent`}>
+      <div className="conf-ring" role="img" aria-label={`P(live) ${Math.round(frac * 100)} percent`}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           <circle className="conf-track" cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth="8" strokeDasharray={c} />
           <circle
@@ -47,11 +46,10 @@ function ConfidenceRing({ value, tone }) {
           />
         </svg>
         <div className="conf-center">
-          <span className="conf-pct mono">{Math.round(frac * 100)}%</span>
-          <span className="conf-cap">confidence</span>
+          <span className="conf-pct mono">{value != null ? value.toFixed(3) : "—"}</span>
+          <span className="conf-cap">P(live)</span>
         </div>
       </div>
-      <span className="conf-note">confidence of the final quantum verdict</span>
     </div>
   );
 }
@@ -62,7 +60,6 @@ export default function VerdictCard({ result, onTryAgain }) {
   const Icon = TONE_ICON[p.tone];
   const confidence = result?.verdict?.confidence;
   const probReal = result?.stages?.quantum?.prob_real;
-  const reason = result?.verdict?.reason;
 
   return (
     <motion.section
@@ -78,45 +75,15 @@ export default function VerdictCard({ result, onTryAgain }) {
             <Icon size={13} aria-hidden="true" /> Final verdict
           </span>
           <h3 className="verdict-word">{p.word}</h3>
-          <p className="verdict-cause">
-            {reason || p.note} —{" "}
-            <Tip text={GLOSSARY.probability}>
-              probability {probReal == null ? "" : `${(probReal * 100).toFixed(0)}% `}
-            </Tip>
-            of live by the quantum layer.
-          </p>
+          <div className="verdict-nums">
+            <span className="verdict-num">
+              <small>P(live)</small>
+              <b className="mono">{probReal != null ? probReal.toFixed(3) : "—"}</b>
+            </span>
+          </div>
         </div>
-        <ConfidenceRing value={confidence ?? probReal ?? 0.5} tone={p.tone} />
+        <ConfidenceRing value={probReal ?? confidence ?? 0.5} tone={p.tone} />
       </div>
-
-      <div className="verdict-prob">
-        <div className="vp-row">
-          <span className="vp-k">
-            <Tip text={GLOSSARY.probability}>Probability of live</Tip>
-          </span>
-          <span className="vp-track" aria-hidden="true">
-            <span className="vp-fill" style={{ transform: `scaleX(${clamp01(probReal)})` }} />
-          </span>
-          <span className="vp-v mono">{probReal != null ? probReal.toFixed(3) : "—"}</span>
-        </div>
-        <div className="vp-row" style={{ gridTemplateColumns: "118px 1fr" }}>
-          <span className="vp-k">
-            <Tip text={GLOSSARY.confidence}>Confidence</Tip>
-          </span>
-          <span className="vp-v" style={{ textAlign: "left", fontSize: "11px", color: "var(--dim)" }}>
-            {probabilityWord(probReal)}
-            {confidence != null && ` · decisiveness ${confidence.toFixed(3)}`}
-          </span>
-        </div>
-      </div>
-
-      {reason ? (
-        <p className="verdict-reason">{reason}</p>
-      ) : (
-        <p className="verdict-reason" style={{ borderLeftColor: "transparent", background: "transparent", padding: 0, marginTop: 6 }}>
-          <span style={{ color: "var(--dim)" }}>{p.note}</span>
-        </p>
-      )}
 
       <div className="verdict-actions">
         <button type="button" className="btn btn-ghost" onClick={onTryAgain}>

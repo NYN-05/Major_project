@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { Activity, BrainCircuit, HeartPulse, ScanSearch } from "lucide-react";
+import { Activity, BrainCircuit, HeartPulse } from "lucide-react";
 import { fmtVal, clamp01, GLOSSARY } from "../lib.js";
 import Tip from "./Tip.jsx";
 
@@ -12,31 +12,19 @@ function Bar({ pct, tone = "" }) {
 }
 
 export default function KeyMetrics({ result }) {
-  const frames = result?.stages?.frames?.stats ?? null;
   const rppg = result?.stages?.rppg ?? null;
   const xc = result?.stages?.rppg_crosscheck ?? null;
 
-  const accepted = frames?.accepted_frames ?? null;
-  const sampled = frames?.sampled_frames ?? null;
-  const usable = rppg?.n_frames_usable ?? null;
-  const total = rppg?.n_frames_total ?? null;
   const inputMode = rppg?.input_mode ?? null;
 
   const bpm = rppg?.features?.heart_rate_bpm ?? null;
   const sqi = rppg?.features?.signal_quality_index ?? null;
   const sqiTone = sqi == null ? "" : sqi >= 0.6 ? "" : "sqi-warn";
 
-  const framesSub =
-    usable != null && total != null
-      ? `${usable} of ${total} frames used by rPPG`
-      : "no frame data";
-
   const framesSub2 = inputMode
     ? inputMode === "stage1_frames"
       ? "stage-1 accepted frames + face re-tracking"
-      : accepted != null && sampled != null
-        ? `${accepted}/${sampled} passed stage-1 quality gate; full video read fallback`
-        : "full video read fallback"
+      : "full video read fallback"
     : "";
 
   return (
@@ -73,23 +61,6 @@ export default function KeyMetrics({ result }) {
         <span className="metric-v">{sqi != null ? <>{Math.round(sqi * 100)}<small>%</small></> : "—"}</span>
         <span className="metric-s">signal quality index of the reconstructed pulse</span>
         <Bar pct={sqi} tone={sqiTone} />
-      </motion.div>
-
-      <motion.div
-        className="metric"
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: "easeOut", delay: 0.2 }}
-      >
-        <span className="metric-k">
-          <ScanSearch size={13} aria-hidden="true" />
-          Usable / accepted frames
-        </span>
-        <span className="metric-v">
-          {usable != null ? usable : "—"}
-          <small> / {total ?? "—"}</small>
-        </span>
-        <span className="metric-s">{framesSub}</span>
       </motion.div>
 
       <motion.div

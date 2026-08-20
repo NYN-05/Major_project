@@ -11,11 +11,7 @@ import VerdictHeader from "./components/VerdictHeader.jsx";
 import VerdictCard from "./components/VerdictCard.jsx";
 import KeyMetrics from "./components/KeyMetrics.jsx";
 import SignalPanel from "./components/SignalPanel.jsx";
-import QuantumFlow from "./components/QuantumFlow.jsx";
 import CrossCheck from "./components/CrossCheck.jsx";
-import FrameGallery from "./components/FrameGallery.jsx";
-import TechnicalDetails from "./components/TechnicalDetails.jsx";
-import { artifacts } from "./api.js";
 
 export default function App() {
   const [phase, setPhase] = useState("idle"); // idle | selected | running | done | error
@@ -163,11 +159,8 @@ export default function App() {
             </div>
             <div className="row-2">
               <SignalPanel signalData={signalData} result={result} />
-              <QuantumFlow result={result} />
             </div>
             <CrossCheck result={result} />
-            <FrameGallery result={result} artifacts={artifacts} />
-            <TechnicalDetails result={result} videoMeta={videoMeta} />
           </div>
         ) : (
           <UploadZone phase={phase} onFile={pickFile} />

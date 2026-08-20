@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { ChevronDown, HeartPulse, Waves } from "lucide-react";
-import { FEATURE_LABELS, ROIS, fmtVal, clamp01, GLOSSARY } from "../lib.js";
+import { HeartPulse, Waves } from "lucide-react";
+import { ROIS, fmtVal, GLOSSARY } from "../lib.js";
 import Tip from "./Tip.jsx";
 
 function Waveform({ data, tone, reduced }) {
@@ -99,7 +99,6 @@ function Waveform({ data, tone, reduced }) {
 
 export default function SignalPanel({ signalData, result }) {
   const reduced = useReducedMotion();
-  const [open, setOpen] = useState(false);
   const data = signalData?.signal;
   const rppg = result?.stages?.rppg ?? null;
   const features = rppg?.features ?? null;
@@ -107,8 +106,6 @@ export default function SignalPanel({ signalData, result }) {
 
   const bpm = features?.heart_rate_bpm ?? null;
   const sqi = features?.signal_quality_index ?? null;
-  const nFeat = Array.isArray(features) ? features.length : features ? FEATURE_LABELS.length : 0;
-  const usable = rppg?.n_frames_usable ?? null;
   const error = signalData?.error ?? null;
 
   return (
@@ -181,54 +178,6 @@ export default function SignalPanel({ signalData, result }) {
           ))}
         </div>
       </div>
-
-      <div className="accordion">
-        <button
-          type="button"
-          className="acc-head"
-          aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
-        >
-          <span><Tip text={GLOSSARY.rppg}>Physiological features</Tip></span>
-          <span className="acc-count mono">
-            {nFeat} extracted · {usable ?? "—"} usable frames
-            <ChevronDown size={13} className="chev" aria-hidden="true" />
-          </span>
-        </button>
-        <motion.div
-          className="acc-body"
-          initial={false}
-          animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
-          transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-        >
-          {open && (
-            <div className="feature-grid">
-              {FEATURE_LABELS.map(({ key, label, unit }) => (
-                <div className="feature" key={key}>
-                  <span className="feature-k">
-                    <Tip text={LABEL_FEATURE_TIP[key] ?? GLOSSARY.rppg}>{label}</Tip>
-                  </span>
-                  <span className="feature-v mono">
-                    {features ? fmtVal(features[key]) : "—"}
-                    {unit && <small>{unit}</small>}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </motion.div>
-      </div>
     </motion.section>
   );
 }
-
-const LABEL_FEATURE_TIP = {
-  heart_rate_bpm: "Estimated heart rate in beats per minute, measured from the reconstructed pulse.",
-  snr_db: GLOSSARY.snr,
-  prv_std_ms: GLOSSARY.prv,
-  spectral_entropy: GLOSSARY.entropy,
-  mad: GLOSSARY.mad,
-  signal_quality_index: GLOSSARY.sqi,
-  cheek_forehead_correlation: "Pearson correlation between the cheek and forehead pulse signals — true physiology pulses in synchrony across regions.",
-  left_right_cheek_correlation: "Pearson correlation between the left and right cheek pulse signals — real faces show high bilateral synchrony.",
-};
