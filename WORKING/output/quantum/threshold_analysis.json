@@ -1,0 +1,22 @@
+{
+  "n_total": 694,
+  "n_real": 384,
+  "n_fake": 310,
+  "n_uncertain_at_03_07": 694,
+  "fake_max_prob": 0.3,
+  "real_min_prob": 0.7,
+  "score_range": [
+    0.42841285467147827,
+    0.5029251575469971
+  ],
+  "fake_scores": 0.42841285467147827,
+  "real_scores": 0.5029251575469971,
+  "proportion_fake_below_03": 0.0,
+  "proportion_real_above_07": 0.0,
+  "fake_recall_direct": 0.0,
+  "real_recall": 1.0,
+  "specificity": 0.0,
+  "precision_at_last": 0.553314121037464,
+  "diagnosis": "Case B: Scores do not separate classes - all probabilities concentrated in uncertain region",
+  "recommendation": "Proceed upstream to rPPG and feature improvement (Phase 4-6)"
+}
