@@ -100,10 +100,10 @@ class VQCConfig:
     batch_size: int = 32
     learning_rate: float = 1e-2
     weight_decay: float = 1e-2
-    alpha: float = 0.75
-    gamma: float = 2.0
+    alpha: float = 0.45
+    gamma: float = 1.0
     label_smoothing: float = 0.03
-    confidence_penalty: float = 0.02
+    confidence_penalty: float = 0.0
     lr_schedule: str = "cosine"
     patience: int = 12
     min_delta: float = 1e-4

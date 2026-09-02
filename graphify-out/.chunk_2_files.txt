@@ -1,0 +1,22 @@
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\A_Study_on_Deepfake_Detection_Methods.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\FakeFormer_Transformer-Based_Lightweight_Deepfake_Video_Detection_Model.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\Multimodal_Vision_Transformer_Forensics_for_Deepfake_Resistant_Secure_Authentication.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\Real-Time_Deepfake_Video_Detection_using_Machine_Learning_A_CNN-based_Authentication_Framework.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\Deepfake_Review_Paper (2).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\Final_report_draft_V2.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\Final_report_draft_V3.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\Project_Phase_1_Review (1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\draft_1.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\first_pages.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\A_Quantum-Hybrid_Framework_for_Enhanced_Deepfake_Detection_Integrating_QAOA-Based_Feature_Selection_With_Quantum-Inspired_Attention_Mechanisms.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\A_Study_on_Deepfake_Detection_Methods.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Design_and_Analytical_Performance_of_a_Hybrid_Model_Using_Deep_Learning_Techniques_for_the_Detection_of_Deepfake_Videos.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\EffiSwinNet_ A Cross-Architecture Deepfake Detection with Style GAN Generated Faces.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\EffiSwinNet_StyleGAN_2025.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\FakeFormer_Transformer-Based_Lightweight_Deepfake_Video_Detection_Model.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Hybrid_CNN_GRU_Comparative_2024.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Hybrid_LSTM_GRU_Temporal_2021.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Hybrid_Recurrent_Deep_Learning_Model_for_DeepFake_Video_Detection.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\LowRes_CNN_DFDC_FFpp_2022.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\MS_CNN_AttnFusion_FFpp_2025.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Multimodal_Vision_Transformer_Forensics_for_Deepfake_Resistant_Secure_Authentication.pdf

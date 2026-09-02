@@ -1,0 +1,110 @@
+C:\Users\JHASHANK\Desktop\Maj_Proj\AGENTS.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\DEEPFAKE_KYC_SEQUENTIAL_REMEDIATION_PLAN.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\FRAMES_LAYER_STAGE1_PRESENTATION.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\Key_Findings_Contributions_Significance.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\RMTT_report.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\A_Quantum-Hybrid_Framework_for_Enhanced_Deepfake_Detection_Integrating_QAOA-Based_Feature_Selection_With_Quantum-Inspired_Attention_Mechanisms.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\FakeFormer_Transformer-Based_Lightweight_Deepfake_Video_Detection_Model.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\problems.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\quantum_layer_guide.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.analyze.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.checklist.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.clarify.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.constitution.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.converge.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.implement.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.plan.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.specify.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.tasks.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Maj_Proj\.opencode\commands\speckit.taskstoissues.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\README.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\RPPG\README.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\RPPG\requirements.txt
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\frame\Docs\implementation_work_division_checklist.txt
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\frame\Docs\project_system_document.txt
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\frame\README.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\frame\requirements.txt
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\quantum\README.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\frontend\README.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\frontend\index.html
+C:\Users\JHASHANK\Desktop\Maj_Proj\requirements.txt
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\FRAMES_LAYER_STAGE1_PRESENTATION.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\QML\M1.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\QML\M2.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\QML\M3.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\QML\M4.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\QML\M5.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\RMTT_report.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\1-s2.0-S2773186326000393-1main.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\10.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\2023_CIAP_DeepFake_rPPG_preprint.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\2112.03553v1.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\2409.17311v1 (1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\AI-Generated-Synthetic-Identities-in-Fin-Tech-Detecting-Deep-fakes-KYC-Fraud-Using-Behavioral-Biometrics.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\A_Deepfake_Detection_Algorithm_Based_on_Fourier_Tr.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\EffiSwinNet_ A Cross-Architecture Deepfake Detection with Style GAN Generated Faces.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\Potential Attacks of DeepFake on eKYC Systems and Remedy for eKYC with DeepFake Detection Using Two-Stream Network of Facial Appearance and Motion Features.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\Quantum-Enhanced_Deepfake_Detection_A_Hybrid_Classical-Quantum_Deep_Learning_Approach.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\R1.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\R2.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\Robust_Deepfake_Detection_for_Electronic_Know_Your_Customer_Systems_Using_Registered_Images.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\applsci-15-00525-with-cover (1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\applsci-15-00525-with-cover 1(1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\fimag-4-1504551.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\journal_tiis_19-1_1185477088.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\redypaper.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\s00371-023-02833-x.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\s42484-024-00163-2 (1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\A_Quantum-Hybrid_Framework_for_Enhanced_Deepfake_Detection_Integrating_QAOA-Based_Feature_Selection_With_Quantum-Inspired_Attention_Mechanisms.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\A_Study_on_Deepfake_Detection_Methods.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\FakeFormer_Transformer-Based_Lightweight_Deepfake_Video_Detection_Model.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\A_Study_on_Deepfake_Detection_Methods.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\Multimodal_Vision_Transformer_Forensics_for_Deepfake_Resistant_Secure_Authentication.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\Real-Time_Deepfake_Video_Detection_using_Machine_Learning_A_CNN-based_Authentication_Framework.md
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\Multimodal_Vision_Transformer_Forensics_for_Deepfake_Resistant_Secure_Authentication.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\Real-Time_Deepfake_Video_Detection_using_Machine_Learning_A_CNN-based_Authentication_Framework.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\Deepfake_Review_Paper (2).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\Final_report_draft_V2.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\Final_report_draft_V3.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\Project_Phase_1_Review (1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\draft_1.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\SEM6_report\first_pages.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\A_Quantum-Hybrid_Framework_for_Enhanced_Deepfake_Detection_Integrating_QAOA-Based_Feature_Selection_With_Quantum-Inspired_Attention_Mechanisms.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\A_Study_on_Deepfake_Detection_Methods.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Design_and_Analytical_Performance_of_a_Hybrid_Model_Using_Deep_Learning_Techniques_for_the_Detection_of_Deepfake_Videos.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\EffiSwinNet_ A Cross-Architecture Deepfake Detection with Style GAN Generated Faces.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\EffiSwinNet_StyleGAN_2025.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\FakeFormer_Transformer-Based_Lightweight_Deepfake_Video_Detection_Model.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Hybrid_CNN_GRU_Comparative_2024.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Hybrid_LSTM_GRU_Temporal_2021.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Hybrid_Recurrent_Deep_Learning_Model_for_DeepFake_Video_Detection.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\LowRes_CNN_DFDC_FFpp_2022.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\MS_CNN_AttnFusion_FFpp_2025.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Multimodal_Vision_Transformer_Forensics_for_Deepfake_Resistant_Secure_Authentication.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\QHybrid_XceptionViT_QNN_2025.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Real-Time_Deepfake_Video_Detection_using_Machine_Learning_A_CNN-based_Authentication_Framework.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Short_And_Low_Resolution_Deepfake_Video_Detection_Using_CNN.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Sync_rPPG_CNNLSTM_2025.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\Two-Branch_Deepfake_Detection_Network_Based_on_Improved_Xception.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\TwoBranch_Xception_CBAM_GRU_2023.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\eKYC_RegisteredID_Temporal_2025.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\research_paper\rPPG_Deepfake_Overview_2024.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\frame\Docs\implementation_work_division_checklist.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\frame\Docs\project_system_document.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\implementation_work_division_checklist.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\project_system_document.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\charts\dataset_composition.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\charts\frame_funnel.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\charts\latency_profile.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\charts\model_comparison.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\charts\qaoa_restarts.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\images\6.1_system_arch.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\images\6.2-class_diagram.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\images\6.3_activity diagram.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\images\6.4_use_case_diagram.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\images\6.5_ER_diagram.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\images\proposed_workflow.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\images\table_6.1_system_scenarion.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\output\quantum\calibration_curve.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\output\quantum\confusion_matrix.png
+C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\output\quantum\roc_curve.png

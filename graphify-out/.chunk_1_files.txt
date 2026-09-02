@@ -1,0 +1,22 @@
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\2409.17311v1 (1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\AI-Generated-Synthetic-Identities-in-Fin-Tech-Detecting-Deep-fakes-KYC-Fraud-Using-Behavioral-Biometrics.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\A_Deepfake_Detection_Algorithm_Based_on_Fourier_Tr.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\EffiSwinNet_ A Cross-Architecture Deepfake Detection with Style GAN Generated Faces.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\Potential Attacks of DeepFake on eKYC Systems and Remedy for eKYC with DeepFake Detection Using Two-Stream Network of Facial Appearance and Motion Features.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\Quantum-Enhanced_Deepfake_Detection_A_Hybrid_Classical-Quantum_Deep_Learning_Approach.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\R1.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\R2.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\Robust_Deepfake_Detection_for_Electronic_Know_Your_Customer_Systems_Using_Registered_Images.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\applsci-15-00525-with-cover (1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\applsci-15-00525-with-cover 1(1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\fimag-4-1504551.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\journal_tiis_19-1_1185477088.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\redypaper.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\s00371-023-02833-x.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\other\s42484-024-00163-2 (1).pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\A_Quantum-Hybrid_Framework_for_Enhanced_Deepfake_Detection_Integrating_QAOA-Based_Feature_Selection_With_Quantum-Inspired_Attention_Mechanisms.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\A_Study_on_Deepfake_Detection_Methods.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\FakeFormer_Transformer-Based_Lightweight_Deepfake_Video_Detection_Model.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\Multimodal_Vision_Transformer_Forensics_for_Deepfake_Resistant_Secure_Authentication.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\Real-Time_Deepfake_Video_Detection_using_Machine_Learning_A_CNN-based_Authentication_Framework.pdf
+C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\maj_proj_report_sem_6\RESEARCH_PAPERS\self\MD_FILES\A_Quantum-Hybrid_Framework_for_Enhanced_Deepfake_Detection_Integrating_QAOA-Based_Feature_Selection_With_Quantum-Inspired_Attention_Mechanisms.md

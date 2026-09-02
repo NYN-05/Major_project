@@ -10,7 +10,7 @@ Stages
 1. FRAMES  : frame sampling + quality assessment via the `frame/` module
              (YOLO face detection, blur/dark/bright/face checks).
 2. RPPG    : physiological feature extraction via the `RPPG/` module
-             (POS/CHROM pulse reconstruction -> 10-feature vector).
+             (POS/CHROM pulse reconstruction -> 20-feature vector).
 3. QUANTUM : train-fitted feature scaling + QAOA-selected subset of the
               rPPG features -> trained Hybrid VQC checkpoint -> P(real) ->
               KYC decision bins (real >= 0.7, fake <= 0.3).
@@ -198,10 +198,10 @@ def rppg_classifier_crosscheck(vector: np.ndarray) -> dict:
     n_features = getattr(clf, "n_features_in_", 0)
     classes = getattr(clf, "classes_", None)
     n_classes = 0 if classes is None else len(classes)
-    if n_features != 10 or n_classes != 2:
+    if n_features != 20 or n_classes != 2:
         return {
             "skipped": "rppg_classifier.pkl incompatible "
-            f"(n_features={n_features}, classes={n_classes}); expected 10 features, 2 classes",
+            f"(n_features={n_features}, classes={n_classes}); expected 20 features, 2 classes",
         }
     try:
         proba = clf.predict_proba(x)[0]

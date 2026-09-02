@@ -309,18 +309,25 @@ class HybridModel(nn.Module):
         return self.head(self.quantum(x)).squeeze(-1)
 
 
-def focal_loss(logits, targets, cfg, weight=None):
+def focal_loss(logits, targets, cfg, sample_weights=None):
+    """Focal loss for binary classification.
+
+    ``cfg.alpha`` is the weight for the **positive** class (REAL=1).
+    Alpha > 0.5 up-weights the minority class; alpha < 0.5 up-weights
+    the majority class.  Default config.alpha=0.45 slightly up-weights
+    the minority FAKE class in a ~55% REAL dataset.
+
+    ``sample_weights`` (optional, per-sample tensor) is multiplied into
+    the loss element-wise for additional class-level re-weighting.
+    """
     probs = torch.sigmoid(logits)
     soft = targets * (1 - cfg.label_smoothing) + cfg.label_smoothing * 0.5
     pt = probs * soft + (1 - probs) * (1 - soft)
     alpha_t = cfg.alpha * soft + (1 - cfg.alpha) * (1 - soft)
     focal = -alpha_t * (1 - pt).pow(cfg.gamma) * torch.log(pt.clamp(min=1e-6))
-    entropy = -probs * torch.log(probs.clamp(min=1e-6)) - (1 - probs) * torch.log(
-        (1 - probs).clamp(min=1e-6)
-    )
-    loss = focal.mean() - cfg.confidence_penalty * entropy.mean()
-    if weight is not None:
-        loss = loss * weight
+    loss = focal.mean()
+    if sample_weights is not None:
+        loss = (focal * sample_weights).mean()
     return loss
 
 
@@ -427,15 +434,23 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
     )
     monitor_val = X_val is not None and y_val is not None
 
-    # Compute balanced class weight for focal loss (intervention A)
-    # Weight for the positive class (REAL = 1) is inversely proportional to its frequency
-    y_np = y.cpu().numpy()
-    n_pos = int((y == 1).sum())  # class 1 = REAL in quantum convention
-    n_neg = int((y == 0).sum())  # class 0 = FAKE in quantum convention
+    # Per-sample class-reweighting for the focal loss.
+    # Minority class (FAKE=0) gets weight = n_pos/n_samples, majority
+    # (REAL=1) gets n_neg/n_samples.  This ensures the loss sees
+    # equal contribution from both classes regardless of prevalence.
+    n_pos = int((y == 1).sum())
+    n_neg = int((y == 0).sum())
+    n_total = n_pos + n_neg
     if n_pos > 0 and n_neg > 0:
-        balanced_weight = float(n_neg + n_pos) / (2.0 * max(n_pos, n_neg))  # ~ n_samples / (2 * max_class)
+        weight_fake = n_total / (2.0 * n_neg) if n_neg > 0 else 1.0
+        weight_real = n_total / (2.0 * n_pos) if n_pos > 0 else 1.0
+        sample_class_weights = torch.where(
+            y == 1,
+            torch.tensor(weight_real, device=device),
+            torch.tensor(weight_fake, device=device),
+        )
     else:
-        balanced_weight = 1.0
+        sample_class_weights = None
 
     scheduler = None
     if cfg.lr_schedule == "cosine":
@@ -456,7 +471,17 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
         total_loss = 0.0
         for xb, yb in loader:
             optimizer.zero_grad()
-            loss = focal_loss(model(xb), yb, cfg, weight=balanced_weight)
+            if sample_class_weights is not None:
+                weight_real = n_total / (2.0 * n_pos)
+                weight_fake = n_total / (2.0 * n_neg)
+                batch_weights = torch.where(
+                    yb == 1,
+                    torch.tensor(weight_real, device=device),
+                    torch.tensor(weight_fake, device=device),
+                )
+            else:
+                batch_weights = None
+            loss = focal_loss(model(xb), yb, cfg, sample_weights=batch_weights)
             loss.backward()
             if cfg.clip_grad is not None and cfg.clip_grad > 0:
                 nn.utils.clip_grad_norm_(model.parameters(), cfg.clip_grad)
