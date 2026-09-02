@@ -1,6 +1,7 @@
+# Dataset (gitignored, large)
 FF++/
 
-# Dev scratch (tests, temp scripts, screenshots, logs — see AGENTS.md)
+# Dev scratch — tests, temp scripts, screenshots, logs (see AGENTS.md)
 Scrape/
 
 # Python bytecode
@@ -14,47 +15,30 @@ venv/
 # Node dependencies
 node_modules/
 
-# Model weights larger than GitHub's 100 MB limit
+# Large model weights (>100 MB GitHub limit)
 WORKING/frame/weights/yolov8x-face-lindevs.pt
 WORKING/frame/weights/yolov9e-face-lindevs.pt
-*.pt
-*.pkl
-*.csv
-*.json
-*.mp4
 
-# Bundled inference models (needed offline, ~10 MB total)
-!WORKING/frame/weights/yolov8n-face-lindevs.pt
-
-# Regenerated pipeline output — frame sequences are large (378 MB) and regenerated per video
+# Regenerated pipeline outputs (large, regenerated per run)
 WORKING/output/frames/
+WORKING/output/rppg/
+WORKING/output/quantum/
+WORKING/output/pipeline/
+
+# Logs
 *.log
 
 # Node/Vite build output
 frontend/dist/
 
-# Frontend manifests are needed for the build; the global *.json rule
-# above must not swallow them.
-!frontend/package.json
-!frontend/package-lock.json
+# IDE / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
 
-# Track RPPG dataset and quantum artifacts (small, regenerated, needed for reproducibility)
-# Blocks: *.csv, *.json, *.pkl, *.pt, output/ all override these; negations re-include specific paths
-!WORKING/output/rppg/dataset_features.csv
-!WORKING/output/quantum/
-!WORKING/output/quantum/*.json
-!WORKING/output/quantum/*.jsonl
-!WORKING/output/quantum/*.npz
-!WORKING/output/quantum/*.pt
-!WORKING/output/quantum/*.png
-
-.agents
-.github
-.specify
-
-WORKING/RPPG/archive
-*.cmd
-*.ps1
-DEMO_VIDEO_PROMPT.md
-graphify-out
-Maj_Proj
+# Local config / agent dirs
+.agents/
+.github/
+.specify/
+graphify-out/
