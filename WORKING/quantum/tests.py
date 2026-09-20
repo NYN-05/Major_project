@@ -104,16 +104,27 @@ def test_hamiltonian_matches_classical():
 
 
 def test_real_hamiltonian_verification():
-    """verify_hamiltonian must be ~0 on the real rPPG feature table."""
+    """verify_hamiltonian must be ~0 on the real rPPG feature table.
+    
+    Uses classical pre-selection (like the pipeline) to limit to 18 features,
+    avoiding 2^29 memory explosion in make_hamiltonian_diagonal.
+    """
     csv_file = DataConfig().csv_file
     if not csv_file.exists():
         raise AssertionError(f"dataset CSV not found at {csv_file}")
     from quantum.data import _load_rppg_rows
+    from quantum.qaoa import select_classical
 
     X, y, _, _, _, _ = _load_rppg_rows(csv_file, DataConfig())
-    assert X.shape[1] == len(FEATURE_NAMES) == 20
+    assert X.shape[1] == len(FEATURE_NAMES) == 29
     assert set(y.tolist()) <= {0, 1}
-    error = verify_hamiltonian(X, y, QAOASelectionConfig())
+    
+    # Classical pre-selection to 18 features (pipeline default)
+    classical_pre = select_classical(X, y, QAOASelectionConfig())
+    classical_pre = classical_pre["selected_indices"][:18]
+    X_pre = X[:, classical_pre]
+    
+    error = verify_hamiltonian(X_pre, y, QAOASelectionConfig())
     assert error < 1e-6, f"verify_hamiltonian error on real data: {error:.2e}"
 
 

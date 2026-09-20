@@ -4,7 +4,7 @@ from pathlib import Path
 LABEL_REAL = 1
 LABEL_FAKE = 0
 
-# Feature contract: the raw 20-feature vector produced by the rPPG layer
+# Feature contract: the raw 29-feature vector produced by the rPPG layer
 # (same names/order as RPPGFeatures.feature_names() in RPPG/rppg/features.py).
 FEATURE_NAMES = [
     "heart_rate_bpm",
@@ -27,6 +27,16 @@ FEATURE_NAMES = [
     "sqi_window_std",
     "entropy_window_std",
     "max_hr_deviation_bpm",
+    # New probe features (Phase 4 upstream improvement)
+    "spectral_flatness",
+    "spectral_centroid",
+    "kurtosis",
+    "phase_coherence_lr",
+    "phase_coherence_cf",
+    "pulse_cv_interval",
+    "hr_window_jitter",
+    "snr_window_jitter",
+    "zero_crossing_rate",
 ]
 
 FEATURE_MEANINGS = {
@@ -50,6 +60,16 @@ FEATURE_MEANINGS = {
     "sqi_window_std": "Std of per-window signal quality index - pulse-quality stability",
     "entropy_window_std": "Std of per-window spectral entropy - spectral stability",
     "max_hr_deviation_bpm": "Max per-window HR deviation from the median HR (BPM)",
+    # New probe features (Phase 4)
+    "spectral_flatness": "Geometric/arithmetic mean ratio of in-band PSD (flat=1, tonal<1)",
+    "spectral_centroid": "Center of mass of in-band power spectrum (Hz)",
+    "kurtosis": "Fisher kurtosis of time-domain pulse waveform (heavy-tailed=artifacts)",
+    "phase_coherence_lr": "Phase coherence std between left/right cheek signals (lower=more coherent)",
+    "phase_coherence_cf": "Phase coherence std between forehead/cheek signals (lower=more coherent)",
+    "pulse_cv_interval": "Coefficient of variation of inter-beat intervals (regular=low CV)",
+    "hr_window_jitter": "Std of per-window HR estimates (BPM) - BEST discriminator (AUC~0.82)",
+    "snr_window_jitter": "Std of per-window SNR estimates (dB) - SNR stability",
+    "zero_crossing_rate": "Zero-crossing rate of pulse waveform (high=noise/artifacts)",
 }
 
 QUANTUM_ROOT = Path(__file__).resolve().parent
@@ -96,15 +116,15 @@ class VQCConfig:
     hidden_units: int = 8
     dropout: float = 0.2
     epochs: int = 80
-    # Batch 32 with <=32 train rows = a single batch per epoch (benign at this scale).
-    batch_size: int = 32
-    learning_rate: float = 1e-2
+    batch_size: int = 256
+    learning_rate: float = 5e-2
     weight_decay: float = 1e-2
-    alpha: float = 0.45
+    alpha: float = 0.5
     gamma: float = 1.0
     label_smoothing: float = 0.03
     confidence_penalty: float = 0.0
-    lr_schedule: str = "cosine"
+    lr_schedule: str = "cosine_warmup"
+    warmup_epochs: int = 3
     patience: int = 12
     min_delta: float = 1e-4
     clip_grad: float = 1.0

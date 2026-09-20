@@ -243,8 +243,9 @@ if _MEDIAPIPE_AVAILABLE:
         @staticmethod
         def _skin_mask(frame_bgr: np.ndarray) -> np.ndarray:
             ycrcb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2YCrCb)
-            lower = np.array([0, 133, 77], dtype=np.uint8)
-            upper = np.array([255, 173, 127], dtype=np.uint8)
+            # Expanded skin tone range for compressed/low-quality video
+            lower = np.array([0, 120, 65], dtype=np.uint8)
+            upper = np.array([255, 185, 140], dtype=np.uint8)
             return cv2.inRange(ycrcb, lower, upper)
 
         def extract_rois(self, frame_bgr: np.ndarray, face: TrackedFace) -> ROISet:
@@ -332,7 +333,8 @@ if _MEDIAPIPE_AVAILABLE:
                 mask = self._polygon_mask((h, w), region_pts)
                 if skin is not None:
                     mask = cv2.bitwise_and(mask, skin)
-                if cv2.countNonZero(mask) < 25:
+                # Reduced minimum valid pixels for low-res faces (was 25)
+                if cv2.countNonZero(mask) < 10:
                     return None
                 return mask
 

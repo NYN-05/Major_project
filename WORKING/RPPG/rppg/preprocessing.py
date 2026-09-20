@@ -83,6 +83,8 @@ def bandpass_filter(
     0.7-4.0 Hz corresponds to 42-240 BPM, covering resting through
     elevated heart rates while rejecting baseline drift and
     high-frequency camera/compression noise.
+
+    For short signals, uses reduced padlen to minimize edge distortion.
     """
     trace = np.asarray(trace, dtype=np.float64)
     nyq = fs / 2.0
@@ -92,11 +94,15 @@ def bandpass_filter(
         raise ValueError("Invalid filter band for given sampling rate.")
 
     b, a = _bandpass_coefficients(order, fs, low, high)
-    padlen = 3 * max(len(a), len(b))
+    # Reduced padlen for short signals: default scipy is 3*(order+1),
+    # but we use min(3*(order+1), len(trace)//4) to limit edge distortion
+    # to at most 25% of signal at each edge.
+    default_padlen = 3 * max(len(a), len(b))
+    padlen = min(default_padlen, len(trace) // 4)
     if len(trace) <= padlen:
         # Too short to filtfilt safely; fall back to lfilter.
         return signal.lfilter(b, a, trace)
-    return signal.filtfilt(b, a, trace)
+    return signal.filtfilt(b, a, trace, padlen=padlen)
 
 
 @lru_cache(maxsize=16)

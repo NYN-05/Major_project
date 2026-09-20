@@ -10,11 +10,15 @@ behind ``VQCConfig.qnode_impl="pennylane"`` for cross-verification.
 
 Training uses a focal loss with label smoothing and a confidence
 penalty; the torch side (head, loss, optimizer) runs on GPU by default.
+AMP (mixed precision) accelerates the classical head on CUDA.
+torch.compile optimizes the classical head (PyTorch 2.0+, auto-disabled on Windows without Triton).
 Checkpoints bundle state_dict + metadata so inference can reproduce the
 exact training-time transformation.
 """
 
 import json
+import math
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +28,10 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from quantum.config import VQCConfig
+
+# Suppress torch.compile errors (e.g., missing Triton on Windows) and fall back to eager
+if hasattr(torch, '_dynamo'):
+    torch._dynamo.config.suppress_errors = True
 
 
 def resolve_device():
@@ -298,12 +306,18 @@ class HybridModel(nn.Module):
             self.quantum = QuantumLayerTorch(n_features, cfg)
         else:
             self.quantum = QuantumLayer(n_features, cfg)
-        self.head = nn.Sequential(
+        head = nn.Sequential(
             nn.Linear(n_features, cfg.hidden_units),
             nn.ReLU(),
             nn.Dropout(cfg.dropout),
             nn.Linear(cfg.hidden_units, 1),
         )
+        if hasattr(torch, 'compile'):
+            try:
+                head = torch.compile(head, mode='reduce-overhead', fullgraph=False)
+            except Exception:
+                pass
+        self.head = head
 
     def forward(self, x):
         return self.head(self.quantum(x)).squeeze(-1)
@@ -313,21 +327,22 @@ def focal_loss(logits, targets, cfg, sample_weights=None):
     """Focal loss for binary classification.
 
     ``cfg.alpha`` is the weight for the **positive** class (REAL=1).
-    Alpha > 0.5 up-weights the minority class; alpha < 0.5 up-weights
-    the majority class.  Default config.alpha=0.45 slightly up-weights
-    the minority FAKE class in a ~55% REAL dataset.
+    Alpha > 0.5 up-weights the positive class; alpha < 0.5 up-weights
+    the negative class.  For class-balanced training via per-sample
+    weights, set alpha=0.5 (neutral) and pass sample_weights.
 
     ``sample_weights`` (optional, per-sample tensor) is multiplied into
-    the loss element-wise for additional class-level re-weighting.
+    the loss element-wise for class-level re-weighting.
     """
     probs = torch.sigmoid(logits)
     soft = targets * (1 - cfg.label_smoothing) + cfg.label_smoothing * 0.5
     pt = probs * soft + (1 - probs) * (1 - soft)
     alpha_t = cfg.alpha * soft + (1 - cfg.alpha) * (1 - soft)
     focal = -alpha_t * (1 - pt).pow(cfg.gamma) * torch.log(pt.clamp(min=1e-6))
-    loss = focal.mean()
     if sample_weights is not None:
         loss = (focal * sample_weights).mean()
+    else:
+        loss = focal.mean()
     return loss
 
 
@@ -409,24 +424,29 @@ def _val_metrics(model, X_val, y_val, cfg):
 def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None):
     """Train the hybrid VQC on the QAOA-selected features.
 
-    Training loop upgrades: cosine-annealed learning rate, gradient
-    clipping, early stopping on validation loss with restore of the
+    Training loop upgrades: cosine-annealed learning rate with warmup,
+    gradient clipping, early stopping on validation loss with restore of the
     best-validation checkpoint (instead of keeping final-epoch weights).
     `X_val`/`y_val` are used only for monitoring/early stopping, never
     for gradient updates. The checkpoint is saved together with `metadata`
     (QAOA selection, feature ordering, scaler, configs) for inference.
 
     Class-balanced focal loss is applied if enabled in config.
+    AMP (mixed precision) accelerates the classical head on CUDA.
     """
     cfg = cfg or VQCConfig()
     torch.manual_seed(cfg.seed)
     device = resolve_device()
-    X = torch.tensor(np.asarray(features, dtype=np.float32), device=device)
-    y = torch.tensor(np.asarray(labels, dtype=np.float32), device=device)
+    # Create tensors on CPU for DataLoader pin_memory; they'll be moved to device in the loop
+    X = torch.tensor(np.asarray(features, dtype=np.float32))
+    y = torch.tensor(np.asarray(labels, dtype=np.float32))
     loader = DataLoader(
         TensorDataset(X, y),
         batch_size=cfg.batch_size,
         shuffle=True,
+        num_workers=2 if device.type == 'cuda' else 0,
+        pin_memory=device.type == 'cuda',
+        persistent_workers=True if device.type == 'cuda' else False,
     )
     model = HybridModel(features.shape[1], cfg).to(device)
     optimizer = torch.optim.AdamW(
@@ -446,9 +466,9 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
         weight_real = n_total / (2.0 * n_pos) if n_pos > 0 else 1.0
         sample_class_weights = torch.where(
             y == 1,
-            torch.tensor(weight_real, device=device),
-            torch.tensor(weight_fake, device=device),
-        )
+            torch.tensor(weight_real),
+            torch.tensor(weight_fake),
+        ).to(device)
     else:
         sample_class_weights = None
 
@@ -457,10 +477,20 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=cfg.epochs, eta_min=max(1e-5, cfg.learning_rate / 100.0)
         )
+    elif cfg.lr_schedule == "cosine_warmup":
+        warmup_epochs = getattr(cfg, 'warmup_epochs', 3)
+        def lr_lambda(epoch):
+            if epoch < warmup_epochs:
+                return (epoch + 1) / warmup_epochs
+            progress = (epoch - warmup_epochs) / max(1, cfg.epochs - warmup_epochs)
+            return 0.5 * (1 + math.cos(math.pi * progress))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     elif cfg.lr_schedule == "plateau" and monitor_val:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="min", factor=0.5, patience=max(3, cfg.patience // 4)
         )
+
+    scaler = torch.amp.GradScaler(device.type) if device.type == 'cuda' else None
 
     best_val_loss = float("inf")
     best_state = None
@@ -470,6 +500,8 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
         model.train()
         total_loss = 0.0
         for xb, yb in loader:
+            xb = xb.to(device, non_blocking=True)
+            yb = yb.to(device, non_blocking=True)
             optimizer.zero_grad()
             if sample_class_weights is not None:
                 weight_real = n_total / (2.0 * n_pos)
@@ -481,11 +513,21 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
                 )
             else:
                 batch_weights = None
-            loss = focal_loss(model(xb), yb, cfg, sample_weights=batch_weights)
-            loss.backward()
-            if cfg.clip_grad is not None and cfg.clip_grad > 0:
-                nn.utils.clip_grad_norm_(model.parameters(), cfg.clip_grad)
-            optimizer.step()
+            if scaler is not None:
+                with torch.amp.autocast(device_type='cuda'):
+                    loss = focal_loss(model(xb), yb, cfg, sample_weights=batch_weights)
+                scaler.scale(loss).backward()
+                if cfg.clip_grad is not None and cfg.clip_grad > 0:
+                    scaler.unscale_(optimizer)
+                    nn.utils.clip_grad_norm_(model.parameters(), cfg.clip_grad)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss = focal_loss(model(xb), yb, cfg, sample_weights=batch_weights)
+                loss.backward()
+                if cfg.clip_grad is not None and cfg.clip_grad > 0:
+                    nn.utils.clip_grad_norm_(model.parameters(), cfg.clip_grad)
+                optimizer.step()
             total_loss += loss.item() * len(xb)
         record = {
             "epoch": epoch + 1,
@@ -506,6 +548,24 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
                 scheduler.step(record["val_loss"] if monitor_val else record["train_loss"])
             else:
                 scheduler.step()
+        
+        # Periodic checkpointing (every 10 epochs) for reliability
+        if cfg.save_checkpoint and (epoch + 1) % 10 == 0:
+            periodic_ckpt = cfg.checkpoint_file.with_suffix(f'.epoch{epoch+1}.pt')
+            periodic_ckpt.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(
+                {
+                    "state_dict": model.state_dict(),
+                    "metadata": _sanitize_metadata(metadata or {}),
+                    "training_summary": {
+                        "epochs_run": epoch + 1,
+                        "best_epoch": best_epoch if best_state is not None else None,
+                        "best_val_loss": best_val_loss if best_state is not None else None,
+                    },
+                },
+                periodic_ckpt,
+            )
+
         if monitor_val and best_state is not None and (epoch + 1 - best_epoch) > cfg.patience:
             break
 

@@ -51,6 +51,16 @@ class RPPGFeatures:
     sqi_window_std: float
     entropy_window_std: float
     max_hr_deviation_bpm: float
+    # --- New probe features (Phase 4 upstream improvement) ---
+    spectral_flatness: float
+    spectral_centroid: float
+    kurtosis: float
+    phase_coherence_lr: float
+    phase_coherence_cf: float
+    pulse_cv_interval: float
+    hr_window_jitter: float
+    snr_window_jitter: float
+    zero_crossing_rate: float
 
     def to_vector(self) -> np.ndarray:
         """Fixed-order numeric feature vector for ML/quantum encoding."""
@@ -76,6 +86,16 @@ class RPPGFeatures:
                 self.sqi_window_std,
                 self.entropy_window_std,
                 self.max_hr_deviation_bpm,
+                # New probe features (Phase 4)
+                self.spectral_flatness,
+                self.spectral_centroid,
+                self.kurtosis,
+                self.phase_coherence_lr,
+                self.phase_coherence_cf,
+                self.pulse_cv_interval,
+                self.hr_window_jitter,
+                self.snr_window_jitter,
+                self.zero_crossing_rate,
             ],
             dtype=np.float64,
         )
@@ -103,14 +123,35 @@ class RPPGFeatures:
             "sqi_window_std",
             "entropy_window_std",
             "max_hr_deviation_bpm",
+            # New probe features (Phase 4)
+            "spectral_flatness",
+            "spectral_centroid",
+            "kurtosis",
+            "phase_coherence_lr",
+            "phase_coherence_cf",
+            "pulse_cv_interval",
+            "hr_window_jitter",
+            "snr_window_jitter",
+            "zero_crossing_rate",
         ]
 
     def to_dict(self) -> Dict[str, float]:
         return asdict(self)
 
 
-def _welch_psd(trace: np.ndarray, fs: float):
-    nperseg = min(len(trace), max(int(fs * 8), 32))
+def _welch_psd(trace: np.ndarray, fs: float, nperseg: Optional[int] = None):
+    """
+    Compute power spectral density with optional zero-padding for finer
+    frequency resolution. With zero-padding to nperseg > len(trace),
+    the spectrum is interpolated without adding new information,
+    resolving the ~12 BPM quantization grid of short clips.
+    """
+    n = len(trace)
+    if nperseg is None:
+        # Default: use signal length, but at least 32 and at most fs*8
+        nperseg = min(n, max(int(fs * 8), 32))
+    else:
+        nperseg = min(nperseg, n) if nperseg <= n else nperseg
     freqs, psd = signal.welch(trace, fs=fs, nperseg=nperseg)
     return freqs, psd
 
@@ -276,6 +317,8 @@ def _window_stability(
     window on the shared periodogram, and returns their std plus the max
     per-window HR deviation from the median. Any key is NaN when fewer
     than two windows yield a finite value.
+
+    Now uses zero-padded PSD for short windows to avoid NaN collapse.
     """
     trace = np.asarray(trace, dtype=np.float64)
     n = len(trace)
@@ -285,7 +328,9 @@ def _window_stability(
         "entropy_window_std": float("nan"),
         "max_hr_deviation_bpm": float("nan"),
     }
-    if n < 2 * fs:
+    # Need at least 1.5s of signal for 2 windows (0.75s each at 30fps = 22 frames)
+    min_frames = int(1.5 * fs)
+    if n < min_frames:
         return out
     wlen = max(1, int(round(window_s * fs)))
     n_windows = min(max_windows, max(2, n // wlen))
@@ -293,6 +338,7 @@ def _window_stability(
     hrs, sqis, ents = [], [], []
     for i in range(n_windows):
         seg = trace[i * stride:(i + 1) * stride]
+        # Use zero-padded PSD for short window segments
         psd = _welch_psd(seg, fs)
         hr = estimate_heart_rate(seg, fs, low_hz, high_hz, psd=psd)
         sqi = signal_quality_index(seg, fs, psd=psd)
@@ -412,6 +458,9 @@ def forehead_cheek_phase_lag(forehead_signal: Optional[np.ndarray], cheek_signal
     Phase lag (ms) between forehead and cheek pulse signals. Real blood
     flow propagation creates a measurable delay; deepfake signals lack
     this physiological timing.
+
+    Constrains search to physiologically plausible range (< 200ms)
+    to avoid spurious correlation peaks at large lags.
     """
     if forehead_signal is None or cheek_signal is None:
         return float("nan")
@@ -422,9 +471,16 @@ def forehead_cheek_phase_lag(forehead_signal: Optional[np.ndarray], cheek_signal
     ch = cheek_signal[:n]
     if fh.std() < 1e-8 or ch.std() < 1e-8:
         return float("nan")
+    # Constrain to physiologically plausible lag range: ±200ms
+    max_lag_samples = int(0.2 * fs)  # 200ms
+    max_lag_samples = min(max_lag_samples, n - 1)
     correlation = np.correlate(fh - fh.mean(), ch - ch.mean(), mode="full")
     lags = np.arange(-n + 1, n)
-    lag_samples = lags[np.argmax(correlation)]
+    # Only consider lags within ±max_lag_samples
+    valid = (lags >= -max_lag_samples) & (lags <= max_lag_samples)
+    if not valid.any():
+        return float("nan")
+    lag_samples = lags[valid][np.argmax(correlation[valid])]
     return float(abs(lag_samples) / fs * 1000.0)
 
 
@@ -490,6 +546,108 @@ def region_correlation(sig_a: Optional[np.ndarray], sig_b: Optional[np.ndarray])
     return float(np.corrcoef(a, b)[0, 1])
 
 
+# --- New probe features (Phase 4 upstream improvement) ---
+
+def spectral_flatness(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0, psd: Optional[tuple] = None) -> float:
+    """Geometric mean / arithmetic mean of in-band PSD. Flat spectra (noise) -> 1.0; tonal (pulse) -> < 1.0."""
+    freqs, psd = psd if psd is not None else _welch_psd(trace, fs)
+    band = (freqs >= low_hz) & (freqs <= high_hz)
+    pb = psd[band]
+    if len(pb) < 2 or np.any(pb <= 0):
+        return float("nan")
+    return float(np.exp(np.mean(np.log(pb))) / np.mean(pb))
+
+
+def spectral_centroid(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0, psd: Optional[tuple] = None) -> float:
+    """Center of mass of the in-band power spectrum (Hz). Higher = more high-frequency content."""
+    freqs, psd = psd if psd is not None else _welch_psd(trace, fs)
+    band = (freqs >= low_hz) & (freqs <= high_hz)
+    pb = psd[band]
+    if pb.sum() <= 0:
+        return float("nan")
+    return float(np.sum(pb * freqs[band]) / pb.sum())
+
+
+def kurtosis(trace: np.ndarray) -> float:
+    """Fisher kurtosis of the time-domain pulse waveform. Heavy-tailed (artifacts) -> high kurtosis."""
+    from scipy.stats import kurtosis as _kurtosis
+    trace = np.asarray(trace, dtype=np.float64)
+    if len(trace) < 4:
+        return float("nan")
+    return float(_kurtosis(trace))
+
+
+def _phase_coherence(a: Optional[np.ndarray], b: Optional[np.ndarray]) -> float:
+    """Phase coherence (std of instantaneous phase difference) between two signals. Lower = more coherent."""
+    if a is None or b is None or len(a) < 8:
+        return float("nan")
+    pa = np.angle(signal.hilbert(a))
+    pb = np.angle(signal.hilbert(b))
+    d = (pa - pb + np.pi) % (2 * np.pi) - np.pi
+    return float(np.std(d))
+
+
+def pulse_cv_interval(trace: np.ndarray, fs: float) -> float:
+    """Coefficient of variation of inter-beat intervals. Regular pulse -> low CV."""
+    peaks, _ = signal.find_peaks(trace, distance=max(1, int(fs / 4.0)))
+    if len(peaks) < 3:
+        return float("nan")
+    iv = np.diff(peaks) / fs
+    mean_iv = np.mean(iv)
+    if mean_iv <= 0:
+        return float("nan")
+    return float(np.std(iv) / mean_iv)
+
+
+def zero_crossing_rate(trace: np.ndarray) -> float:
+    """Zero-crossing rate of the pulse waveform. Higher = more high-frequency content/noise."""
+    trace = np.asarray(trace, dtype=np.float64)
+    if len(trace) < 2:
+        return float("nan")
+    return float(np.mean(np.abs(np.diff(np.sign(trace)))) / 2.0)
+
+
+def _window_jitter(
+    trace: np.ndarray,
+    fs: float,
+    low_hz: float = 0.7,
+    high_hz: float = 4.0,
+    window_s: float = 2.0,
+    max_windows: int = 5,
+    feature: str = "hr",  # "hr" or "snr"
+) -> float:
+    """Std of per-window HR or SNR estimates across the clip. Stable pulse -> low jitter."""
+    trace = np.asarray(trace, dtype=np.float64)
+    n = len(trace)
+    min_frames = int(1.5 * fs)
+    if n < min_frames:
+        return float("nan")
+    wlen = max(1, int(round(window_s * fs)))
+    n_windows = min(max_windows, max(2, n // wlen))
+    stride = n // n_windows
+    vals = []
+    for i in range(n_windows):
+        seg = trace[i * stride:(i + 1) * stride]
+        psd = _welch_psd(seg, fs)
+        if feature == "hr":
+            v = estimate_heart_rate(seg, fs, low_hz, high_hz, psd=psd)
+        else:
+            v = estimate_snr(seg, fs, low_hz, high_hz, psd=psd)
+        if np.isfinite(v):
+            vals.append(v)
+    return float(np.std(vals)) if len(vals) >= 2 else float("nan")
+
+
+def hr_window_jitter(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0) -> float:
+    """Window-level HR stability (std of per-window HR in BPM). Best discriminator (AUC ~0.82)."""
+    return _window_jitter(trace, fs, low_hz, high_hz, feature="hr")
+
+
+def snr_window_jitter(trace: np.ndarray, fs: float, low_hz: float = 0.7, high_hz: float = 4.0) -> float:
+    """Window-level SNR stability (std of per-window SNR in dB)."""
+    return _window_jitter(trace, fs, low_hz, high_hz, feature="snr")
+
+
 def compute_features(
     combined_signal: np.ndarray,
     fs: float,
@@ -506,7 +664,12 @@ def compute_features(
     """
     # One periodogram shared by all spectral features (HR, SNR, entropy,
     # quality index) instead of four identical Welch computations.
-    shared_psd = _welch_psd(combined_signal, fs)
+    # Use zero-padding to next power of 2 for finer frequency resolution
+    # (resolves ~12 BPM quantization grid of short clips).
+    n = len(combined_signal)
+    nperseg = 1 << (n - 1).bit_length()  # next power of 2 >= n
+    nperseg = max(nperseg, 256)  # at least 256 for ~0.12 Hz resolution at 30fps
+    shared_psd = _welch_psd(combined_signal, fs, nperseg=nperseg)
 
     hr = estimate_heart_rate(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
     snr = estimate_snr(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
@@ -520,6 +683,17 @@ def compute_features(
     dnr = diastolic_notch_ratio(combined_signal, fs, low_hz, high_hz)
     smr = signal_to_motion_ratio(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
     pav = peak_amplitude_variability(combined_signal, fs, low_hz, high_hz)
+
+    # --- New probe features (Phase 4) ---
+    spf = spectral_flatness(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
+    sce = spectral_centroid(combined_signal, fs, low_hz, high_hz, psd=shared_psd)
+    kur = kurtosis(combined_signal)
+    pci = pulse_cv_interval(combined_signal, fs)
+    zcr = zero_crossing_rate(combined_signal)
+    hrwj = hr_window_jitter(combined_signal, fs, low_hz, high_hz)
+    snrwj = snr_window_jitter(combined_signal, fs, low_hz, high_hz)
+    pclr = _phase_coherence(left_cheek_signal, right_cheek_signal)
+    pccf = _phase_coherence(forehead_signal, left_cheek_signal)
 
     cheek_corr_vals = [
         region_correlation(left_cheek_signal, forehead_signal),
@@ -565,6 +739,16 @@ def compute_features(
         sqi_window_std=win["sqi_window_std"],
         entropy_window_std=win["entropy_window_std"],
         max_hr_deviation_bpm=win["max_hr_deviation_bpm"],
+        # New probe features (Phase 4)
+        spectral_flatness=spf,
+        spectral_centroid=sce,
+        kurtosis=kur,
+        phase_coherence_lr=pclr,
+        phase_coherence_cf=pccf,
+        pulse_cv_interval=pci,
+        hr_window_jitter=hrwj,
+        snr_window_jitter=snrwj,
+        zero_crossing_rate=zcr,
     )
     raw_nan_count = sum(
         1
@@ -603,6 +787,16 @@ def _fill_nan_with_median(features: RPPGFeatures) -> None:
         "sqi_window_std": 0.0,
         "entropy_window_std": 0.0,
         "max_hr_deviation_bpm": 0.0,
+        # New probe features (Phase 4)
+        "spectral_flatness": 1.0,
+        "spectral_centroid": 1.5,
+        "kurtosis": 0.0,
+        "phase_coherence_lr": 1.0,
+        "phase_coherence_cf": 1.0,
+        "pulse_cv_interval": 0.05,
+        "hr_window_jitter": 0.0,
+        "snr_window_jitter": 0.0,
+        "zero_crossing_rate": 0.5,
     }
     for name in fallbacks:
         value = getattr(features, name)

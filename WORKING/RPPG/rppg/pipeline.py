@@ -86,7 +86,8 @@ class RPPGPipeline:
         method: str = "POS",
         target_fps: Optional[float] = None,
         blur_threshold: float = 15.0,
-        brightness_range: tuple = (25, 230),
+        brightness_min: int = 25,
+        brightness_max: int = 230,
         low_hz: float = 0.7,
         high_hz: float = 4.0,
         min_usable_frames: int = 48,
@@ -100,8 +101,8 @@ class RPPGPipeline:
                               this rate; otherwise the video's native
                               fps is used.
         blur_threshold      : minimum Laplacian variance to keep a frame.
-        brightness_range     : (min, max) mean pixel intensity to keep
-                              a frame (rejects too-dark/too-bright frames).
+        brightness_min       : minimum mean pixel intensity to keep a frame.
+        brightness_max       : maximum mean pixel intensity to keep a frame.
         low_hz, high_hz      : physiological frequency band (Hz).
         min_usable_frames    : minimum number of usable frames required
                               to attempt signal extraction (~1.5-2s at
@@ -112,7 +113,8 @@ class RPPGPipeline:
         self.method = method
         self.target_fps = target_fps
         self.blur_threshold = blur_threshold
-        self.brightness_range = brightness_range
+        self.brightness_min = brightness_min
+        self.brightness_max = brightness_max
         self.low_hz = low_hz
         self.high_hz = high_hz
         self.min_usable_frames = min_usable_frames
@@ -150,8 +152,7 @@ class RPPGPipeline:
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         blur = _blur_score(gray)
         bright = _brightness(gray)
-        lo, hi = self.brightness_range
-        usable = (blur >= self.blur_threshold) and (lo <= bright <= hi)
+        usable = (blur >= self.blur_threshold) and (self.brightness_min <= bright <= self.brightness_max)
         return FrameQuality(
             frame_index=idx,
             is_usable=usable,
@@ -344,7 +345,7 @@ class RPPGPipeline:
         )
 
         raw_nan_count = getattr(feats, "_raw_nan_count", 0)
-        if raw_nan_count >= 2 or feats.signal_quality_index == 0.0:
+        if raw_nan_count >= 2 or feats.signal_quality_index < 0.10:
             warnings.append(
                 f"Degenerate rPPG signal (non-finite features: {raw_nan_count}, "
                 f"SQI: {feats.signal_quality_index:.2f}); "

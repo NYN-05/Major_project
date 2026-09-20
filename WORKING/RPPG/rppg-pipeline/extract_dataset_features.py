@@ -53,9 +53,12 @@ def _init_worker(
     method: str,
     target_fps: Optional[float],
     blur_threshold: float,
+    brightness_min: int,
+    brightness_max: int,
     min_usable_frames: int,
     min_sqi: float,
     max_nan_features: int,
+    roi_weights: tuple = (0.35, 0.35, 0.30),
 ) -> None:
     """Per-process initializer: creates one RPPGPipeline per worker.
 
@@ -73,7 +76,10 @@ def _init_worker(
         method=method,
         target_fps=target_fps,
         blur_threshold=blur_threshold,
+        brightness_min=brightness_min,
+        brightness_max=brightness_max,
         min_usable_frames=min_usable_frames,
+        roi_weights=roi_weights,
     )
     _WORKER["min_sqi"] = min_sqi
     _WORKER["max_nan_features"] = max_nan_features
@@ -83,9 +89,12 @@ def _init_worker_gpu(
     method: str,
     target_fps: Optional[float],
     blur_threshold: float,
+    brightness_min: int,
+    brightness_max: int,
     min_usable_frames: int,
     min_sqi: float,
     max_nan_features: int,
+    roi_weights: tuple = (0.35, 0.35, 0.30),
 ) -> None:
     """Per-process initializer for GPU workers: creates RPPGPipeline +
     GPUFaceDetector + FaceROIExtractor (for trace accumulation)."""
@@ -108,6 +117,8 @@ def _init_worker_gpu(
         method=method,
         target_fps=target_fps,
         blur_threshold=blur_threshold,
+        brightness_min=brightness_min,
+        brightness_max=brightness_max,
         min_usable_frames=min_usable_frames,
     )
     _WORKER["min_sqi"] = min_sqi
@@ -377,6 +388,8 @@ def main() -> None:
     parser.add_argument("--method", default="POS", choices=["POS", "CHROM"], help="rPPG reconstruction method")
     parser.add_argument("--target-fps", type=float, default=None, help="Optional target FPS for sampling")
     parser.add_argument("--blur-threshold", type=float, default=15.0, help="Minimum Laplacian variance to keep a frame")
+    parser.add_argument("--brightness-min", type=int, default=25, help="Minimum mean pixel intensity to keep a frame (0-255)")
+    parser.add_argument("--brightness-max", type=int, default=230, help="Maximum mean pixel intensity to keep a frame (0-255)")
     parser.add_argument("--min-usable-frames", type=int, default=48, help="Minimum usable frames required per clip")
     parser.add_argument("--max-per-class", type=int, default=None, help="Optional cap for each label when extracting features")
     parser.add_argument("--include-ffpp", action="store_true", help="Also include FaceForensics++ clips (FF-synthesis fakes, FF-real/YouTube-real reals)")
@@ -386,6 +399,7 @@ def main() -> None:
     parser.add_argument("--max-nan-features", type=int, default=1, help="Drop clips with more than this many median-filled (raw-NaN) features")
     parser.add_argument("--gpu", action="store_true", help="Use GPU-accelerated face detection (YuNet via ONNX Runtime CUDA) instead of MediaPipe")
     parser.add_argument("--gpu-workers", type=int, default=None, help="Number of GPU worker processes (default: 8 when --gpu is set)")
+    parser.add_argument("--roi-weights", type=float, nargs=3, default=None, metavar=("LEFT", "RIGHT", "FOREHEAD"), help="ROI weights for left cheek, right cheek, forehead (default: 0.35 0.35 0.30)")
     args = parser.parse_args()
 
     samples = collect_samples(max_per_class=args.max_per_class, include_ffpp=args.include_ffpp)
@@ -413,6 +427,8 @@ def main() -> None:
                   "  Install with: pip install onnxruntime-gpu>=1.18.1,<1.27.0")
             use_gpu = False
 
+    roi_weights = tuple(args.roi_weights) if args.roi_weights else (0.35, 0.35, 0.30)
+
     if use_gpu:
         n_workers = args.gpu_workers if args.gpu_workers else min(8, os.cpu_count() or 8)
         print(f"[gpu] Using GPU face detection (YuNet ONNX Runtime CUDA) with {n_workers} workers")
@@ -432,7 +448,10 @@ def main() -> None:
             method=args.method,
             target_fps=args.target_fps,
             blur_threshold=args.blur_threshold,
+            brightness_min=args.brightness_min,
+            brightness_max=args.brightness_max,
             min_usable_frames=args.min_usable_frames,
+            roi_weights=roi_weights,
         )
         for label, video_path, source in samples:
             label_name = "Fake" if label == 1 else "Real"
@@ -463,7 +482,7 @@ def main() -> None:
         with mp.Pool(
             n_workers,
             initializer=init_fn,
-            initargs=(args.method, args.target_fps, args.blur_threshold, args.min_usable_frames, args.min_sqi, args.max_nan_features),
+            initargs=(args.method, args.target_fps, args.blur_threshold, args.brightness_min, args.brightness_max, args.min_usable_frames, args.min_sqi, args.max_nan_features, roi_weights),
         ) as pool:
             results = iter(pool.imap_unordered(worker_fn, items, chunksize=1))
             done = 0

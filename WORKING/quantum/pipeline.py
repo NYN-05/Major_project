@@ -156,19 +156,39 @@ def main():
         print("[2/6] Running QAOA feature selection (train split only)...")
         from quantum.qaoa import simulator_device
 
-        qaoa_dev, qaoa_backend = simulator_device(len(FEATURE_NAMES), qaoa_cfg)
+        # Pre-select features classically if >20 (state vector sim limit)
+        pre_select_k = 18
+        if len(FEATURE_NAMES) > pre_select_k:
+            print(f"  Pre-selecting {pre_select_k} features via classical AUC (from {len(FEATURE_NAMES)})")
+            classical_pre = select_classical(X_train, data["y_train"], qaoa_cfg)
+            classical_pre = classical_pre["selected_indices"]
+            pre_select_k = min(pre_select_k, len(classical_pre))
+            classical_pre = classical_pre[:pre_select_k]
+            X_train_qaoa = X_train[:, classical_pre]
+            feat_names_qaoa = [FEATURE_NAMES[i] for i in classical_pre]
+            print(f"  Pre-selected: {feat_names_qaoa}")
+        else:
+            X_train_qaoa = X_train
+            feat_names_qaoa = FEATURE_NAMES
+            classical_pre = None
+
+        qaoa_dev, qaoa_backend = simulator_device(len(feat_names_qaoa), qaoa_cfg)
         print(
             f"  QAOA simulator: {qaoa_backend}"
             f"{' (' + str(getattr(qaoa_dev, 'short_name', '')) + ')' if qaoa_dev else ''}"
         )
-        error = verify_hamiltonian(X_train, data["y_train"], qaoa_cfg)
+        error = verify_hamiltonian(X_train_qaoa, data["y_train"], qaoa_cfg)
         assert error < 1e-6, (
             f"Hamiltonian verification FAILED (max error {error:.2e}): "
             "_cost_terms does not reproduce _classical_cost"
         )
         print(f"  Hamiltonian verification OK (max error {error:.2e})")
-        selection = QAOASelector(qaoa_cfg).select(X_train, data["y_train"])
+        selection = QAOASelector(qaoa_cfg).select(X_train_qaoa, data["y_train"])
         save_selection(selection, qaoa_cfg.selection_file)
+        # Map QAOA indices back to original feature space
+        if classical_pre is not None:
+            selection["selected_indices"] = [classical_pre[i] for i in selection["selected_indices"]]
+            selection["selected_features"] = [FEATURE_NAMES[i] for i in selection["selected_indices"]]
         print(
             f"  Selected {len(selection['selected_features'])} features: {selection['selected_features']}"
         )
