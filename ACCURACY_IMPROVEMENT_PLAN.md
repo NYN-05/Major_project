@@ -3,7 +3,7 @@
 **Project:** Deepfake Detection in Low-Resolution KYC Videos Using rPPG and Hybrid Quantum ML  
 **Target:** 80–85% balanced accuracy (engineering target, not guaranteed)  
 **Date:** 2026-09-26  
-**Status:** P6-P7 COMPLETE — P6: Removed 6 degenerate temporal stability features (VQC Test AUC 0.535→0.605). P7: Fixed ROI quality with larger ROIs, resolution-aware skin mask, lower blur threshold. VQC now detects FAKE (specificity 0.000→0.702), CV balanced accuracy 0.500→0.545. P9, P12 remain fundamental data limitations.
+**Status:** P6-P8 COMPLETE — P6: Removed 6 degenerate temporal stability features (VQC Test AUC 0.535→0.605). P7: Fixed ROI quality with larger ROIs, resolution-aware skin mask, lower blur threshold. VQC now detects FAKE (specificity 0.000→0.702), CV balanced accuracy 0.500→0.545. P8: SQI gate alignment verified — training and inference both use SQI<0.10. P9, P12 remain fundamental data limitations.
 
 ---
 
@@ -160,7 +160,7 @@ loss = focal - 0.02*entropy  # Minimum at p=0.5 → explains narrow P(real) band
 | **P5** | Spectral quantization (~12 BPM grid) | 🔴 Critical | Zero-padding in PSD (nperseg≥256) | ✅ FIXED — `features.py:152-158` manual zero-pad to 256 samples → 7 BPM grid (vs 12 BPM native). Test: 72 BPM signal → 70.3 BPM estimate (within 2 BPM). Fundamental clip duration limit remains but quantization artifact resolved. |
 | **P6** | Temporal stability features → 0.0 | 🔴 Critical | Remove degenerate features (hr_window_std, sqi_window_std, entropy_window_std, max_hr_deviation_bpm, hr_window_jitter, snr_window_jitter) | ✅ FIXED — Removed 6 degenerate features from RPPGFeatures (23 features now). VQC Test AUC: 0.535→0.605 (+13%), CV Balanced Acc: 0.500→0.512. Decision bins remain 100% UNCERTAIN — fundamental feature informativeness limit. |
 | **P7** | ROI quality poor (skin mask → None) | 🟠 High | Larger ROIs / resolution-aware skin mask / lower blur threshold | ✅ FIXED — Expanded landmark ROIs (8→29/31/53 pts), disabled skin mask for frames <200px, lowered blur_threshold 15→5, brightness 25/230→20/240, MIN_VALID_ROI_PIXELS 10→3. VQC Specificity: 0.000→0.702, Recall: 1.000→0.342, CV Balanced Acc: 0.512→0.545. Model now discriminates classes (confusion matrix `[[177,75],[202,105]]`). |
-| **P8** | SQI gate mismatch (train vs inference) | 🟠 High | Align gates (inference SQI<0.10) | ✅ FIXED — Both train (`extract_dataset_features.py:144`) and inference (`pipeline.py:378`) use SQI<0.10 |
+| **P8** | SQI gate mismatch (train vs inference) | 🟠 High | Align gates (inference SQI<0.10) | ✅ FIXED — Both train (`extract_dataset_features.py:144`) and inference (`pipeline.py:380`) use `signal_quality_index < min_sqi` with `min_sqi=0.10`. Verified: training gate rejects SQI<0.10, accepts SQI≥0.10; inference gate in `_finalize()` uses identical logic. End-to-end pipeline runs without gate mismatch. |
 | **P9** | Per-feature discrimination ≤ 0.06 | 🔴 Critical | Upstream rPPG repair (method/ROI/FPS) | ❌ NOT FIXED — Phase 3 exhaustive probe: best full-dataset AUC=0.53; subset flukes (0.65-0.76) don't replicate |
 | **P10** | QAOA unstable (cost spread 12.5) | 🟠 High | Increase restarts=8, max_iter=500 | ⚠️ PARTIAL — Not critical since upstream bottleneck; current restarts=4, max_iter=200 sufficient |
 | **P11** | No quantum advantage vs classical | 🟠 High | Fix upstream first; fair comparison | ✅ CONFIRMED — Classical LR AUC=0.582 > VQC AUC=0.535; no quantum advantage possible with current features |
@@ -369,3 +369,47 @@ However, the 80-85% target remains unachievable. The fundamental limit is per-fe
 1. **Threshold calibration** — move decision boundaries from [0.3, 0.7] to data-driven thresholds
 2. **New data acquisition** — longer KYC captures (≥8s) for better rPPG signal
 3. **Feature engineering** — explore multi-spectral, motion-corrected, or synthetic-data-augmented features
+
+---
+
+## 15. P8 Implementation & Validation (2026-09-26)
+
+### Problem
+SQI gate mismatch between training and inference: training pipeline (`extract_dataset_features.py`) dropped clips with `SQI < 0.10`, but inference pipeline (`pipeline.py`) was reported to only reject `SQI == 0`. This inconsistency could allow low-quality signals to pass inference that would have been rejected during training, causing distribution shift.
+
+### Implementation
+**Files verified (no changes needed — fix already in place):**
+1. `WORKING/RPPG/rppg-pipeline/extract_dataset_features.py` (line 144-146) — Training gate: `_gate_result()` checks `if sqi < min_sqi: return f"sqi={sqi:.4f} < {min_sqi}"` with `min_sqi=0.10` default.
+2. `WORKING/RPPG/rppg/pipeline.py` (line 380) — Inference gate in `_finalize()`: `if raw_nan_count >= 2 or feats.signal_quality_index < self.min_sqi:` with `min_sqi=0.10` default.
+
+Both paths use **identical logic**: `signal_quality_index < min_sqi` (strict less-than), threshold = 0.10.
+
+### Validation Results
+
+**Training gate test (`_gate_result`):**
+| Input SQI | Result | Notes |
+|-----------|--------|-------|
+| 0.05 | GATED | `sqi=0.0500 < 0.1` |
+| 0.09 | GATED | `sqi=0.0900 < 0.1` |
+| 0.10 | PASSED | Threshold is strict `<` |
+| 0.15 | PASSED | — |
+| 0.50 | PASSED | — |
+
+**Inference gate test (`_finalize` logic):**
+| Input SQI | Result | Notes |
+|-----------|--------|-------|
+| 0.05 | GATED | `0.05 < 0.10` → INCONCLUSIVE |
+| 0.09 | GATED | `0.09 < 0.10` → INCONCLUSIVE |
+| 0.10 | PASSED | `0.10 < 0.10` is False |
+| 0.15 | PASSED | — |
+
+**Dataset verification:** All 2,794 samples in `dataset_features.csv` have SQI ≥ 0.55 (mean=0.67, min=0.55), confirming the training gate was applied correctly during extraction.
+
+**End-to-end pipeline test:** `run_pipeline.py` executed successfully on DFDC Real video (146/148 usable frames, HR=84.4 BPM, SQI=0.668), producing UNCERTAIN verdict — SQI gate passed, no mismatch observed.
+
+### Conclusion
+P8 is **validated as FIXED**. Both training and inference use identical SQI gate logic (`signal_quality_index < 0.10`). No code changes were needed — the fix was already in place. The validation confirms:
+1. Training gate correctly rejects low-SQI clips during dataset construction
+2. Inference gate uses identical threshold and comparison operator
+3. Dataset contains only SQI ≥ 0.55 samples (well above 0.10 threshold)
+4. End-to-end pipeline runs without SQI gate mismatch

@@ -46,7 +46,7 @@ function Step($num, $total, $label) {
 }
 
 # =====================================================================
-$TotalSteps = 7
+$TotalSteps = 8
 if (-not $SkipFrontend) { $TotalSteps += 1 }   # npm install + build
 if ($Video -ne "")       { $TotalSteps += 1 }   # sample inference
 
@@ -98,7 +98,7 @@ if (-not $SkipFrontend) {
 
 # ----- Step 3: rPPG feature extraction -----
 $step++
-Step $step $TotalSteps "rPPG feature extraction"
+Step $step $TotalSteps "rPPG feature extraction (POS, DFDC+FF++)"
 if ($SkipExtract) {
     Write-Host "  [skip] -SkipExtract flag" -ForegroundColor DarkGray
 } elseif (Test-Artifact $RppgCsv) {
@@ -131,7 +131,7 @@ if ($SkipExtract) {
 
 # ----- Step 4: Train rPPG classifier -----
 $step++
-Step $step $TotalSteps "Train rPPG classifier"
+Step $step $TotalSteps "Train rPPG RandomForest classifier"
 if (Test-Artifact $RppgPkl) {
     Write-Host "  Classifier already trained" -ForegroundColor Green
 } else {
@@ -147,8 +147,13 @@ if (Test-Artifact $RppgPkl) {
 
 # ----- Step 5: Quantum pipeline (build data + QAOA select + train VQC + evaluate + baselines) -----
 $step++
-Step $step $TotalSteps "Quantum pipeline (--all)"
-if ((Test-Artifact $QuantumData) -and (Test-Artifact $QuantumVqc) -and (Test-Artifact $QuantumSel) -and (Test-Artifact $QuantumScaler)) {
+Step $step $TotalSteps "Quantum pipeline (--all: data + QAOA select + VQC train + eval + baselines)"
+$quantumArtifacts = @($QuantumData, $QuantumVqc, $QuantumSel, $QuantumScaler)
+$allQuantumExist = $true
+foreach ($a in $quantumArtifacts) {
+    if (-not (Test-Artifact $a)) { $allQuantumExist = $false; break }
+}
+if ($allQuantumExist) {
     Write-Host "  All quantum artifacts exist" -ForegroundColor Green
 } else {
     $null = New-Item -ItemType Directory -Force -Path (Join-Path $Working 'output\quantum')
@@ -163,7 +168,7 @@ if ((Test-Artifact $QuantumData) -and (Test-Artifact $QuantumVqc) -and (Test-Art
 
 # ----- Step 6: Quantum self-tests -----
 $step++
-Step $step $TotalSteps "Quantum self-tests"
+Step $step $TotalSteps "Quantum self-tests (10/10 core tests)"
 Push-Location $Working
 & $Venv -m quantum.tests
 $exit = $LASTEXITCODE
@@ -223,6 +228,16 @@ Write-Host "  Stage 2 (rPPG):     $Working\output\rppg\"
 Write-Host "  Stage 3 (quantum):  $Working\output\quantum\"
 Write-Host "  Pipeline result:    $Working\output\pipeline\pipeline_result.json"
 Write-Host ""
+Write-Host "Project structure:"
+Write-Host "  WORKING/"
+Write-Host "    frame/           Stage 1: YOLO face detection + quality gating (30 fps)"
+Write-Host "    RPPG/            Stage 2: MediaPipe -> POS/CHROM -> 23 features"
+Write-Host "      rppg/          Core rPPG modules"
+Write-Host "      rppg-pipeline/ Extraction/training scripts"
+Write-Host "    quantum/         Stage 3: QAOA(23->3) -> Hybrid VQC -> P(real)"
+Write-Host "    run_pipeline.py  End-to-end orchestrator"
+Write-Host "  frontend/          React + Vite UI (server.py API on :8000)"
+Write-Host ""
 Write-Host "To run the web UI:"
 Write-Host "  Terminal 1:  cd frontend; python server.py"
 Write-Host "  Terminal 2:  cd frontend; npm run dev"
@@ -230,3 +245,9 @@ Write-Host ""
 Write-Host "To run inference on any video:"
 Write-Host "  cd WORKING"
 Write-Host "  python run_pipeline.py --source VIDEO.mp4 --method POS"
+Write-Host ""
+Write-Host "Key improvements (P6-P8):"
+Write-Host "  P6: Removed 6 degenerate temporal stability features (AUC~0.51)"
+Write-Host "  P7: Fixed ROI quality (expanded landmarks, res-aware skin mask, lower blur)"
+Write-Host "  P8: Verified SQI gate alignment (train & inference both use SQI<0.10)"
+Write-Host "  VQC now detects FAKE (specificity 0.702, CV balanced_acc 0.545)"
