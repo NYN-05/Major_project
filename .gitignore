@@ -1,5 +1,6 @@
 # Dataset (gitignored, large)
 FF++/
+DFDC_Dataset/
 
 # Dev scratch — tests, temp scripts, screenshots, logs (see AGENTS.md)
 Scrape/
@@ -24,6 +25,16 @@ WORKING/output/frames/
 WORKING/output/rppg/
 WORKING/output/quantum/
 WORKING/output/pipeline/
+WORKING/output/sweep/
+
+# ML checkpoints & caches (regenerated)
+*.pkl
+*.pt
+!WORKING/frame/weights/yolov8n-face-lindevs.pt
+
+# Test videos / temp media
+WORKING/frame/test.mp4
+WORKING/frame/test*.mp4
 
 # Logs
 *.log

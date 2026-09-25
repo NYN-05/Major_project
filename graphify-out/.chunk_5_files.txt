@@ -1,3 +1,0 @@
-C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\charts\dataset_composition.png
-C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\charts\frame_funnel.png
-C:\Users\JHASHANK\Desktop\Maj_Proj\Docs\charts\latency_profile.png

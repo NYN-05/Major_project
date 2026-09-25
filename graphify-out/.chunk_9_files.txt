@@ -1,3 +1,0 @@
-C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\output\quantum\calibration_curve.png
-C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\output\quantum\confusion_matrix.png
-C:\Users\JHASHANK\Desktop\Maj_Proj\WORKING\output\quantum\roc_curve.png

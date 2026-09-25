@@ -40,7 +40,7 @@ export const PIPELINE = [
   { title: "Frame quality", sub: "Filtering blurry or dark frames", icon: ScanSearch },
   { title: "Face detection", sub: "Locating the face region", icon: ScanFace },
   { title: "rPPG signal", sub: "Extracting the pulse from skin-color changes", icon: HeartPulse },
-  { title: "Feature analysis", sub: "Measuring 10 physiological features", icon: Gauge },
+  { title: "Feature analysis", sub: "Measuring 29 physiological features", icon: Gauge },
   { title: "Quantum classifier", sub: "QAOA selection + hybrid VQC scoring", icon: Atom },
   { title: "Final decision", sub: "Issuing the verification verdict", icon: ShieldCheck },
 ];
@@ -113,7 +113,7 @@ export const fmtTimestamp = (iso) => {
 export const GLOSSARY = {
   rppg: "Remote photoplethysmography — measuring the pulse from subtle skin-color changes in video, without skin contact.",
   sqi: "Signal Quality Index — how clean and periodic the extracted pulse is (0–1); higher is more physiological.",
-  qaoa: "Quantum Approximate Optimization Algorithm — used on this pipeline to select the 6 most informative features from the 10 extracted ones.",
+  qaoa: "Quantum Approximate Optimization Algorithm — used on this pipeline to select the 3 most informative features from the 29 extracted ones.",
   vqc: "Variational Quantum Circuit — a parameterized quantum circuit (PennyLane) whose weights are trained classically; the hybrid decision layer.",
   probability: "Probability of live — the model's estimate that the recording comes from a real, living person (0–1).",
   confidence: "Confidence — the model's estimate that the recording is live (0–1), identical to the probability of live.",

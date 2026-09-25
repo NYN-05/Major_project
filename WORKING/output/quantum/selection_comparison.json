@@ -1,23 +1,20 @@
 {
   "qaoa_features": [
     "cheek_forehead_correlation",
-    "left_right_cheek_correlation",
-    "signal_to_motion_ratio"
+    "mad",
+    "prv_std_ms"
   ],
   "classical_features": [
     "cheek_forehead_correlation",
-    "left_right_cheek_correlation",
-    "prv_std_ms"
+    "prv_std_ms",
+    "mad"
   ],
   "overlap_indices": [
-    6,
-    7
+    2,
+    4,
+    6
   ],
-  "overlap_count": 2,
-  "qaoa_only": [
-    "signal_to_motion_ratio"
-  ],
-  "classical_only": [
-    "prv_std_ms"
-  ]
+  "overlap_count": 3,
+  "qaoa_only": [],
+  "classical_only": []
 }

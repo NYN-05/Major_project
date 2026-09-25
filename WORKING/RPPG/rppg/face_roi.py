@@ -44,15 +44,41 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Landmark index groups (MediaPipe Face Mesh, 468-point topology)
 # ---------------------------------------------------------------------------
-# These indices define small polygons over skin-rich, motion-stable regions.
-# Forehead: between eyebrows and hairline.
-# Cheeks: below eyes, above jawline, avoiding nose shadow and ears.
-LEFT_CHEEK_IDX = [116, 117, 118, 101, 36, 205, 187, 123]
-RIGHT_CHEEK_IDX = [345, 346, 347, 330, 266, 425, 411, 352]
-FOREHEAD_IDX = [109, 10, 338, 297, 332, 284, 251, 21, 54, 103]
+# These indices define polygons over skin-rich, motion-stable regions.
+# Forehead: between eyebrows and hairline (expanded for better coverage).
+# Cheeks: below eyes, above jawline, avoiding nose shadow and ears (expanded).
+# P7: Expanded ROIs for better skin pixel yield on low-res/compressed video.
+LEFT_CHEEK_IDX = [
+    116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,  # jawline to cheek
+    101, 36, 205, 187,  # cheek upper/center
+    115, 114, 113, 112, 111, 110,  # cheek interior
+    102, 103, 104, 105, 106, 107,  # cheek interior upper
+]
+RIGHT_CHEEK_IDX = [
+    345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357,  # jawline to cheek
+    330, 266, 425, 411,  # cheek upper/center
+    363, 364, 365, 366, 367, 368, 369,  # cheek interior
+    344, 343, 342, 341, 340, 339, 338,  # cheek interior upper
+]
+FOREHEAD_IDX = [
+    109, 10, 338, 297, 332, 284, 251, 21, 54, 103,  # original
+    9, 8, 7, 6, 5, 4,  # upper forehead
+    337, 336, 335, 334, 333, 331, 330,  # forehead upper
+    299, 298, 296, 295, 294, 293, 292, 291,  # forehead sides
+    289, 288, 287, 286, 285, 283, 282, 281, 280,  # forehead center
+    279, 278, 277, 276, 275, 274, 273, 272, 271, 270, 269, 268, 267,  # forehead lower
+]
 
 # A minimal landmark set used for pose-stability / ROI smoothing.
 STABILIZATION_IDX = [1, 33, 263, 61, 291, 199]  # nose tip, eyes, mouth corners, chin
+
+# Resolution threshold (height in px) below which skin mask is disabled.
+# Low-res compressed video (< 200px) has unreliable YCrCb skin segmentation.
+SKIN_MASK_MIN_HEIGHT = 200
+
+# Minimum valid pixels in an ROI mask after skin masking (fallback to polygon if below).
+# Lowered from 10 to 3 to accommodate very small ROIs on low-res frames.
+MIN_VALID_ROI_PIXELS = 3
 
 
 def _load_haar_cascade() -> Optional[cv2.CascadeClassifier]:
@@ -243,10 +269,17 @@ if _MEDIAPIPE_AVAILABLE:
         @staticmethod
         def _skin_mask(frame_bgr: np.ndarray) -> np.ndarray:
             ycrcb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2YCrCb)
-            # Expanded skin tone range for compressed/low-quality video
-            lower = np.array([0, 120, 65], dtype=np.uint8)
-            upper = np.array([255, 185, 140], dtype=np.uint8)
+            # Expanded skin tone range for compressed/low-quality video.
+            # Wider Cr/Cb ranges to capture more skin tones under compression.
+            lower = np.array([0, 115, 60], dtype=np.uint8)
+            upper = np.array([255, 190, 145], dtype=np.uint8)
             return cv2.inRange(ycrcb, lower, upper)
+
+        @staticmethod
+        def _should_use_skin_mask(frame_bgr: np.ndarray) -> bool:
+            """Disable skin mask for low-resolution frames where YCrCb is unreliable."""
+            h, w = frame_bgr.shape[:2]
+            return min(h, w) >= SKIN_MASK_MIN_HEIGHT
 
         def extract_rois(self, frame_bgr: np.ndarray, face: TrackedFace) -> ROISet:
             if not face.found:
@@ -257,6 +290,7 @@ if _MEDIAPIPE_AVAILABLE:
             if face.landmarks_px is None:
                 # Coarse ROI polygons derived from bounding box when
                 # landmarks are unavailable (e.g., Haar fallback).
+                # P7: Expanded polygons for better skin coverage on low-res faces.
                 if face.bbox is None:
                     return ROISet(frame_index=face.frame_index, valid=False)
                 x, y, bw, bh = face.bbox
@@ -267,26 +301,29 @@ if _MEDIAPIPE_AVAILABLE:
                     pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
                     return pts
 
-                left_pts = poly_from_bbox([(0.12, 0.45), (0.32, 0.4), (0.38, 0.6), (0.18, 0.65)])
-                right_pts = poly_from_bbox([(0.62, 0.45), (0.82, 0.4), (0.78, 0.6), (0.58, 0.65)])
-                forehead_pts = poly_from_bbox([(0.35, 0.12), (0.65, 0.12), (0.65, 0.32), (0.35, 0.32)])
+                # P7: Larger polygons covering more cheek/forehead area
+                left_pts = poly_from_bbox([(0.08, 0.4), (0.38, 0.35), (0.45, 0.65), (0.12, 0.7)])
+                right_pts = poly_from_bbox([(0.55, 0.4), (0.92, 0.35), (0.88, 0.65), (0.58, 0.7)])
+                forehead_pts = poly_from_bbox([(0.25, 0.08), (0.75, 0.08), (0.75, 0.38), (0.25, 0.38)])
 
                 left_mask = self._polygon_mask((h, w), left_pts)
                 right_mask = self._polygon_mask((h, w), right_pts)
                 forehead_mask = self._polygon_mask((h, w), forehead_pts)
 
-                if self.skin_mask_enabled:
+                # P7: Resolution-aware skin mask - disable for low-res frames
+                use_skin = self.skin_mask_enabled and self._should_use_skin_mask(frame_bgr)
+                if use_skin:
                     sm = self._skin_mask(frame_bgr)
                     left_and = cv2.bitwise_and(left_mask, sm)
                     right_and = cv2.bitwise_and(right_mask, sm)
                     fore_and = cv2.bitwise_and(forehead_mask, sm)
-                    # If skin mask removes too many pixels (e.g., synthetic test
-                    # faces), fall back to the original polygon mask.
-                    left_mask = left_and if cv2.countNonZero(left_and) >= 25 else left_mask
-                    right_mask = right_and if cv2.countNonZero(right_and) >= 25 else right_mask
-                    forehead_mask = fore_and if cv2.countNonZero(fore_and) >= 25 else forehead_mask
+                    # If skin mask removes too many pixels, fall back to original polygon
+                    min_px = MIN_VALID_ROI_PIXELS
+                    left_mask = left_and if cv2.countNonZero(left_and) >= min_px else left_mask
+                    right_mask = right_and if cv2.countNonZero(right_and) >= min_px else right_mask
+                    forehead_mask = fore_and if cv2.countNonZero(fore_and) >= min_px else forehead_mask
 
-                valid = any(cv2.countNonZero(m) > 25 for m in (left_mask, right_mask, forehead_mask))
+                valid = any(cv2.countNonZero(m) > MIN_VALID_ROI_PIXELS for m in (left_mask, right_mask, forehead_mask))
 
                 return ROISet(
                     frame_index=face.frame_index,
@@ -326,15 +363,17 @@ if _MEDIAPIPE_AVAILABLE:
 
             # Skin mask is shared by all three ROIs; compute it once per frame
             # instead of inside the region() closure (3x/frame previously).
-            skin = self._skin_mask(frame_bgr) if self.skin_mask_enabled else None
+            # P7: Resolution-aware skin mask - disable for low-res frames
+            use_skin = self.skin_mask_enabled and self._should_use_skin_mask(frame_bgr)
+            skin = self._skin_mask(frame_bgr) if use_skin else None
 
             def region(idx_list) -> Optional[np.ndarray]:
                 region_pts = pts_for_masks[idx_list]
                 mask = self._polygon_mask((h, w), region_pts)
                 if skin is not None:
                     mask = cv2.bitwise_and(mask, skin)
-                # Reduced minimum valid pixels for low-res faces (was 25)
-                if cv2.countNonZero(mask) < 10:
+                # P7: Use configurable minimum valid pixels threshold
+                if cv2.countNonZero(mask) < MIN_VALID_ROI_PIXELS:
                     return None
                 return mask
 
@@ -407,6 +446,18 @@ else:
             cv2.fillConvexPoly(mask, hull, 255)
             return mask
 
+        def _skin_mask(self, frame_bgr: np.ndarray) -> np.ndarray:
+            ycrcb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2YCrCb)
+            lower = np.array([0, 115, 60], dtype=np.uint8)
+            upper = np.array([255, 190, 145], dtype=np.uint8)
+            return cv2.inRange(ycrcb, lower, upper)
+
+        @staticmethod
+        def _should_use_skin_mask(frame_bgr: np.ndarray) -> bool:
+            """Disable skin mask for low-resolution frames where YCrCb is unreliable."""
+            h, w = frame_bgr.shape[:2]
+            return min(h, w) >= SKIN_MASK_MIN_HEIGHT
+
         def extract_rois(self, frame_bgr: np.ndarray, face: TrackedFace) -> ROISet:
             if not face.found or face.bbox is None:
                 return ROISet(frame_index=face.frame_index, valid=False)
@@ -420,15 +471,29 @@ else:
                 pts[:, 1] = np.clip(pts[:, 1], 0, fh - 1)
                 return pts
 
-            left_pts = poly_from_bbox([(0.12, 0.45), (0.32, 0.4), (0.38, 0.6), (0.18, 0.65)])
-            right_pts = poly_from_bbox([(0.62, 0.45), (0.82, 0.4), (0.78, 0.6), (0.58, 0.65)])
-            forehead_pts = poly_from_bbox([(0.35, 0.12), (0.65, 0.12), (0.65, 0.32), (0.35, 0.32)])
+            # P7: Larger polygons for better skin coverage
+            left_pts = poly_from_bbox([(0.08, 0.4), (0.38, 0.35), (0.45, 0.65), (0.12, 0.7)])
+            right_pts = poly_from_bbox([(0.55, 0.4), (0.92, 0.35), (0.88, 0.65), (0.58, 0.7)])
+            forehead_pts = poly_from_bbox([(0.25, 0.08), (0.75, 0.08), (0.75, 0.38), (0.25, 0.38)])
 
             left_mask = self._polygon_mask((fh, fw), left_pts)
             right_mask = self._polygon_mask((fh, fw), right_pts)
             forehead_mask = self._polygon_mask((fh, fw), forehead_pts)
 
-            valid = any(cv2.countNonZero(m) > 25 for m in (left_mask, right_mask, forehead_mask))
+            # P7: Resolution-aware skin mask
+            use_skin = self.skin_mask_enabled and self._should_use_skin_mask(frame_bgr)
+            if use_skin:
+                sm = self._skin_mask(frame_bgr)
+                left_and = cv2.bitwise_and(left_mask, sm)
+                right_and = cv2.bitwise_and(right_mask, sm)
+                fore_and = cv2.bitwise_and(forehead_mask, sm)
+                # If skin mask removes too many pixels, fall back to original polygon
+                min_px = MIN_VALID_ROI_PIXELS
+                left_mask = left_and if cv2.countNonZero(left_and) >= min_px else left_mask
+                right_mask = right_and if cv2.countNonZero(right_and) >= min_px else right_mask
+                forehead_mask = fore_and if cv2.countNonZero(fore_and) >= min_px else forehead_mask
+
+            valid = any(cv2.countNonZero(m) > MIN_VALID_ROI_PIXELS for m in (left_mask, right_mask, forehead_mask))
 
             return ROISet(
                 frame_index=face.frame_index,

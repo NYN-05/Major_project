@@ -138,6 +138,15 @@ def pos_method(rgb_window: np.ndarray, fs: float, window_sec: float = 1.6) -> np
     return S / weight_sum
 
 
+def green_method(rgb_window: np.ndarray) -> np.ndarray:
+    """
+    GREEN channel only: simple averaging of the green channel.
+    Baseline method for comparison.
+    """
+    rgb_n = _normalize_temporal(rgb_window)
+    return rgb_n[:, 1]  # green channel
+
+
 def extract_pulse_signal(
     rgb_window: np.ndarray,
     fs: float,
@@ -151,15 +160,17 @@ def extract_pulse_signal(
     ----------
     rgb_window : array (T, 3)
     fs         : sampling rate (fps)
-    method     : "POS" or "CHROM"
+    method     : "POS", "CHROM", or "GREEN"
     """
     method = method.upper()
     if method == "POS":
         return pos_method(rgb_window, fs=fs)
     elif method == "CHROM":
         return chrom_method(rgb_window)
+    elif method == "GREEN":
+        return green_method(rgb_window)
     else:
-        raise ValueError(f"Unknown rPPG method '{method}'. Use 'POS' or 'CHROM'.")
+        raise ValueError(f"Unknown rPPG method '{method}'. Use 'POS', 'CHROM', or 'GREEN'.")
 
 
 def combine_roi_signals(

@@ -151,7 +151,7 @@ def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None =
     """rPPG feature extraction. Uses the stage-1 accepted frames when the
     frame layer produced them (input_mode=stage1_frames); otherwise falls
     back to reading the video directly (input_mode=video_direct)."""
-    pipeline = RPPGPipeline(method=method)
+    pipeline = RPPGPipeline(method=method, min_sqi=0.10)
     input_mode = "video_direct"
     if handoff:
         frames_dir = handoff.get("frames_dir", "")

@@ -1,8 +1,8 @@
 """
 retrain_dfdc.py
 ===============
-Retrain the rPPG RandomForest classifier on archive/DFDC_Dataset
-(Fake/ + Real/) end-to-end.
+Retrain the rPPG RandomForest classifier on the DFDC dataset
+(Fake/ + Real/) located at DFDC_DATASET_PATH (set in .env).
 
 Pipeline per batch of videos:
   1. Extract the 10 rPPG features per video (same RPPGPipeline used by
@@ -40,14 +40,15 @@ from sklearn.pipeline import Pipeline
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from quantum.config import get_dfdc_dataset_path  # noqa: E402
 from rppg import RPPGPipeline  # noqa: E402
 from rppg.features import RPPGFeatures  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = REPO_ROOT.parent / "output" / "rppg"
-DATA_ROOT = REPO_ROOT / "archive" / "DFDC_Dataset"
-FAKE_DIR = DATA_ROOT / "Fake"
-REAL_DIR = DATA_ROOT / "Real"
+DFDC_ROOT = get_dfdc_dataset_path()
+FAKE_DIR = DFDC_ROOT / "Fake"
+REAL_DIR = DFDC_ROOT / "Real"
 
 FEATURES_CSV = OUTPUT_DIR / "dataset_features_dfdc.csv"
 MODEL_PATH = OUTPUT_DIR / "rppg_classifier.pkl"
@@ -128,7 +129,7 @@ def train_and_save(rows: list[dict]) -> tuple[int, int]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Retrain rPPG classifier on archive/DFDC_Dataset.")
+    parser = argparse.ArgumentParser(description="Retrain rPPG classifier on DFDC dataset (from DFDC_DATASET_PATH).")
     parser.add_argument("--method", default="POS", choices=["POS", "CHROM"])
     parser.add_argument("--min-usable-frames", type=int, default=48)
     parser.add_argument("--checkpoint-every", type=int, default=10, help="Save model every N processed videos")
@@ -138,7 +139,7 @@ def main() -> None:
 
     videos = collect_videos()
     if not videos:
-        print(f"No videos found under {DATA_ROOT}")
+        print(f"No videos found under {DFDC_ROOT}")
         return
 
     done = set() if args.force else load_done()

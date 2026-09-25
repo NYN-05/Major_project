@@ -85,12 +85,13 @@ class RPPGPipeline:
         self,
         method: str = "POS",
         target_fps: Optional[float] = None,
-        blur_threshold: float = 15.0,
-        brightness_min: int = 25,
-        brightness_max: int = 230,
+        blur_threshold: float = 5.0,
+        brightness_min: int = 20,
+        brightness_max: int = 240,
         low_hz: float = 0.7,
         high_hz: float = 4.0,
         min_usable_frames: int = 48,
+        min_sqi: float = 0.10,
         roi_weights: tuple = (0.35, 0.35, 0.30),  # left cheek, right cheek, forehead
     ):
         """
@@ -101,14 +102,19 @@ class RPPGPipeline:
                               this rate; otherwise the video's native
                               fps is used.
         blur_threshold      : minimum Laplacian variance to keep a frame.
+                              Lowered from 15.0 to 5.0 (P7) for low-res compressed video.
         brightness_min       : minimum mean pixel intensity to keep a frame.
+                              Lowered from 25 to 20 (P7) for darker videos.
         brightness_max       : maximum mean pixel intensity to keep a frame.
+                              Raised from 230 to 240 (P7) for brighter videos.
         low_hz, high_hz      : physiological frequency band (Hz).
         min_usable_frames    : minimum number of usable frames required
-                              to attempt signal extraction (~1.5-2s at
-                              25-30fps).
+                                to attempt signal extraction (~1.5-2s at
+                                25-30fps).
+        min_sqi              : minimum signal quality index to accept a clip
+                                (aligned with training gate in extract_dataset_features.py).
         roi_weights          : weighting for combining left cheek /
-                              right cheek / forehead signals.
+                                right cheek / forehead signals.
         """
         self.method = method
         self.target_fps = target_fps
@@ -118,6 +124,7 @@ class RPPGPipeline:
         self.low_hz = low_hz
         self.high_hz = high_hz
         self.min_usable_frames = min_usable_frames
+        self.min_sqi = min_sqi
         self.roi_weights = roi_weights
 
     # -- frame quality ---------------------------------------------------
@@ -334,6 +341,22 @@ class RPPGPipeline:
         right_clean = clean_signal(right_sig, fs=fps, low_hz=self.low_hz, high_hz=self.high_hz) if right_sig is not None else None
         forehead_clean = clean_signal(forehead_sig, fs=fps, low_hz=self.low_hz, high_hz=self.high_hz) if forehead_sig is not None else None
 
+        # Diagnostic logging: signal quality statistics
+        if combined_clean is not None:
+            # combined_raw is 1D pulse signal, not 2D RGB - check for NaN differently
+            if combined_raw is not None and combined_raw.ndim == 1:
+                valid_ratio = 1.0 - np.isnan(combined_raw).mean()
+            elif combined_raw is not None and combined_raw.ndim == 2:
+                valid_ratio = 1.0 - np.isnan(combined_raw).any(axis=1).mean()
+            else:
+                valid_ratio = 0.0
+            warnings.append(
+                f"Signal diagnostics: fps={fps:.1f}, n_total={n_total}, n_usable={n_usable}, "
+                f"valid_ratio={valid_ratio:.2f}, combined_signal_len={len(combined_clean)}, "
+                f"left_valid={left_sig is not None}, right_valid={right_sig is not None}, "
+                f"forehead_valid={forehead_sig is not None}"
+            )
+
         feats = compute_features(
             combined_signal=combined_clean,
             fs=fps,
@@ -344,11 +367,20 @@ class RPPGPipeline:
             high_hz=self.high_hz,
         )
 
+        # Diagnostic logging: feature quality
         raw_nan_count = getattr(feats, "_raw_nan_count", 0)
-        if raw_nan_count >= 2 or feats.signal_quality_index < 0.10:
+        warnings.append(
+            f"Feature diagnostics: raw_nan_count={raw_nan_count}, "
+            f"SQI={feats.signal_quality_index:.3f}, HR={feats.heart_rate_bpm:.1f}BPM, "
+            f"SNR={feats.snr_db:.1f}dB, PRV={feats.prv_std_ms:.1f}ms, "
+            f"Entropy={feats.spectral_entropy:.3f}, MAD={feats.mad:.3f}"
+        )
+
+        raw_nan_count = getattr(feats, "_raw_nan_count", 0)
+        if raw_nan_count >= 2 or feats.signal_quality_index < self.min_sqi:
             warnings.append(
                 f"Degenerate rPPG signal (non-finite features: {raw_nan_count}, "
-                f"SQI: {feats.signal_quality_index:.2f}); "
+                f"SQI: {feats.signal_quality_index:.2f} < {self.min_sqi:.2f}); "
                 "treating as no-features (INCONCLUSIVE)."
             )
             return RPPGResult(

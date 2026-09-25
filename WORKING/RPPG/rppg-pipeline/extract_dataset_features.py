@@ -2,8 +2,8 @@
 extract_dataset_features.py
 ===========================
 Batch processes the available real and deepfake datasets to extract rPPG
-features. The script now supports the new folder-based DFDC layout at
-archive/DFDC_Dataset/ in addition to the older CSV-based archive (1)/ layout.
+features. The script now supports the DFDC dataset located at the path
+specified by the DFDC_DATASET_PATH environment variable (set in .env).
 
 Outputs a CSV file dataset_features.csv for training the classifier.
 
@@ -35,8 +35,10 @@ import pandas as pd  # noqa: E402
 
 import numpy as np  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from quantum.config import get_dfdc_dataset_path  # noqa: E402
 from rppg import RPPGPipeline  # noqa: E402
 from rppg.face_roi import FaceROIExtractor  # noqa: E402
 
@@ -319,13 +321,12 @@ def _cap_per_class(groups: List[list], max_per_class: Optional[int]) -> None:
 
 
 def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = False) -> List[Tuple[int, Path, str]]:
-    root = _repo_root()
     samples: List[Tuple[int, Path, str]] = []
 
-    new_dataset_root = root / "archive" / "DFDC_Dataset"
-    if new_dataset_root.exists():
-        fake_dir = new_dataset_root / "Fake"
-        real_dir = new_dataset_root / "Real"
+    dfdc_root = get_dfdc_dataset_path()
+    if dfdc_root.exists():
+        fake_dir = dfdc_root / "Fake"
+        real_dir = dfdc_root / "Real"
 
         fake_files = list(_iter_video_files(fake_dir)) if fake_dir.exists() else []
         real_files = list(_iter_video_files(real_dir)) if real_dir.exists() else []
@@ -334,9 +335,9 @@ def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = Fa
             _cap_per_class([fake_files, real_files], max_per_class)
 
             for path in fake_files:
-                _add_sample(samples, 1, path, "archive/DFDC_Dataset/Fake")
+                _add_sample(samples, 1, path, "DFDC_Dataset/Fake")
             for path in real_files:
-                _add_sample(samples, 0, path, "archive/DFDC_Dataset/Real")
+                _add_sample(samples, 0, path, "DFDC_Dataset/Real")
 
     if include_ffpp:
         # FF++ (FaceForensics++): FF-synthesis clips are fully re-rendered
@@ -361,7 +362,7 @@ def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = Fa
                 for path in real_files:
                     _add_sample(samples, 0, path, f"FF++/{split}/FF-real")
 
-    legacy_root = root / "archive (1)"
+    legacy_root = _repo_root().parent / "archive (1)"
     legacy_csv = legacy_root / "DeepFake Videos Dataset.csv"
     if legacy_csv.exists():
         legacy_df = pd.read_csv(legacy_csv)
@@ -404,7 +405,7 @@ def main() -> None:
 
     samples = collect_samples(max_per_class=args.max_per_class, include_ffpp=args.include_ffpp)
     if not samples:
-        print("No dataset videos were found. Check archive/DFDC_Dataset or archive (1).")
+        print("No dataset videos were found. Check DFDC_DATASET_PATH in .env or archive (1).")
         return
 
     root = _repo_root()

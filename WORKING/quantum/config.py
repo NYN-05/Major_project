@@ -1,10 +1,33 @@
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 LABEL_REAL = 1
 LABEL_FAKE = 0
 
-# Feature contract: the raw 29-feature vector produced by the rPPG layer
+
+def get_dfdc_dataset_path() -> Path:
+    """Get DFDC dataset path from DFDC_DATASET_PATH environment variable.
+
+    Raises:
+        RuntimeError: If DFDC_DATASET_PATH is not set or the path does not exist.
+    """
+    env_path = os.environ.get("DFDC_DATASET_PATH")
+    if not env_path:
+        raise RuntimeError(
+            "DFDC_DATASET_PATH environment variable is not set. "
+            "Set it in .env or export it before running. "
+            "Example: DFDC_DATASET_PATH=C:\\\\path\\\\to\\\\DFDC_Dataset"
+        )
+    path = Path(env_path)
+    if not path.exists():
+        raise RuntimeError(
+            f"DFDC dataset path does not exist: {path}. "
+            f"Check DFDC_DATASET_PATH in .env"
+        )
+    return path
+
+# Feature contract: the raw 23-feature vector produced by the rPPG layer
 # (same names/order as RPPGFeatures.feature_names() in RPPG/rppg/features.py).
 FEATURE_NAMES = [
     "heart_rate_bpm",
@@ -23,19 +46,13 @@ FEATURE_NAMES = [
     "signal_to_motion_ratio",
     "peak_amplitude_variability",
     "pulse_transit_time_proxy",
-    "hr_window_std",
-    "sqi_window_std",
-    "entropy_window_std",
-    "max_hr_deviation_bpm",
-    # New probe features (Phase 4 upstream improvement)
+    # Probe features (Phase 4 upstream improvement)
     "spectral_flatness",
     "spectral_centroid",
     "kurtosis",
     "phase_coherence_lr",
     "phase_coherence_cf",
     "pulse_cv_interval",
-    "hr_window_jitter",
-    "snr_window_jitter",
     "zero_crossing_rate",
 ]
 
@@ -56,19 +73,13 @@ FEATURE_MEANINGS = {
     "signal_to_motion_ratio": "Log ratio of physiological-band to motion-band spectral power (dB)",
     "peak_amplitude_variability": "Coefficient of variation of systolic peak amplitudes",
     "pulse_transit_time_proxy": "Inter-ROI propagation delay (ms) as a pulse transit time proxy",
-    "hr_window_std": "Std of per-window heart rate estimates (BPM) - pulse stability across the clip",
-    "sqi_window_std": "Std of per-window signal quality index - pulse-quality stability",
-    "entropy_window_std": "Std of per-window spectral entropy - spectral stability",
-    "max_hr_deviation_bpm": "Max per-window HR deviation from the median HR (BPM)",
-    # New probe features (Phase 4)
+    # Probe features (Phase 4)
     "spectral_flatness": "Geometric/arithmetic mean ratio of in-band PSD (flat=1, tonal<1)",
     "spectral_centroid": "Center of mass of in-band power spectrum (Hz)",
     "kurtosis": "Fisher kurtosis of time-domain pulse waveform (heavy-tailed=artifacts)",
     "phase_coherence_lr": "Phase coherence std between left/right cheek signals (lower=more coherent)",
     "phase_coherence_cf": "Phase coherence std between forehead/cheek signals (lower=more coherent)",
     "pulse_cv_interval": "Coefficient of variation of inter-beat intervals (regular=low CV)",
-    "hr_window_jitter": "Std of per-window HR estimates (BPM) - BEST discriminator (AUC~0.82)",
-    "snr_window_jitter": "Std of per-window SNR estimates (dB) - SNR stability",
     "zero_crossing_rate": "Zero-crossing rate of pulse waveform (high=noise/artifacts)",
 }
 
@@ -119,7 +130,7 @@ class VQCConfig:
     batch_size: int = 256
     learning_rate: float = 5e-2
     weight_decay: float = 1e-2
-    alpha: float = 0.5
+    alpha: float = 0.45
     gamma: float = 1.0
     label_smoothing: float = 0.03
     confidence_penalty: float = 0.0

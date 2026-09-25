@@ -84,23 +84,31 @@ def bandpass_filter(
     elevated heart rates while rejecting baseline drift and
     high-frequency camera/compression noise.
 
-    For short signals, uses reduced padlen to minimize edge distortion.
+    For short signals, uses reduced padlen and lower filter order
+    to minimize edge distortion.
     """
     trace = np.asarray(trace, dtype=np.float64)
+    n = len(trace)
     nyq = fs / 2.0
     low = max(low_hz / nyq, 1e-4)
     high = min(high_hz / nyq, 0.999)
     if low >= high:
         raise ValueError("Invalid filter band for given sampling rate.")
 
+    # Adaptive filter order: lower order for short signals to reduce
+    # edge effects and ringing
+    if n < 100:
+        order = 2
+    elif n < 200:
+        order = 3
+
     b, a = _bandpass_coefficients(order, fs, low, high)
-    # Reduced padlen for short signals: default scipy is 3*(order+1),
-    # but we use min(3*(order+1), len(trace)//4) to limit edge distortion
-    # to at most 25% of signal at each edge.
+    # Conservative padlen for short signals: limit to 10% of signal at each edge
+    # to minimize edge distortion while preserving zero-phase property.
     default_padlen = 3 * max(len(a), len(b))
-    padlen = min(default_padlen, len(trace) // 4)
-    if len(trace) <= padlen:
-        # Too short to filtfilt safely; fall back to lfilter.
+    padlen = min(default_padlen, max(3, n // 10))
+    if n <= padlen * 2:
+        # Too short for safe filtfilt; fall back to lfilter with lower order.
         return signal.lfilter(b, a, trace)
     return signal.filtfilt(b, a, trace, padlen=padlen)
 

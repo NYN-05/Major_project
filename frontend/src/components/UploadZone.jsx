@@ -86,7 +86,7 @@ export default function UploadZone({ phase, onFile }) {
 
       <p className="upload-hint">or drag and drop a video here</p>
       <p className="upload-fmts mono">
-        MP4 · AVI · MOV <span className="upload-fmts-dot" /> sampled at ~10 fps during analysis · max 200 MB
+        MP4 · AVI · MOV <span className="upload-fmts-dot" /> sampled at 30 fps during analysis · max 200 MB
       </p>
     </motion.section>
   );

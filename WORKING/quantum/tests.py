@@ -23,7 +23,7 @@ if WORKING_ROOT not in sys.path:
 
 import numpy as np
 
-from quantum.config import FEATURE_NAMES, DataConfig, QAOASelectionConfig
+from quantum.config import FEATURE_NAMES, DataConfig, QAOASelectionConfig, get_dfdc_dataset_path
 from quantum.data import SPLITS
 from quantum.qaoa import (
     _classical_cost,
@@ -181,7 +181,15 @@ def test_ffpp_source_subject_grouping():
     real = {"video_path": r"FF++\train\FF-real\id0_0000.mp4"}
     synth = {"video_path": r"FF++\train\FF-synthesis\id0_id16_0002.mp4"}
     yt = {"video_path": r"FF++\train\YouTube-real\00000.mp4"}
-    dfdc = {"video_path": r"archive\DFDC_Dataset\Fake\aaaoqepxnf.mp4"}
+
+    # Dynamically locate a DFDC fake video from the configured dataset path
+    dfdc_root = get_dfdc_dataset_path()
+    fake_dir = dfdc_root / "Fake"
+    fake_files = list(fake_dir.rglob("*.mp4")) if fake_dir.exists() else []
+    if not fake_files:
+        raise AssertionError(f"No fake videos found in DFDC dataset at {fake_dir}")
+    dfdc = {"video_path": str(fake_files[0])}
+
     assert _infer_subject_key(real) == _infer_subject_key(synth) == "ffpp:src:id0"
     assert _infer_subject_key(yt) == "ffpp:yt:00000"
     assert _infer_subject_key(dfdc) == "clip:" + dfdc["video_path"].replace("\\", "/").lower()
