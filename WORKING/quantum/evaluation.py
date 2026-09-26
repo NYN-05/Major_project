@@ -179,22 +179,37 @@ def _enough_for_cv(y, n_splits=5):
 
 def decision_bins(y_true, prob_real, cfg=None):
     cfg = cfg or DecisionConfig()
-    fake = prob_real <= cfg.fake_max_prob
-    real = prob_real >= cfg.real_min_prob
-    uncertain = ~(fake | real)
-    confirmed_accuracy = None
-    if (fake | real).any():
-        predictions = (prob_real >= 0.5).astype(int)
-        confirmed_accuracy = float(
-            _sklearn()["accuracy_score"](y_true[fake | real], predictions[fake | real])
-        )
+    threshold = cfg.decision_threshold
+    real = prob_real >= threshold
+    fake = prob_real < threshold
     return {
         "real": int(real.sum()),
-        "uncertain": int(uncertain.sum()),
         "fake": int(fake.sum()),
-        "uncertain_rate": float(uncertain.mean()),
-        "confirmed_accuracy": confirmed_accuracy,
+        "threshold": float(threshold),
     }
+
+
+def optimal_threshold_youden(y_true, prob_real):
+    """Compute optimal threshold using Youden's J statistic (max sensitivity + specificity - 1).
+    
+    Returns the threshold that maximizes J = sensitivity + specificity - 1.
+    """
+    thresholds = np.unique(prob_real)
+    best_j = -1.0
+    best_t = 0.5
+    for t in thresholds:
+        pred = (prob_real >= t).astype(int)
+        tp = int(((pred == 1) & (y_true == 1)).sum())
+        tn = int(((pred == 0) & (y_true == 0)).sum())
+        fp = int(((pred == 1) & (y_true == 0)).sum())
+        fn = int(((pred == 0) & (y_true == 1)).sum())
+        sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        j = sensitivity + specificity - 1
+        if j > best_j:
+            best_j = j
+            best_t = float(t)
+    return best_t
 
 
 def analyze_threshold_behavior(y_true, prob_real, cfg=None):
@@ -293,10 +308,18 @@ def evaluate_quantum_model(
     decision_cfg = decision_cfg or DecisionConfig()
     model = load_vqc_model(X_test.shape[1], vqc_cfg)
     prob_real = predict_vqc(model, X_test)
+
+    # Load optimal threshold from checkpoint metadata
+    import torch
+    ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=False)
+    opt_threshold = ckpt.get("metadata", {}).get("decision_threshold", decision_cfg.decision_threshold)
+    from dataclasses import replace
+    decision_cfg_opt = replace(decision_cfg, decision_threshold=opt_threshold)
+
     payload = {
         "metrics": classification_metrics(y_test, prob_real),
         "balanced_accuracy": balanced_accuracy(y_test, prob_real),
-        "decision_bins": decision_bins(y_test, prob_real, decision_cfg),
+        "decision_bins": decision_bins(y_test, prob_real, decision_cfg_opt),
     }
 
     # Cross-validation of the training procedure on the train split (the

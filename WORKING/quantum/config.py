@@ -105,12 +105,12 @@ class DataConfig:
 @dataclass(frozen=True)
 class QAOASelectionConfig:
     p_layers: int = 3
-    max_iter: int = 200
+    max_iter: int = 500
     redundancy_penalty: float = 0.3
     cardinality_penalty: float = 0.5
     target_features: int = 3
     seed: int = 42
-    restarts: int = 4
+    restarts: int = 8
     n_jobs: int = 0
     # Simulator backend: "auto" uses the torch-native statevector sim
     # (fast, float64 complex128; see qaoa_sim.QAOASimulator); "torch"
@@ -157,8 +157,7 @@ class VQCConfig:
 
 @dataclass(frozen=True)
 class DecisionConfig:
-    fake_max_prob: float = 0.3
-    real_min_prob: float = 0.7
+    decision_threshold: float = 0.5
     metrics_baseline_file: Path = field(default_factory=lambda: OUTPUT_DIR / "metrics_baselines.json")
     roc_plot: Path = field(default_factory=lambda: OUTPUT_DIR / "roc_curve.png")
     confusion_plot: Path = field(default_factory=lambda: OUTPUT_DIR / "confusion_matrix.png")

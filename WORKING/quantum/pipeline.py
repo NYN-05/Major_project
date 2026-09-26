@@ -1,5 +1,6 @@
 import argparse
 import json
+import torch
 from dataclasses import asdict
 
 import numpy as np
@@ -89,15 +90,16 @@ def predict_features(features):
             f"({len(indices)} features): {type(exc).__name__}: {exc}. "
             "Rerun `python -m quantum.pipeline --all` from WORKING/."
         ) from exc
+
+    # Load optimal threshold from checkpoint metadata
+    ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=False)
+    opt_threshold = ckpt.get("metadata", {}).get("decision_threshold", DecisionConfig().decision_threshold)
     prob_real = float(predict_vqc(model, x_scaled[:, indices])[0])
 
-    decision_cfg = DecisionConfig()
-    if prob_real >= decision_cfg.real_min_prob:
+    if prob_real >= opt_threshold:
         verdict = "REAL"
-    elif prob_real <= decision_cfg.fake_max_prob:
-        verdict = "FAKE"
     else:
-        verdict = "UNCERTAIN"
+        verdict = "FAKE"
     return {
         "prob_real": prob_real,
         "verdict": verdict,
@@ -105,6 +107,7 @@ def predict_features(features):
         "selected_features": selection["selected_features"],
         "selected_indices": indices,
         "scaler_file": str(SCALER_FILE),
+        "decision_threshold": opt_threshold,
     }
 
 
@@ -238,6 +241,20 @@ def main():
             },
         )
         print(f"  Checkpoint (with metadata): {vqc_cfg.checkpoint_file}")
+
+    # Compute and save optimal threshold using Youden's J on validation set
+    if args.train or args.all:
+        print("  Computing optimal threshold (Youden's J) on validation set...")
+        from quantum.evaluation import optimal_threshold_youden
+        val_probs = predict_vqc(load_vqc_model(len(indices)), X_val[:, indices])
+        opt_threshold = optimal_threshold_youden(data["y_val"].astype(int), val_probs)
+        print(f"    Optimal threshold: {opt_threshold:.6f}")
+        # Update checkpoint metadata with optimal threshold
+        ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=False)
+        if isinstance(ckpt, dict) and "metadata" in ckpt:
+            ckpt["metadata"]["decision_threshold"] = float(opt_threshold)
+            torch.save(ckpt, vqc_cfg.checkpoint_file)
+            print(f"    Saved optimal threshold to checkpoint")
 
     if args.evaluate or args.all:
         eval_X = X_val[:, indices] if dev_only else X_test[:, indices]

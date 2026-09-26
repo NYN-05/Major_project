@@ -383,9 +383,18 @@ def section_live_recompute(report):
 
     model = load_vqc_model(n_feat, vqc_cfg)
     prob_real = predict_vqc(model, X_test_sel)
+
+    # Load optimal threshold from checkpoint metadata
+    import torch
+    ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=False)
+    opt_threshold = ckpt.get("metadata", {}).get("decision_threshold", dec_cfg.decision_threshold)
+    # Create a temporary decision config with the optimal threshold
+    from dataclasses import replace
+    dec_cfg_opt = replace(dec_cfg, decision_threshold=opt_threshold)
+
     m = classification_metrics(y_test, prob_real)
-    db = decision_bins(y_test, prob_real, dec_cfg)
-    ta = analyze_threshold_behavior(y_test, prob_real, dec_cfg)
+    db = decision_bins(y_test, prob_real, dec_cfg_opt)
+    ta = analyze_threshold_behavior(y_test, prob_real, dec_cfg_opt)
     ba = balanced_accuracy(y_test, prob_real)
     ece = expected_calibration_error(y_test, prob_real)
 
