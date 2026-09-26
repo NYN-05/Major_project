@@ -115,3 +115,42 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
 Run: `python -m quantum.pipeline --all` (or `--build-data --select --train`) and `python run_pipeline.py --source <video> --method POS` from `WORKING/`. From `frontend/`: `python server.py` + `npm run dev`.
 
 `Docs/projec_audit.md` is gone (deleted with the other pre-2026-08 docs). The current remediation roadmap lives in `Docs/DEEPFAKE_KYC_SEQUENTIAL_REMEDIATION_PLAN.md` (24 severity-ordered phases; 1A–1C status in the Verification section); `Docs/Key_Findings_Contributions_Significance.md` is the honest findings/contributions write-up; `Docs/problems.md` is the ranked problem analysis.
+
+## Agent Skills (OpenCode)
+
+This project uses skills installed under `~/.config/opencode/skills/`.
+
+### Core Rules
+- If a task matches a skill, invoke it with the `skill` tool before acting.
+- Skills are located in `~/.config/opencode/skills/<skill-name>/SKILL.md`.
+- Follow the skill workflow strictly; do not partially apply it.
+- Never skip required steps such as spec, plan, or test when a skill demands them.
+
+### Intent → Skill Mapping
+| User Intent | Primary Skill | Follow-up Skills |
+|-------------|---------------|------------------|
+| "Build a feature" / "Add X" | `spec-driven-development` | `incremental-implementation`, `test-driven-development` |
+| "Plan this work" / "Break it down" | `planning-and-task-breakdown` | — |
+| "Fix this bug" / "It's broken" | `debugging-and-error-recovery` | `test-driven-development` |
+| "Review this PR" / "Check my code" | `code-review-and-quality` | — |
+| "Simplify this" / "Refactor" | `code-simplification` | `test-driven-development` |
+| "Design an API" / "Define interface" | `api-and-interface-design` | `spec-driven-development` |
+| "Build UI" / "Fix the frontend" | `frontend-ui-engineering` | `test-driven-development` |
+| "Improve performance" | `performance-optimization` | `observability-and-instrumentation` |
+| "Secure this" / "Audit security" | `security-and-hardening` | — |
+| "Set up CI/CD" | `ci-cd-and-automation` | `git-workflow-and-versioning` |
+| "Write docs / ADR" | `documentation-and-adrs` | — |
+| "Ship / deploy" | `shipping-and-launch` | — |
+
+### Execution Model
+For every request:
+1. Determine if any skill applies (even a small chance).
+2. Load the skill with `skill({ name: "<skill-name>" })`.
+3. Follow the skill workflow exactly.
+4. Only proceed to implementation once required steps are complete.
+
+### Project-Specific Overrides
+- **Test framework:** Python `unittest`/`assert` (no pytest), Vitest + React Testing Library for frontend
+- **Lint:** Python `ruff` (if configured), eslint + prettier for frontend
+- **Git:** trunk-based, conventional commits
+- **Definition of Done:** See `~/.config/opencode/references/definition-of-done.md`
