@@ -13,6 +13,8 @@ from quantum.config import (
     QAOASelectionConfig,
     VQCConfig,
 )
+
+_vqc_cfg = VQCConfig()
 from quantum.data import build_dataset, load_dataset
 from quantum.evaluation import evaluate_quantum_model, run_baselines
 from quantum.scaling import FeatureScaler, SCALER_FILE
@@ -92,7 +94,7 @@ def predict_features(features):
         ) from exc
 
     # Load optimal threshold from checkpoint metadata
-    ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=False)
+    ckpt = torch.load(_vqc_cfg.checkpoint_file, map_location="cpu", weights_only=False)
     opt_threshold = ckpt.get("metadata", {}).get("decision_threshold", DecisionConfig().decision_threshold)
     prob_real = float(predict_vqc(model, x_scaled[:, indices])[0])
 

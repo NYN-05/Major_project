@@ -29,7 +29,6 @@ output/hybrid_vqc.pt). If missing, run once from this folder:
 
 import argparse
 import json
-import pickle
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -55,7 +54,6 @@ from rppg import RPPGPipeline  # stage 2
 # SSE client immediately instead of blocking on the heavy import stack.
 
 FRAME_WEIGHTS = FRAME_ROOT / "weights" / "yolov8n-face-lindevs.pt"
-RPPG_CLASSIFIER = RPPG_OUTPUT / "rppg_classifier.pkl"
 
 VERDICT_INCONCLUSIVE = "INCONCLUSIVE"
 
@@ -184,35 +182,6 @@ def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None =
     return payload, result.to_feature_vector(), result
 
 
-def rppg_classifier_crosscheck(vector: np.ndarray) -> dict:
-    """Cross-check via the trained rPPG RandomForest (label 1 = DEEPFAKE,
-    opposite of the quantum stage where LABEL_REAL=1)."""
-    if not RPPG_CLASSIFIER.exists():
-        return {"skipped": "rppg_classifier.pkl not found"}
-    try:
-        with open(RPPG_CLASSIFIER, "rb") as fh:
-            clf = pickle.load(fh)
-    except (pickle.UnpicklingError, AttributeError, ImportError, ModuleNotFoundError) as exc:
-        return {"skipped": f"rppg_classifier.pkl could not be loaded: {exc}"}
-    x = vector.reshape(1, -1)
-    n_features = getattr(clf, "n_features_in_", 0)
-    classes = getattr(clf, "classes_", None)
-    n_classes = 0 if classes is None else len(classes)
-    if n_features != 20 or n_classes != 2:
-        return {
-            "skipped": "rppg_classifier.pkl incompatible "
-            f"(n_features={n_features}, classes={n_classes}); expected 20 features, 2 classes",
-        }
-    try:
-        proba = clf.predict_proba(x)[0]
-        pred = int(clf.predict(x)[0])
-    except Exception as exc:
-        return {"skipped": f"rppg_classifier.pkl prediction failed: {type(exc).__name__}: {exc}"}
-    if pred == 1:
-        return {"verdict": "DEEPFAKE", "probability": float(proba[1])}
-    return {"verdict": "REAL", "probability": float(proba[0])}
-
-
 # ---------------------------------------------------------------------------
 # Stage 4: quantum
 # ---------------------------------------------------------------------------
@@ -309,7 +278,6 @@ def main() -> int:
         f"usable = {rppg_stage['n_frames_usable']}/{rppg_stage['n_frames_total']} "
         f"HR = {rppg_stage['features']['heart_rate_bpm']:.1f} BPM"
     )
-    result["stages"]["rppg_crosscheck"] = rppg_classifier_crosscheck(vector)
 
     print("[3/3] QUANTUM stage : rPPG features -> QAOA subset -> hybrid VQC")
     quantum = quantum_inference(rppg_stage["features"])

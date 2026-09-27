@@ -199,6 +199,8 @@ def _run_job(job: dict, video_path: Path) -> None:
                 f"pipeline exceeded the {JOB_RUN_TIMEOUT_SECONDS // 60}-minute timeout"
             )
         reader.join(timeout=5)
+        if proc.returncode != 0:
+            raise RuntimeError(f"pipeline exited with code {proc.returncode}")
         if not out_json.exists():
             raise RuntimeError("pipeline produced no result JSON")
         result = json.loads(out_json.read_text(encoding="utf-8"))

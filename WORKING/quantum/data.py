@@ -7,6 +7,11 @@ convention (CSV: 1 = deepfake, 0 = real; quantum: LABEL_REAL = 1,
 LABEL_FAKE = 0), and stores a subject-grouped train/val/test split as
 data.npz for QAOA selection, VQC training, and evaluation.
 
+Supports multiple feature configurations:
+- rPPG only (original 23 features)
+- Visual only (39 features)
+- Fused (rPPG + Visual = 62 features)
+
 Subject grouping: the CSV carries no explicit subject IDs, so the
 group key is derived from the clip path. FF++ clips are grouped by
 source subject so a real clip and its synthesized counterpart can
@@ -29,7 +34,10 @@ import numpy as np
 
 from quantum.config import (
     DataConfig,
-    FEATURE_NAMES,
+    FEATURE_NAMES,  # alias for RPPG_FEATURE_NAMES
+    RPPG_FEATURE_NAMES,
+    VISUAL_FEATURE_NAMES,
+    FUSED_FEATURE_NAMES,
     LABEL_FAKE,
     LABEL_REAL,
     OUTPUT_DIR,
@@ -40,6 +48,13 @@ LABEL_REAL = 1  # quantum convention: 1 = real
 LABEL_FAKE = 0  # quantum convention: 0 = fake
 
 SPLITS = ("train", "val", "test")
+
+# Feature set configurations
+FEATURE_SETS = {
+    "rppg_only": RPPG_FEATURE_NAMES,
+    "visual_only": VISUAL_FEATURE_NAMES,
+    "fused": FUSED_FEATURE_NAMES,
+}
 
 def csv_to_quantum_label(csv_label):
     """Convert rPPG CSV label to quantum convention.
@@ -120,10 +135,10 @@ def _infer_split_key(row):
     return None
 
 
-def _load_rppg_rows(csv_file, cfg=None):
-    """Load the real rPPG feature table.
+def _load_feature_rows(csv_file, feature_names, cfg=None):
+    """Load a feature table with the specified feature names.
 
-    Returns X (n x len(FEATURE_NAMES), FEATURE_NAMES order), y (quantum convention:
+    Returns X (n x len(feature_names), feature_names order), y (quantum convention:
     1 = real, 0 = fake), subject groups, video paths, and a dict of
     filtering stats. When cfg.filter_implausible is set, rows with a
     heart rate outside [hr_min, hr_max] or with non-finite feature
@@ -131,22 +146,21 @@ def _load_rppg_rows(csv_file, cfg=None):
     """
     if not csv_file.exists():
         raise FileNotFoundError(
-            f"rPPG features file not found at {csv_file}. Extract it with the rPPG "
-            "pipeline first (see RPPG/rppg-pipeline/extract_dataset_features.py)."
+            f"Feature file not found at {csv_file}."
         )
     with open(csv_file, newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     if not rows:
         raise ValueError(f"No labelled samples found in {csv_file}")
-    missing = [name for name in FEATURE_NAMES if name not in rows[0]]
+    missing = [name for name in feature_names if name not in rows[0]]
     if missing:
-        raise ValueError(f"{csv_file} is missing rPPG columns: {missing}")
+        raise ValueError(f"{csv_file} is missing columns: {missing}")
 
     filter_stats = {"total": len(rows), "dropped_hr": 0, "dropped_invalid": 0}
     keep = []
     for row in rows:
         try:
-            values = [float(row[name]) for name in FEATURE_NAMES]
+            values = [float(row[name]) for name in feature_names]
         except (TypeError, ValueError):
             keep.append(None)
             continue
@@ -154,11 +168,13 @@ def _load_rppg_rows(csv_file, cfg=None):
             filter_stats["dropped_invalid"] += 1
             keep.append(None)
             continue
-        hr = values[FEATURE_NAMES.index("heart_rate_bpm")]
-        if cfg is not None and cfg.filter_implausible and not (cfg.hr_min <= hr <= cfg.hr_max):
-            filter_stats["dropped_hr"] += 1
-            keep.append(None)
-            continue
+        # Only apply HR filter if heart_rate_bpm is in feature set
+        if "heart_rate_bpm" in feature_names:
+            hr = values[feature_names.index("heart_rate_bpm")]
+            if cfg is not None and cfg.filter_implausible and not (cfg.hr_min <= hr <= cfg.hr_max):
+                filter_stats["dropped_hr"] += 1
+                keep.append(None)
+                continue
         keep.append(row)
 
     kept_rows = [row for row in keep if row is not None]
@@ -167,16 +183,21 @@ def _load_rppg_rows(csv_file, cfg=None):
         raise ValueError(f"No labelled samples survived filtering in {csv_file}")
 
     X = np.asarray(
-        [[float(row[name]) for name in FEATURE_NAMES] for row in kept_rows], dtype=np.float32
+        [[float(row[name]) for name in feature_names] for row in kept_rows], dtype=np.float32
     )
     labels = np.asarray([int(round(float(row["label"]))) for row in kept_rows], dtype=np.int64)
     if set(labels.tolist()) - {0, 1}:
-        raise ValueError("rPPG labels must be 0 (real) or 1 (fake)")
+        raise ValueError("Labels must be 0 (real) or 1 (fake)")
     y = np.where(labels == RPPG_LABEL_FAKE, LABEL_FAKE, LABEL_REAL).astype(np.int64)
     groups = np.asarray([_infer_subject_key(row) for row in kept_rows], dtype=object)
     paths = np.asarray([row["video_path"].strip() for row in kept_rows], dtype=object)
     split_keys = np.asarray([_infer_split_key(row) for row in kept_rows], dtype=object)
     return X, y, groups, paths, split_keys, filter_stats
+
+
+def _load_rppg_rows(csv_file, cfg=None):
+    """Backward compatibility: load rPPG features only."""
+    return _load_feature_rows(csv_file, RPPG_FEATURE_NAMES, cfg)
 
 
 def _grouped_train_val_test_split(X, y, groups, paths, cfg):
