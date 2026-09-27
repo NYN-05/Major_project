@@ -29,15 +29,7 @@ export default function App() {
   const elapsedRef = useRef(0);
   elapsedRef.current = elapsed;
 
-  useEffect(() => {
-    previous().then(({ result: prev }) => {
-      if (prev) {
-        setResult(prev);
-        setVideoName(prev.video?.name ?? prev.video);
-        setPhase("done");
-      }
-    });
-  }, []);
+  
 
   const reset = () => {
     setPhase("idle");
