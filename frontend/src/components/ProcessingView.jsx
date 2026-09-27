@@ -44,8 +44,7 @@ function Timeline({ active, done }) {
 export default function ProcessingView({ stageIdx, elapsed, videoName, lines }) {
   const active = Math.min(stageActive(stageIdx), 6);
   const status = humanStatus(lines);
-  const target = stageIdx === 0 ? 0 : stageIdx / 3;
-  const pct = Math.round(target * 100);
+  const pct = Math.round((active / 6) * 100);
 
   return (
     <motion.section
