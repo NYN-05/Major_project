@@ -67,7 +67,7 @@ export default function UploadZone({ phase, onFile }) {
       </motion.h2>
       <p className="upload-sub">
         {isError
-          ? "The analysis server hit an error on the last run. Try again, or check the server console."
+          ? "We couldn't analyze this video. Please try again, or choose a different file."
           : "Upload a short selfie-style or KYC video. The system measures the subtle pulse of the face — then a hybrid quantum classifier issues the verdict."}
       </p>
 

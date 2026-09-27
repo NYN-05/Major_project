@@ -2,8 +2,6 @@ import { motion } from "motion/react";
 import { Check, Clock, Loader2 } from "lucide-react";
 import { humanStatus, fmtClock, PIPELINE, stageActive } from "../lib.js";
 
-const STAGE_NAMES = ["Preparing", "Frames", "Face detection", "rPPG signal", "Features", "Quantum", "Deciding"];
-
 function Timeline({ active, done }) {
   return (
     <ol className="timeline" aria-label="verification pipeline (7 steps)">
@@ -33,7 +31,7 @@ function Timeline({ active, done }) {
               )}
             </span>
             <p className="ts-title">{title}</p>
-            <p className="ts-sub">{i <= active ? "…" : "waiting"}</p>
+            <p className="ts-sub">{i < active ? "done" : i === active ? "processing" : "waiting"}</p>
           </motion.li>
         );
       })}
@@ -44,7 +42,8 @@ function Timeline({ active, done }) {
 export default function ProcessingView({ stageIdx, elapsed, videoName, lines }) {
   const active = Math.min(stageActive(stageIdx), 6);
   const status = humanStatus(lines);
-  const pct = Math.round((active / 6) * 100);
+  // single source of truth: text, bar width and aria all read this value
+  const pct = Math.round((active / 7) * 100);
 
   return (
     <motion.section
@@ -73,7 +72,7 @@ export default function ProcessingView({ stageIdx, elapsed, videoName, lines }) 
       <div className="progress-block">
         <div className="pb-row">
           <span className="pb-status">
-            Stage {active + 1} of 7 — <strong>{STAGE_NAMES[active]}</strong> · {status}
+            Stage {active + 1} of 7 — <strong>{PIPELINE[active].title}</strong> · {status}
           </span>
           <span className="pb-percent mono">{pct}%</span>
         </div>
@@ -86,10 +85,10 @@ export default function ProcessingView({ stageIdx, elapsed, videoName, lines }) 
           aria-valuemax={100}
         >
           <motion.span
-            className={`pb-fill${stageIdx === 0 ? " indet" : ""}`}
+            className="pb-fill"
             initial={false}
-            animate={{ scaleX: stageIdx === 0 ? undefined : pct / 100 }}
-            style={stageIdx === 0 ? undefined : { transform: `scaleX(${pct / 100})` }}
+            animate={{ scaleX: pct / 100 }}
+            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
           />
         </div>
       </div>

@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { motion } from "motion/react";
-import { AlertTriangle } from "lucide-react";
 import { detect, fileUrl, previous, stream } from "./api.js";
 import { useElapsed, useSignalFile, useTheme } from "./hooks.js";
 import Header from "./components/Header.jsx";
@@ -21,7 +19,6 @@ export default function App() {
   const [stageIdx, setStageIdx] = useState(0);
   const [videoName, setVideoName] = useState(null);
   const [lastElapsed, setLastElapsed] = useState(null);
-  const [runError, setRunError] = useState(null);
   const [lines, setLines] = useState([]);
   const [signalRel, setSignalRel] = useState(null);
   const [theme, setTheme] = useTheme();
@@ -39,13 +36,11 @@ export default function App() {
     setStageIdx(0);
     setVideoName(null);
     setLastElapsed(null);
-    setRunError(null);
     setLines([]);
     setSignalRel(null);
   };
 
   const pickFile = (f) => {
-    setRunError(null);
     setFile(f);
     setSignalRel(null);
     const meta = { name: f.name, size: f.size, duration: null, width: null, height: null };
@@ -78,7 +73,6 @@ export default function App() {
     setStageIdx(0);
     setVideoName(file.name);
     setLastElapsed(null);
-    setRunError(null);
     setLines([]);
     setSignalRel(null);
     detect(file)
@@ -96,16 +90,10 @@ export default function App() {
             setPhase("done");
             setLastElapsed(elapsedRef.current);
           },
-          error: (msg) => {
-            setRunError(msg);
-            setPhase("error");
-          },
+          error: () => setPhase("error"),
         });
       })
-      .catch((err) => {
-        setRunError(String(err));
-        setPhase("error");
-      });
+      .catch(() => setPhase("error"));
   }, [file]);
 
   const signalRel2 = result?._signal ?? signalRel;
@@ -116,18 +104,6 @@ export default function App() {
       <Header theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} />
 
       <main>
-        {phase === "error" && (
-          <motion.div
-            className="error-banner"
-            role="alert"
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <AlertTriangle size={15} aria-hidden="true" />
-            <span>{runError}</span>
-          </motion.div>
-        )}
-
         {phase === "selected" ? (
           <VideoSelected
             file={file}

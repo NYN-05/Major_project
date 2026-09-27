@@ -45,8 +45,9 @@ export const PIPELINE = [
   { title: "Final decision", sub: "Issuing the verification verdict", icon: ShieldCheck },
 ];
 
-/* backend reports 3 run stages → map onto the 7-step pipeline */
-export const stageActive = (idx) => (idx === 1 ? 3 : idx === 2 ? 5 : idx === 0 ? 0 : 7);
+/* backend [N/3] tags print at stage START → map onto the first in-progress
+   step of the 7-step pipeline (frames runs steps 1-2, rPPG runs 3-4) */
+export const stageActive = (idx) => (idx <= 0 ? 0 : idx === 1 ? 1 : idx === 2 ? 3 : 5);
 
 export const confWord = (c) =>
   c == null ? "No confidence value" : c >= 0.6 ? "High confidence" : c >= 0.3 ? "Moderate confidence" : "Low confidence";
@@ -85,11 +86,14 @@ export const fmtSize = (bytes) => {
 
 export const clamp01 = (v) => (v == null || Number.isNaN(v) ? 0 : Math.min(1, Math.max(0, v)));
 
+/* C++ / ML-runtime noise (onnxruntime, mediapipe, TF) that leaks onto stdout+stderr */
+const STATUS_NOISE = /^(?:[EWI]\d{4}|INFO\b|WARNING\b|ERROR\b)|\.(?:cc|cpp|hpp?|c):\d+/;
+
 export const humanStatus = (lines = []) => {
   const last = [...lines]
     .reverse()
     .map((l) => l.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "").trim())
-    .find((s) => s && !s.startsWith("[") && !s.startsWith("─"));
+    .find((s) => s && !s.startsWith("[") && !s.startsWith("─") && !STATUS_NOISE.test(s));
   return last || "Working…";
 };
 

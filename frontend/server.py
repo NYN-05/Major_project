@@ -203,6 +203,9 @@ def _run_job(job: dict, video_path: Path) -> None:
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            # stream stage tags / log lines as they are printed (a piped
+            # child would otherwise block-buffer them until exit)
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
         reader = threading.Thread(target=_pump_stdout, args=(proc, job), daemon=True)
         reader.start()
