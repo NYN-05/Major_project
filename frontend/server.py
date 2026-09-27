@@ -35,6 +35,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from dotenv import load_dotenv
+load_dotenv()
+
 HERE = Path(__file__).resolve().parent
 WORKING = HERE.parent / "WORKING"
 OUTPUT_ROOT = WORKING / "output"
@@ -53,12 +56,25 @@ UPLOAD_CHUNK_BYTES = 64 * 1024
 # Browser origins allowed to talk to this localhost API. Requests without
 # an Origin header (curl, local CLI) are allowed; anything else is blocked
 # so a malicious web page cannot CSRF-upload to or read from the server.
-ALLOWED_ORIGINS = {
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-}
+# Configure via ALLOWED_ORIGINS env var (comma-separated), e.g.:
+#   ALLOWED_ORIGINS="https://xxx.trycloudflare.com,http://localhost:5173"
+# Or allow all for quick tunnel testing: ALLOW_ALL_ORIGINS=1
+def _parse_allowed_origins() -> set[str]:
+    if os.environ.get("ALLOW_ALL_ORIGINS") == "1":
+        return {"*"}
+    env = os.environ.get("ALLOWED_ORIGINS", "").strip()
+    if env:
+        return {o.strip() for o in env.split(",") if o.strip()}
+    # default fallback
+    return {
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    }
+
+
+ALLOWED_ORIGINS = _parse_allowed_origins()
 
 STAGE_TAGS = ("[1/3]", "[2/3]", "[3/3]")
 
@@ -246,7 +262,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _cors(self) -> None:
         origin = self.headers.get("Origin")
-        if origin and origin in ALLOWED_ORIGINS:
+        if origin and ("*" in ALLOWED_ORIGINS or origin in ALLOWED_ORIGINS):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -296,7 +312,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
             return
         origin = self.headers.get("Origin")
-        if origin and origin not in ALLOWED_ORIGINS:
+        if origin and "*" not in ALLOWED_ORIGINS and origin not in ALLOWED_ORIGINS:
             self._json({"error": "forbidden origin"}, 403)
             return
         length = int(self.headers.get("Content-Length") or 0)

@@ -93,15 +93,23 @@ class VisualFeatureExtractor:
     def _fit_pca(self, features: np.ndarray) -> None:
         """Fit PCA on deep features to reduce to target dimension."""
         from sklearn.decomposition import PCA
-        self.pca = PCA(n_components=self.deep_feature_dim, random_state=42)
+        n_samples = features.shape[0]
+        n_components = min(self.deep_feature_dim, n_samples - 1, features.shape[1])
+        self.pca = PCA(n_components=n_components, random_state=42)
         self.pca.fit(features)
         self.pca_fitted = True
+        self.actual_pca_dim = n_components
 
     def _apply_pca(self, features: np.ndarray) -> np.ndarray:
         """Apply fitted PCA to reduce deep features."""
         if not self.pca_fitted:
             self._fit_pca(features)
-        return self.pca.transform(features)
+        reduced = self.pca.transform(features)
+        # Pad with zeros if actual PCA dim < target dim
+        if reduced.shape[1] < self.deep_feature_dim:
+            padding = np.zeros((reduced.shape[0], self.deep_feature_dim - reduced.shape[1]), dtype=reduced.dtype)
+            reduced = np.hstack([reduced, padding])
+        return reduced
 
     def compute_lbp_histogram(self, gray: np.ndarray, radius: int = 1, n_points: int = 8) -> np.ndarray:
         """Compute uniform LBP histogram (10 bins for uniform patterns)."""
@@ -164,10 +172,16 @@ class VisualFeatureExtractor:
         if not face_crops:
             return VisualFeatures()
 
-        # Deep features
+        # Deep features - fit PCA on per-frame features, then transform aggregated
         deep_feats = self.extract_deep_features(face_crops)  # (N, 2048)
+        if not self.pca_fitted and len(deep_feats) >= 2:
+            self._fit_pca(deep_feats)
         deep_agg = deep_feats.mean(axis=0)  # (2048,)
-        deep_reduced = self._apply_pca(deep_agg.reshape(1, -1)).flatten()  # (16,)
+        if self.pca_fitted:
+            deep_reduced = self._apply_pca(deep_agg.reshape(1, -1)).flatten()  # (16,)
+        else:
+            # Fallback: just take first 16 components if not enough samples for PCA
+            deep_reduced = deep_agg[:16]
 
         # Handcrafted features - compute on each frame and average
         lbp_hists = []

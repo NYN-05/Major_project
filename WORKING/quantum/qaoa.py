@@ -429,7 +429,7 @@ class QAOASelector:
         }
 
 
-def select_classical(X, y, cfg=None):
+def select_classical(X, y, cfg=None, feature_names=None):
     """Classical reference selection: top-k features by discrimination AUC.
 
     Report-only selector used to sanity-check that the QAOA choice is not
@@ -437,6 +437,7 @@ def select_classical(X, y, cfg=None):
     QAOASelector.select() so downstream code can consume either.
     """
     cfg = cfg or QAOASelectionConfig()
+    feature_names = feature_names or FEATURE_NAMES
     weights = _normalize_weights(_discrimination_weights(X, y, cfg.seed))
     order = np.argsort(-weights)
     selected = order[: cfg.target_features]
@@ -445,7 +446,7 @@ def select_classical(X, y, cfg=None):
         marginals[i] = 1.0 - pos / X.shape[1]
     return {
         "selected_indices": [int(i) for i in selected],
-        "selected_features": [FEATURE_NAMES[i] for i in selected],
+        "selected_features": [feature_names[i] for i in selected],
         "marginal_probabilities": [float(m) for m in marginals],
         "feature_weights": [float(w) for w in weights],
         "cost": None,
@@ -453,8 +454,9 @@ def select_classical(X, y, cfg=None):
     }
 
 
-def compare_selections(qaoa_result, classical_result):
+def compare_selections(qaoa_result, classical_result, feature_names=None):
     """Summarize two selections for the comparison artifact."""
+    feature_names = feature_names or FEATURE_NAMES
     qa = set(qaoa_result["selected_indices"])
     cl = set(classical_result["selected_indices"])
     return {
@@ -462,8 +464,8 @@ def compare_selections(qaoa_result, classical_result):
         "classical_features": classical_result["selected_features"],
         "overlap_indices": sorted(qa & cl),
         "overlap_count": len(qa & cl),
-        "qaoa_only": [FEATURE_NAMES[i] for i in sorted(qa - cl)],
-        "classical_only": [FEATURE_NAMES[i] for i in sorted(cl - qa)],
+        "qaoa_only": [feature_names[i] for i in sorted(qa - cl)],
+        "classical_only": [feature_names[i] for i in sorted(cl - qa)],
     }
 
 

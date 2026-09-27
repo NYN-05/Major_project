@@ -11,5 +11,6 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    allowedHosts: process.env.VITE_ALLOW_ALL_HOSTS === 'true' ? true : ['localhost', '127.0.0.1'],
   },
 });

@@ -182,17 +182,26 @@ def fuse_features(
         rppg_csv: Path to rPPG features CSV (with label column)
         visual_csv: Path to visual features CSV
         output_csv: Output path for fused features
-        join_key: Column name to join on
+        join_key: Column name to join on (default: "video_path")
+                  Will create normalized "video_stem" key if paths don't match.
     """
     rppg_df = pd.read_csv(rppg_csv)
     visual_df = pd.read_csv(visual_csv)
 
-    # Ensure join key exists
-    if join_key not in rppg_df.columns or join_key not in visual_df.columns:
-        raise ValueError(f"Join key '{join_key}' not found in both tables")
+    # Create normalized join key (video stem without extension) for both tables
+    def normalize_key(path):
+        """Extract video stem from path."""
+        return Path(str(path)).stem
 
-    # Merge on video_path
-    fused = pd.merge(rppg_df, visual_df, on=join_key, how="inner", suffixes=("_rppg", "_visual"))
+    # Add video_stem column to both dataframes
+    rppg_df["video_stem"] = rppg_df["video_path"].apply(normalize_key)
+    visual_df["video_stem"] = visual_df["video_path"].apply(normalize_key)
+
+    # Use video_stem as join key
+    actual_join_key = "video_stem"
+
+    # Merge on video_stem
+    fused = pd.merge(rppg_df, visual_df, on=actual_join_key, how="inner", suffixes=("_rppg", "_visual"))
 
     # Handle duplicate label columns
     if "label_rppg" in fused.columns and "label_visual" in fused.columns:
@@ -210,11 +219,16 @@ def fuse_features(
     if "video_id_rppg" in fused.columns and "video_id_visual" in fused.columns:
         fused = fused.drop(columns=["video_id_visual"])
 
+    # Keep original video_path from rPPG (more informative)
+    if "video_path_rppg" in fused.columns:
+        fused = fused.rename(columns={"video_path_rppg": "video_path"})
+        fused = fused.drop(columns=["video_path_visual"], errors="ignore")
+
     fused.to_csv(output_csv, index=False)
     print(f"Fused features saved to {output_csv} ({len(fused)} videos)")
-    print(f"  rPPG features: {len([c for c in rppg_df.columns if c not in ['label', 'video_path', 'video_id', 'source']])}")
-    print(f"  Visual features: {len([c for c in visual_df.columns if c not in ['label', 'video_path', 'video_id', 'source']])}")
-    print(f"  Fused total: {len([c for c in fused.columns if c not in ['label', 'video_path', 'video_id', 'source']])}")
+    print(f"  rPPG features: {len([c for c in rppg_df.columns if c not in ['label', 'video_path', 'video_id', 'source', 'video_stem']])}")
+    print(f"  Visual features: {len([c for c in visual_df.columns if c not in ['label', 'video_path', 'video_id', 'source', 'video_stem']])}")
+    print(f"  Fused total: {len([c for c in fused.columns if c not in ['label', 'video_path', 'video_id', 'source', 'video_stem']])}")
 
 
 def create_experiment_splits(

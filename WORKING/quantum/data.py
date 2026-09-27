@@ -333,16 +333,43 @@ def _write_split_manifest(split, cfg):
     return out
 
 
-def build_dataset(cfg=None):
-    """Build data.npz from the real rPPG feature table (rPPG layer output)."""
+def build_dataset(cfg=None, feature_set: str = "rppg_only", csv_file=None):
+    """Build data.npz from a feature table.
+
+    Args:
+        cfg: DataConfig instance
+        feature_set: One of "rppg_only", "visual_only", "fused"
+        csv_file: Optional path to CSV file (for visual_only or fused)
+    """
     cfg = cfg or DataConfig()
-    X, y, groups, paths, split_keys, stats = _load_rppg_rows(cfg.csv_file, cfg)
-    if cfg.filter_implausible:
+    feature_names = FEATURE_SETS.get(feature_set, RPPG_FEATURE_NAMES)
+
+    # Determine CSV file
+    if csv_file is None:
+        if feature_set == "rppg_only":
+            csv_file = cfg.csv_file
+        elif feature_set == "visual_only":
+            csv_file = cfg.csv_file.parent.parent / "visual" / "visual_features.csv"
+        elif feature_set == "fused":
+            csv_file = cfg.csv_file.parent.parent / "visual" / "fused_features.csv"
+        else:
+            csv_file = cfg.csv_file
+
+    X, y, groups, paths, split_keys, stats = _load_feature_rows(csv_file, feature_names, cfg)
+
+    if cfg.filter_implausible and "heart_rate_bpm" in feature_names:
         print(
             f"  Plausibility filter: {stats['kept']}/{stats['total']} kept "
             f"(HR out of [{cfg.hr_min}, {cfg.hr_max}]: {stats['dropped_hr']}, "
             f"non-finite features: {stats['dropped_invalid']})"
         )
+    elif "heart_rate_bpm" not in feature_names:
+        print(
+            f"  Filtering: {stats['kept']}/{stats['total']} kept "
+            f"(non-finite features: {stats['dropped_invalid']}) "
+            f"(HR filter skipped for feature_set={feature_set})"
+        )
+
     use_official = bool(split_keys.size) and all(k is not None for k in split_keys)
     if use_official:
         print("  Using official dataset train/val/test folders (no regrouping).")
@@ -350,11 +377,31 @@ def build_dataset(cfg=None):
     else:
         split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
     _assert_no_group_leakage(split)
-    manifest_file = _write_split_manifest(split, cfg)
+
+    # Save manifest with feature set info
+    manifest = {
+        "seed": cfg.seed,
+        "val_ratio": cfg.val_ratio,
+        "test_ratio": cfg.test_ratio,
+        "filter_implausible": cfg.filter_implausible,
+        "feature_set": feature_set,
+        "feature_names": feature_names,
+        "rows": {},
+    }
+    for s in SPLITS:
+        for p, g in zip(split[f"paths_{s}"], split[f"groups_{s}"]):
+            manifest["rows"][str(p)] = {"split": s, "group": str(g)}
+    manifest_file = OUTPUT_DIR / f"split_manifest_{feature_set}.json"
+    manifest_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(manifest_file, "w") as fh:
+        json.dump(manifest, fh, indent=2)
     print(f"  Split manifest written: {manifest_file}")
-    cfg.data_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save data file with feature set suffix
+    data_file = OUTPUT_DIR / f"data_{feature_set}.npz"
+    data_file.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
-        cfg.data_file,
+        data_file,
         X_train=split["X_train"],
         y_train=split["y_train"],
         X_val=split["X_val"],
@@ -367,9 +414,9 @@ def build_dataset(cfg=None):
         paths_train=np.asarray(split["paths_train"], dtype=str),
         paths_val=np.asarray(split["paths_val"], dtype=str),
         paths_test=np.asarray(split["paths_test"], dtype=str),
-        feature_names=FEATURE_NAMES,
+        feature_names=np.array(feature_names, dtype=object),
     )
-    print(f"  Built subject-grouped split from {len(X)} real rPPG samples:")
+    print(f"  Built subject-grouped split from {len(X)} samples (feature_set={feature_set}):")
     for s in SPLITS:
         ys = split[f"y_{s}"]
         n_groups = len(set(split[f"groups_{s}"].tolist()))
@@ -378,7 +425,24 @@ def build_dataset(cfg=None):
             f"({int((ys == LABEL_REAL).sum())} real / {int((ys == LABEL_FAKE).sum())} fake, "
             f"{n_groups} subject groups)"
         )
-    return load_dataset(cfg.data_file)
+    return load_dataset(data_file)
+
+
+def load_dataset(path=None):
+    """Load dataset from NPZ file."""
+    path = path or DataConfig().data_file
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Dataset not found at {path}. Build it first with: python -m quantum.pipeline --build-data"
+        )
+    data = np.load(path, allow_pickle=True)
+    return {
+        key: data[key]
+        for key in (
+            "X_train", "y_train", "X_val", "y_val", "X_test", "y_test",
+            "groups_train", "groups_val", "groups_test",
+        )
+    }
 
 
 def load_dataset(path=None):

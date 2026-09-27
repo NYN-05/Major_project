@@ -61,6 +61,9 @@ def _init_worker(
     min_sqi: float,
     max_nan_features: int,
     roi_weights: tuple = (0.35, 0.35, 0.30),
+    # Phase 2
+    use_quality_weighting: bool = False,
+    quality_weight_min: float = 0.05,
 ) -> None:
     """Per-process initializer: creates one RPPGPipeline per worker.
 
@@ -82,6 +85,9 @@ def _init_worker(
         brightness_max=brightness_max,
         min_usable_frames=min_usable_frames,
         roi_weights=roi_weights,
+        # Phase 2
+        use_quality_weighting=use_quality_weighting,
+        quality_weight_min=quality_weight_min,
     )
     _WORKER["min_sqi"] = min_sqi
     _WORKER["max_nan_features"] = max_nan_features
@@ -97,6 +103,9 @@ def _init_worker_gpu(
     min_sqi: float,
     max_nan_features: int,
     roi_weights: tuple = (0.35, 0.35, 0.30),
+    # Phase 2
+    use_quality_weighting: bool = False,
+    quality_weight_min: float = 0.05,
 ) -> None:
     """Per-process initializer for GPU workers: creates RPPGPipeline +
     GPUFaceDetector + FaceROIExtractor (for trace accumulation)."""
@@ -122,6 +131,10 @@ def _init_worker_gpu(
         brightness_min=brightness_min,
         brightness_max=brightness_max,
         min_usable_frames=min_usable_frames,
+        roi_weights=roi_weights,
+        # Phase 2
+        use_quality_weighting=use_quality_weighting,
+        quality_weight_min=quality_weight_min,
     )
     _WORKER["min_sqi"] = min_sqi
     _WORKER["max_nan_features"] = max_nan_features
@@ -401,6 +414,9 @@ def main() -> None:
     parser.add_argument("--gpu", action="store_true", help="Use GPU-accelerated face detection (YuNet via ONNX Runtime CUDA) instead of MediaPipe")
     parser.add_argument("--gpu-workers", type=int, default=None, help="Number of GPU worker processes (default: 8 when --gpu is set)")
     parser.add_argument("--roi-weights", type=float, nargs=3, default=None, metavar=("LEFT", "RIGHT", "FOREHEAD"), help="ROI weights for left cheek, right cheek, forehead (default: 0.35 0.35 0.30)")
+    # Phase 2: Quality-weighted rPPG
+    parser.add_argument("--use-quality-weighting", action="store_true", help="Use continuous quality weights instead of binary frame rejection (Phase 2)")
+    parser.add_argument("--quality-weight-min", type=float, default=0.05, help="Minimum weight for poor-quality frames (default: 0.05)")
     args = parser.parse_args()
 
     samples = collect_samples(max_per_class=args.max_per_class, include_ffpp=args.include_ffpp)
@@ -453,6 +469,9 @@ def main() -> None:
             brightness_max=args.brightness_max,
             min_usable_frames=args.min_usable_frames,
             roi_weights=roi_weights,
+            # Phase 2
+            use_quality_weighting=args.use_quality_weighting,
+            quality_weight_min=args.quality_weight_min,
         )
         for label, video_path, source in samples:
             label_name = "Fake" if label == 1 else "Real"
@@ -483,7 +502,7 @@ def main() -> None:
         with mp.Pool(
             n_workers,
             initializer=init_fn,
-            initargs=(args.method, args.target_fps, args.blur_threshold, args.brightness_min, args.brightness_max, args.min_usable_frames, args.min_sqi, args.max_nan_features, roi_weights),
+            initargs=(args.method, args.target_fps, args.blur_threshold, args.brightness_min, args.brightness_max, args.min_usable_frames, args.min_sqi, args.max_nan_features, roi_weights, args.use_quality_weighting, args.quality_weight_min),
         ) as pool:
             results = iter(pool.imap_unordered(worker_fn, items, chunksize=1))
             done = 0
