@@ -29,6 +29,7 @@ from .face_roi import FaceROIExtractor
 from .preprocessing import clean_signal
 from .signal_extraction import extract_pulse_signal, combine_roi_signals
 from .features import compute_features, RPPGFeatures
+from .pqs import compute_pqs, PQSResult
 
 _FRAME_RE = re.compile(r"frame_(\d+)_t(\d+)\.jpg")
 
@@ -91,6 +92,8 @@ class RPPGResult:
     window_results: List[WindowResult] = field(default_factory=list)
     window_features_aggregated: Optional[RPPGFeatures] = None
     window_feature_stats: dict = field(default_factory=dict)
+    # Phase 5: Physiological Quality Score
+    pqs: Optional[PQSResult] = None
 
     def to_feature_vector(self) -> Optional[np.ndarray]:
         return self.features.to_vector() if self.features is not None else None
@@ -428,14 +431,14 @@ class RPPGPipeline:
                     right_trace.append(right_rgb)
                     forehead_trace.append(forehead_rgb)
                     
-                    # Re-assess with ROI and RGB data for quality weighting (Phase 2)
-                    if self.use_quality_weighting:
-                        q_full = self._assess_frame(
-                            frame, frame_idx, face.found, face=face,
-                            left_roi=rois.left_cheek, right_roi=rois.right_cheek, forehead_roi=rois.forehead,
-                            left_rgb=left_rgb, right_rgb=right_rgb, forehead_rgb=forehead_rgb
-                        )
-                        quality_log[-1] = q_full  # Replace with full assessment
+                    # Re-assess with ROI and RGB data for quality metrics (always, not just for weighting)
+                    q_full = self._assess_frame(
+                        frame, frame_idx, face.found, face=face,
+                        left_roi=rois.left_cheek, right_roi=rois.right_cheek, forehead_roi=rois.forehead,
+                        left_rgb=left_rgb, right_rgb=right_rgb, forehead_rgb=forehead_rgb,
+                        compute_quality=self.use_quality_weighting
+                    )
+                    quality_log[-1] = q_full  # Replace with full assessment
                 else:
                     left_trace.append(None)
                     right_trace.append(None)
@@ -555,6 +558,20 @@ class RPPGPipeline:
             f"overlap={self.window_overlap_sec:.1f}s, stride={stride_frames/fps:.2f}s"
         )
         
+        # Phase 5: Compute PQS for the whole-clip result
+        pqs_result = compute_pqs(whole_clip_result)
+        whole_clip_warnings = whole_clip_result.warnings + warnings
+        whole_clip_warnings.append(
+            f"PQS: {pqs_result.pqs:.3f} ({pqs_result.quality_tier}), "
+            f"components: SNR={pqs_result.components.snr_quality:.2f}, "
+            f"frames={pqs_result.components.frame_utilization:.2f}, "
+            f"ROI={pqs_result.components.roi_validity:.2f}, "
+            f"crossROI={pqs_result.components.cross_roi_consistency:.2f}, "
+            f"freq={pqs_result.components.frequency_stability:.2f}, "
+            f"amp={pqs_result.components.signal_amplitude:.2f}, "
+            f"temp={pqs_result.components.temporal_consistency:.2f}"
+        )
+
         # Return result with both whole-clip and window-aggregated features
         return RPPGResult(
             fps=whole_clip_result.fps,
@@ -566,10 +583,11 @@ class RPPGPipeline:
             right_cheek_signal=whole_clip_result.right_cheek_signal,
             forehead_signal=whole_clip_result.forehead_signal,
             quality_log=whole_clip_result.quality_log,
-            warnings=whole_clip_result.warnings + warnings,
+            warnings=whole_clip_warnings,
             window_results=window_results,
             window_features_aggregated=aggregated_features,
             window_feature_stats=feature_stats,
+            pqs=pqs_result,
         )
 
     def _process_single_window(
@@ -957,6 +975,52 @@ class RPPGPipeline:
                 warnings=warnings,
             )
 
+        raw_nan_count = getattr(feats, "_raw_nan_count", 0)
+        if raw_nan_count >= 2 or feats.signal_quality_index < self.min_sqi:
+            warnings.append(
+                f"Degenerate rPPG signal (non-finite features: {raw_nan_count}, "
+                f"SQI: {feats.signal_quality_index:.2f} < {self.min_sqi:.2f}); "
+                "treating as no-features (INCONCLUSIVE)."
+            )
+            return RPPGResult(
+                fps=fps,
+                n_frames_total=n_total,
+                n_frames_usable=n_usable,
+                features=None,
+                combined_signal=combined_clean,
+                left_cheek_signal=left_clean,
+                right_cheek_signal=right_clean,
+                forehead_signal=forehead_clean,
+                quality_log=quality_log,
+                warnings=warnings,
+            )
+
+        # Phase 5: Compute Physiological Quality Score (PQS)
+        pqs_result = compute_pqs(
+            RPPGResult(
+                fps=fps,
+                n_frames_total=n_total,
+                n_frames_usable=n_usable,
+                features=feats,
+                combined_signal=combined_clean,
+                left_cheek_signal=left_clean,
+                right_cheek_signal=right_clean,
+                forehead_signal=forehead_clean,
+                quality_log=quality_log,
+                warnings=warnings,
+            )
+        )
+        warnings.append(
+            f"PQS: {pqs_result.pqs:.3f} ({pqs_result.quality_tier}), "
+            f"components: SNR={pqs_result.components.snr_quality:.2f}, "
+            f"frames={pqs_result.components.frame_utilization:.2f}, "
+            f"ROI={pqs_result.components.roi_validity:.2f}, "
+            f"crossROI={pqs_result.components.cross_roi_consistency:.2f}, "
+            f"freq={pqs_result.components.frequency_stability:.2f}, "
+            f"amp={pqs_result.components.signal_amplitude:.2f}, "
+            f"temp={pqs_result.components.temporal_consistency:.2f}"
+        )
+
         return RPPGResult(
             fps=fps,
             n_frames_total=n_total,
@@ -968,6 +1032,7 @@ class RPPGPipeline:
             forehead_signal=forehead_clean,
             quality_log=quality_log,
             warnings=warnings,
+            pqs=pqs_result,
         )
 
     # -- helpers ----------------------------------------------------------
