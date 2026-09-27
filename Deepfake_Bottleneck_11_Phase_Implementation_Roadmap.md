@@ -1,4 +1,5 @@
 # Bottleneck-Driven Improvement Roadmap
+
 ## Deepfake Detection Using rPPG + Hybrid Quantum Machine Learning
 
 > **Dataset constraint:** This roadmap assumes that the existing dataset is not changed. No new videos, external samples, or additional physiological ground-truth data are introduced. The objective is to improve the processing, feature representation, experimentation, and decision-making pipeline using the existing videos.
@@ -585,12 +586,12 @@ Different classifier
 
 For example:
 
-| Feature Set | Classical | VQC |
-|---|---|---|
-| rPPG | ✓ | ✓ |
-| rPPG + Quality | ✓ | ✓ |
-| rPPG + Cross-ROI | ✓ | ✓ |
-| Fused Features | ✓ | ✓ |
+| Feature Set      | Classical | VQC |
+| ---------------- | --------- | --- |
+| rPPG             | ✓        | ✓  |
+| rPPG + Quality   | ✓        | ✓  |
+| rPPG + Cross-ROI | ✓        | ✓  |
+| Fused Features   | ✓        | ✓  |
 
 ### Step 5 — Compare Multiple Metrics
 
@@ -661,17 +662,17 @@ Keep the classifier and validation protocol controlled.
 
 ### Create an Experimental Table
 
-| Experiment | Feature Groups | Balanced Accuracy | ROC-AUC | Recall | Specificity |
-|---|---|---:|---:|---:|---:|
-| A | rPPG | | | | |
-| B | POS | | | | |
-| C | CHROM | | | | |
-| D | POS + CHROM | | | | |
-| E | rPPG + Quality | | | | |
-| F | rPPG + Cross-ROI | | | | |
-| G | rPPG + Visual | | | | |
-| H | rPPG + Visual + Quality | | | | |
-| I | Full | | | | |
+| Experiment | Feature Groups          | Balanced Accuracy | ROC-AUC | Recall | Specificity |
+| ---------- | ----------------------- | ----------------: | ------: | -----: | ----------: |
+| A          | rPPG                    |                   |         |        |             |
+| B          | POS                     |                   |         |        |             |
+| C          | CHROM                   |                   |         |        |             |
+| D          | POS + CHROM             |                   |         |        |             |
+| E          | rPPG + Quality          |                   |         |        |             |
+| F          | rPPG + Cross-ROI        |                   |         |        |             |
+| G          | rPPG + Visual           |                   |         |        |             |
+| H          | rPPG + Visual + Quality |                   |         |        |             |
+| I          | Full                    |                   |         |        |             |
 
 ## 3. Things to Keep in Mind
 
@@ -704,8 +705,9 @@ The existing analysis shows a strong specificity/recall tradeoff for the VQC. An
 A conceptual formulation is:
 
 \[
-P_{final}
-=
+P_
+==
+
 \alpha P_{visual}
 +
 \beta P_{rPPG}
