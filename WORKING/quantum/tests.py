@@ -116,7 +116,8 @@ def test_real_hamiltonian_verification():
     from quantum.qaoa import select_classical
 
     X, y, _, _, _, _ = _load_rppg_rows(csv_file, DataConfig())
-    assert X.shape[1] == len(FEATURE_NAMES) == 29
+    # Feature count updated for Phase 4 (was 29, now 48 with cross-ROI features)
+    assert X.shape[1] == len(FEATURE_NAMES) == 48
     assert set(y.tolist()) <= {0, 1}
     
     # Classical pre-selection to 18 features (pipeline default)
