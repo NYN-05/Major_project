@@ -55,6 +55,36 @@ class RPPGFeatures:
     phase_coherence_cf: float
     pulse_cv_interval: float
     zero_crossing_rate: float
+    # --- Phase 4: Cross-ROI consistency features ---
+    # Cross-correlation between ROI pairs
+    cross_corr_lr: float
+    cross_corr_lf: float
+    cross_corr_rf: float
+    # Frequency agreement between ROI pairs
+    freq_agreement_lr: float
+    freq_agreement_lf: float
+    freq_agreement_rf: float
+    # Spectral similarity between ROI pairs
+    spectral_similarity_lr: float
+    spectral_similarity_lf: float
+    spectral_similarity_rf: float
+    # Aggregated statistics across ROI pairs
+    cross_roi_corr_mean: float
+    cross_roi_corr_std: float
+    cross_roi_corr_min: float
+    cross_roi_corr_max: float
+    cross_roi_corr_cv: float
+    cross_roi_phase_lag_mean: float
+    cross_roi_phase_lag_std: float
+    cross_roi_phase_lag_min: float
+    cross_roi_phase_lag_max: float
+    cross_roi_coherence_mean: float
+    cross_roi_coherence_std: float
+    cross_roi_coherence_min: float
+    cross_roi_coherence_max: float
+    cross_roi_cross_corr_mean: float
+    cross_roi_freq_agreement_mean: float
+    cross_roi_spectral_similarity_mean: float
 
     def to_vector(self) -> np.ndarray:
         """Fixed-order numeric feature vector for ML/quantum encoding."""
@@ -84,6 +114,32 @@ class RPPGFeatures:
                 self.phase_coherence_cf,
                 self.pulse_cv_interval,
                 self.zero_crossing_rate,
+                # Phase 4: Cross-ROI consistency features
+                self.cross_corr_lr,
+                self.cross_corr_lf,
+                self.cross_corr_rf,
+                self.freq_agreement_lr,
+                self.freq_agreement_lf,
+                self.freq_agreement_rf,
+                self.spectral_similarity_lr,
+                self.spectral_similarity_lf,
+                self.spectral_similarity_rf,
+                self.cross_roi_corr_mean,
+                self.cross_roi_corr_std,
+                self.cross_roi_corr_min,
+                self.cross_roi_corr_max,
+                self.cross_roi_corr_cv,
+                self.cross_roi_phase_lag_mean,
+                self.cross_roi_phase_lag_std,
+                self.cross_roi_phase_lag_min,
+                self.cross_roi_phase_lag_max,
+                self.cross_roi_coherence_mean,
+                self.cross_roi_coherence_std,
+                self.cross_roi_coherence_min,
+                self.cross_roi_coherence_max,
+                self.cross_roi_cross_corr_mean,
+                self.cross_roi_freq_agreement_mean,
+                self.cross_roi_spectral_similarity_mean,
             ],
             dtype=np.float64,
         )
@@ -115,6 +171,32 @@ class RPPGFeatures:
             "phase_coherence_cf",
             "pulse_cv_interval",
             "zero_crossing_rate",
+            # Phase 4: Cross-ROI consistency features
+            "cross_corr_lr",
+            "cross_corr_lf",
+            "cross_corr_rf",
+            "freq_agreement_lr",
+            "freq_agreement_lf",
+            "freq_agreement_rf",
+            "spectral_similarity_lr",
+            "spectral_similarity_lf",
+            "spectral_similarity_rf",
+            "cross_roi_corr_mean",
+            "cross_roi_corr_std",
+            "cross_roi_corr_min",
+            "cross_roi_corr_max",
+            "cross_roi_corr_cv",
+            "cross_roi_phase_lag_mean",
+            "cross_roi_phase_lag_std",
+            "cross_roi_phase_lag_min",
+            "cross_roi_phase_lag_max",
+            "cross_roi_coherence_mean",
+            "cross_roi_coherence_std",
+            "cross_roi_coherence_min",
+            "cross_roi_coherence_max",
+            "cross_roi_cross_corr_mean",
+            "cross_roi_freq_agreement_mean",
+            "cross_roi_spectral_similarity_mean",
         ]
 
     def to_dict(self) -> Dict[str, float]:
@@ -514,6 +596,99 @@ def _phase_coherence(a: Optional[np.ndarray], b: Optional[np.ndarray]) -> float:
     return float(np.std(d))
 
 
+# --- Phase 4: Cross-ROI consistency features ---
+
+def cross_correlation(a: Optional[np.ndarray], b: Optional[np.ndarray], max_lag_ms: float = 200.0, fs: float = 30.0) -> float:
+    """
+    Cross-correlation between two ROI signals at the optimal lag.
+    Returns the maximum cross-correlation value within physiologically plausible lag range.
+    """
+    if a is None or b is None:
+        return float("nan")
+    n = min(len(a), len(b))
+    if n < 32:
+        return float("nan")
+    a, b = a[:n], b[:n]
+    if a.std() < 1e-8 or b.std() < 1e-8:
+        return float("nan")
+    # Constrain to physiologically plausible lag range
+    max_lag_samples = int(max_lag_ms * fs / 1000.0)
+    max_lag_samples = min(max_lag_samples, n - 1)
+    correlation = np.correlate(a - a.mean(), b - b.mean(), mode="full")
+    lags = np.arange(-n + 1, n)
+    valid = (lags >= -max_lag_samples) & (lags <= max_lag_samples)
+    if not valid.any():
+        return float("nan")
+    max_corr = float(np.max(correlation[valid]) / (n * a.std() * b.std()))
+    return max_corr
+
+
+def frequency_agreement(a: Optional[np.ndarray], b: Optional[np.ndarray], fs: float, low_hz: float = 0.7, high_hz: float = 4.0) -> float:
+    """
+    Frequency agreement between two ROI signals.
+    Returns 1 - normalized absolute difference in dominant frequencies.
+    """
+    if a is None or b is None:
+        return float("nan")
+    n = min(len(a), len(b))
+    if n < 32:
+        return float("nan")
+    a, b = a[:n], b[:n]
+    if a.std() < 1e-8 or b.std() < 1e-8:
+        return float("nan")
+    hr_a = estimate_heart_rate(a, fs, low_hz, high_hz)
+    hr_b = estimate_heart_rate(b, fs, low_hz, high_hz)
+    if not (np.isfinite(hr_a) and np.isfinite(hr_b)):
+        return float("nan")
+    # Normalize difference by max possible HR range (40-240 BPM = 200 BPM range)
+    diff = abs(hr_a - hr_b)
+    return float(1.0 - min(diff / 200.0, 1.0))
+
+
+def spectral_similarity(a: Optional[np.ndarray], b: Optional[np.ndarray], fs: float, low_hz: float = 0.7, high_hz: float = 4.0) -> float:
+    """
+    Spectral similarity between two ROI signals using cosine similarity of PSDs.
+    """
+    if a is None or b is None:
+        return float("nan")
+    n = min(len(a), len(b))
+    if n < 32:
+        return float("nan")
+    a, b = a[:n], b[:n]
+    if a.std() < 1e-8 or b.std() < 1e-8:
+        return float("nan")
+    freqs_a, psd_a = _welch_psd(a, fs)
+    freqs_b, psd_b = _welch_psd(b, fs)
+    band_a = (freqs_a >= low_hz) & (freqs_a <= high_hz)
+    band_b = (freqs_b >= low_hz) & (freqs_b <= high_hz)
+    if not (band_a.any() and band_b.any()):
+        return float("nan")
+    psd_a_band = psd_a[band_a]
+    psd_b_band = psd_b[band_b]
+    # Normalize
+    norm_a = np.linalg.norm(psd_a_band)
+    norm_b = np.linalg.norm(psd_b_band)
+    if norm_a < 1e-12 or norm_b < 1e-12:
+        return float("nan")
+    # Cosine similarity
+    similarity = float(np.dot(psd_a_band, psd_b_band) / (norm_a * norm_b))
+    return float(np.clip(similarity, 0.0, 1.0))
+
+
+def _aggregate_stats(values: List[float]) -> tuple:
+    """Compute mean, std, min, max, CV for a list of values."""
+    valid_vals = [v for v in values if np.isfinite(v)]
+    if not valid_vals:
+        return float("nan"), float("nan"), float("nan"), float("nan"), float("nan")
+    arr = np.array(valid_vals)
+    mean_val = float(np.mean(arr))
+    std_val = float(np.std(arr))
+    min_val = float(np.min(arr))
+    max_val = float(np.max(arr))
+    cv = float(std_val / mean_val) if mean_val != 0 else float("nan")
+    return mean_val, std_val, min_val, max_val, cv
+
+
 def pulse_cv_interval(trace: np.ndarray, fs: float) -> float:
     """Coefficient of variation of inter-beat intervals. Regular pulse -> low CV."""
     peaks, _ = signal.find_peaks(trace, distance=max(1, int(fs / 4.0)))
@@ -638,12 +813,48 @@ def compute_features(
     if np.isnan(left_right_corr):
         left_right_corr = 0.0
 
+    # --- Phase 4: Cross-ROI consistency features ---
+    # Cross-correlation between ROI pairs
+    cross_corr_lr = cross_correlation(left_cheek_signal, right_cheek_signal, fs=fs)
+    cross_corr_lf = cross_correlation(left_cheek_signal, forehead_signal, fs=fs)
+    cross_corr_rf = cross_correlation(right_cheek_signal, forehead_signal, fs=fs)
+
+    # Frequency agreement between ROI pairs
+    freq_agreement_lr = frequency_agreement(left_cheek_signal, right_cheek_signal, fs, low_hz, high_hz)
+    freq_agreement_lf = frequency_agreement(left_cheek_signal, forehead_signal, fs, low_hz, high_hz)
+    freq_agreement_rf = frequency_agreement(right_cheek_signal, forehead_signal, fs, low_hz, high_hz)
+
+    # Spectral similarity between ROI pairs
+    spectral_similarity_lr = spectral_similarity(left_cheek_signal, right_cheek_signal, fs, low_hz, high_hz)
+    spectral_similarity_lf = spectral_similarity(left_cheek_signal, forehead_signal, fs, low_hz, high_hz)
+    spectral_similarity_rf = spectral_similarity(right_cheek_signal, forehead_signal, fs, low_hz, high_hz)
+
+    # Collect values for aggregation
+    corr_vals = [cheek_forehead_corr, left_right_corr, cross_corr_lr, cross_corr_lf, cross_corr_rf]
+    cross_corr_vals = [cross_corr_lr, cross_corr_lf, cross_corr_rf]
+    freq_agreement_vals = [freq_agreement_lr, freq_agreement_lf, freq_agreement_rf]
+    spectral_similarity_vals = [spectral_similarity_lr, spectral_similarity_lf, spectral_similarity_rf]
+
+    # Phase lag values
     lag_vals = [
         forehead_cheek_phase_lag(forehead_signal, left_cheek_signal, fs),
         forehead_cheek_phase_lag(forehead_signal, right_cheek_signal, fs),
     ]
     lag_vals = [l for l in lag_vals if not np.isnan(l)]
     phase_lag = float(np.mean(lag_vals)) if lag_vals else float("nan")
+
+    # Phase coherence values
+    coherence_vals = [pclr, pccf, _phase_coherence(left_cheek_signal, forehead_signal)]
+    coherence_vals = [c for c in coherence_vals if np.isfinite(c)]
+
+    # Aggregated statistics across ROI pairs
+    cross_roi_corr_mean, cross_roi_corr_std, cross_roi_corr_min, cross_roi_corr_max, cross_roi_corr_cv = _aggregate_stats(corr_vals)
+    cross_roi_phase_lag_mean, cross_roi_phase_lag_std, cross_roi_phase_lag_min, cross_roi_phase_lag_max, _ = _aggregate_stats(lag_vals)
+    cross_roi_coherence_mean, cross_roi_coherence_std, cross_roi_coherence_min, cross_roi_coherence_max, _ = _aggregate_stats(coherence_vals)
+    cross_roi_cross_corr_mean, _, _, _, _ = _aggregate_stats(cross_corr_vals)
+    cross_roi_freq_agreement_mean, _, _, _, _ = _aggregate_stats(freq_agreement_vals)
+    cross_roi_spectral_similarity_mean, _, _, _, _ = _aggregate_stats(spectral_similarity_vals)
+
     ptt = pulse_transit_time_proxy(forehead_signal, left_cheek_signal, fs)
     if np.isnan(ptt):
         ptt = pulse_transit_time_proxy(forehead_signal, right_cheek_signal, fs)
@@ -673,6 +884,32 @@ def compute_features(
         phase_coherence_cf=pccf,
         pulse_cv_interval=pci,
         zero_crossing_rate=zcr,
+        # Phase 4: Cross-ROI consistency features
+        cross_corr_lr=cross_corr_lr,
+        cross_corr_lf=cross_corr_lf,
+        cross_corr_rf=cross_corr_rf,
+        freq_agreement_lr=freq_agreement_lr,
+        freq_agreement_lf=freq_agreement_lf,
+        freq_agreement_rf=freq_agreement_rf,
+        spectral_similarity_lr=spectral_similarity_lr,
+        spectral_similarity_lf=spectral_similarity_lf,
+        spectral_similarity_rf=spectral_similarity_rf,
+        cross_roi_corr_mean=cross_roi_corr_mean,
+        cross_roi_corr_std=cross_roi_corr_std,
+        cross_roi_corr_min=cross_roi_corr_min,
+        cross_roi_corr_max=cross_roi_corr_max,
+        cross_roi_corr_cv=cross_roi_corr_cv,
+        cross_roi_phase_lag_mean=cross_roi_phase_lag_mean,
+        cross_roi_phase_lag_std=cross_roi_phase_lag_std,
+        cross_roi_phase_lag_min=cross_roi_phase_lag_min,
+        cross_roi_phase_lag_max=cross_roi_phase_lag_max,
+        cross_roi_coherence_mean=cross_roi_coherence_mean,
+        cross_roi_coherence_std=cross_roi_coherence_std,
+        cross_roi_coherence_min=cross_roi_coherence_min,
+        cross_roi_coherence_max=cross_roi_coherence_max,
+        cross_roi_cross_corr_mean=cross_roi_cross_corr_mean,
+        cross_roi_freq_agreement_mean=cross_roi_freq_agreement_mean,
+        cross_roi_spectral_similarity_mean=cross_roi_spectral_similarity_mean,
     )
     raw_nan_count = sum(
         1
@@ -715,6 +952,32 @@ def _fill_nan_with_median(features: RPPGFeatures) -> None:
         "phase_coherence_cf": 1.0,
         "pulse_cv_interval": 0.05,
         "zero_crossing_rate": 0.5,
+        # Phase 4: Cross-ROI consistency features
+        "cross_corr_lr": 0.5,
+        "cross_corr_lf": 0.5,
+        "cross_corr_rf": 0.5,
+        "freq_agreement_lr": 0.5,
+        "freq_agreement_lf": 0.5,
+        "freq_agreement_rf": 0.5,
+        "spectral_similarity_lr": 0.5,
+        "spectral_similarity_lf": 0.5,
+        "spectral_similarity_rf": 0.5,
+        "cross_roi_corr_mean": 0.5,
+        "cross_roi_corr_std": 0.2,
+        "cross_roi_corr_min": 0.0,
+        "cross_roi_corr_max": 1.0,
+        "cross_roi_corr_cv": 0.5,
+        "cross_roi_phase_lag_mean": 0.0,
+        "cross_roi_phase_lag_std": 0.1,
+        "cross_roi_phase_lag_min": 0.0,
+        "cross_roi_phase_lag_max": 50.0,
+        "cross_roi_coherence_mean": 0.5,
+        "cross_roi_coherence_std": 0.3,
+        "cross_roi_coherence_min": 0.0,
+        "cross_roi_coherence_max": 1.5,
+        "cross_roi_cross_corr_mean": 0.5,
+        "cross_roi_freq_agreement_mean": 0.5,
+        "cross_roi_spectral_similarity_mean": 0.5,
     }
     for name in fallbacks:
         value = getattr(features, name)
