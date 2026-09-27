@@ -143,6 +143,8 @@ def _load_feature_rows(csv_file, feature_names, cfg=None):
     filtering stats. When cfg.filter_implausible is set, rows with a
     heart rate outside [hr_min, hr_max] or with non-finite feature
     values are dropped (plausibility hygiene for KYC signals).
+
+    If some feature_names are missing from the CSV, they are filled with NaN.
     """
     if not csv_file.exists():
         raise FileNotFoundError(
@@ -152,26 +154,39 @@ def _load_feature_rows(csv_file, feature_names, cfg=None):
         rows = list(csv.DictReader(fh))
     if not rows:
         raise ValueError(f"No labelled samples found in {csv_file}")
+
+    # Determine which feature names are actually present in the CSV
+    available_names = [name for name in feature_names if name in rows[0]]
     missing = [name for name in feature_names if name not in rows[0]]
     if missing:
-        raise ValueError(f"{csv_file} is missing columns: {missing}")
+        print(f"Warning: {csv_file} is missing columns (will be filled with NaN): {missing}")
 
     filter_stats = {"total": len(rows), "dropped_hr": 0, "dropped_invalid": 0}
     keep = []
     for row in rows:
         try:
-            values = [float(row[name]) for name in feature_names]
+            values = []
+            valid_values = []  # Values from columns that actually exist in CSV
+            for name in feature_names:
+                if name in row:
+                    val = float(row[name])
+                    values.append(val)
+                    valid_values.append(val)
+                else:
+                    values.append(float("nan"))  # Missing column -> NaN
         except (TypeError, ValueError):
             keep.append(None)
             continue
-        if not np.isfinite(values).all():
+        # Only check for invalid values in columns that actually exist in the CSV
+        if not np.isfinite(valid_values).all():
             filter_stats["dropped_invalid"] += 1
             keep.append(None)
             continue
-        # Only apply HR filter if heart_rate_bpm is in feature set
-        if "heart_rate_bpm" in feature_names:
-            hr = values[feature_names.index("heart_rate_bpm")]
-            if cfg is not None and cfg.filter_implausible and not (cfg.hr_min <= hr <= cfg.hr_max):
+        # Only apply HR filter if heart_rate_bpm is in available names and has valid value
+        if "heart_rate_bpm" in available_names:
+            hr_idx = feature_names.index("heart_rate_bpm")
+            hr = values[hr_idx]
+            if np.isfinite(hr) and cfg is not None and cfg.filter_implausible and not (cfg.hr_min <= hr <= cfg.hr_max):
                 filter_stats["dropped_hr"] += 1
                 keep.append(None)
                 continue
@@ -183,7 +198,7 @@ def _load_feature_rows(csv_file, feature_names, cfg=None):
         raise ValueError(f"No labelled samples survived filtering in {csv_file}")
 
     X = np.asarray(
-        [[float(row[name]) for name in feature_names] for row in kept_rows], dtype=np.float32
+        [[float(row[name]) if name in row else float("nan") for name in feature_names] for row in kept_rows], dtype=np.float32
     )
     labels = np.asarray([int(round(float(row["label"]))) for row in kept_rows], dtype=np.int64)
     if set(labels.tolist()) - {0, 1}:
