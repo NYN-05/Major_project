@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: deepfake-rppg
+Version: 1.0.0
+Summary: Deepfake detection using rPPG + hybrid quantum ML
+Requires-Python: >=3.8
+Requires-Dist: numpy==1.26.4
+Requires-Dist: scipy>=1.11.0
+Requires-Dist: scikit-learn>=1.2.0
+Requires-Dist: matplotlib>=3.7.0
+Requires-Dist: opencv-python<5.0.0,>=4.8.0
+Requires-Dist: mediapipe>=0.10.9
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: scikit-image>=0.26.0
+Requires-Dist: pennylane>=0.36.0
+Requires-Dist: pennylane-lightning>=0.36.0
+Requires-Dist: torch==2.5.1+cu121
+Requires-Dist: torchvision==0.20.1+cu121
+Requires-Dist: torchaudio==2.5.1+cu121
+Requires-Dist: ultralytics==8.3.0
+Requires-Dist: xgboost>=2.0.0
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: streamlit>=1.30.0
