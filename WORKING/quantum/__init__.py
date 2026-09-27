@@ -2,7 +2,7 @@
 
 QAOA feature selection + a hybrid quantum-classical VQC (PennyLane + PyTorch)
 over the real rPPG feature table, producing the final KYC verdict
-(REAL / FAKE / UNCERTAIN).
+(REAL / FAKE / INSUFFICIENT EVIDENCE / REVIEW REQUIRED).
 
 Modules
 -------
@@ -14,6 +14,7 @@ vqc         HybridModel, focal loss, CUDA-aware train / predict / load (cached)
 evaluation  metrics, decision bins, cross-validation, baselines
 plots       ROC / confusion / calibration figure helpers
 pipeline    CLI entry (``python -m quantum.pipeline``) + ``predict_features()``
+explain     explainable output generation (Phase 11)
 
 Run the full flow from ``WORKING/`` with ``python -m quantum.pipeline --all``.
 """

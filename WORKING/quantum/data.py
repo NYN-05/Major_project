@@ -36,6 +36,7 @@ from quantum.config import (
     DataConfig,
     FEATURE_NAMES,  # alias for RPPG_FEATURE_NAMES
     RPPG_FEATURE_NAMES,
+    RPPG_BASE_FEATURE_NAMES,
     VISUAL_FEATURE_NAMES,
     FUSED_FEATURE_NAMES,
     LABEL_FAKE,
@@ -52,6 +53,8 @@ SPLITS = ("train", "val", "test")
 # Feature set configurations
 FEATURE_SETS = {
     "rppg_only": RPPG_FEATURE_NAMES,
+    "rppg_base": RPPG_BASE_FEATURE_NAMES,
+    "rppg_cross_roi": RPPG_FEATURE_NAMES,
     "visual_only": VISUAL_FEATURE_NAMES,
     "fused": FUSED_FEATURE_NAMES,
 }

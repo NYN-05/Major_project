@@ -79,40 +79,100 @@ def expected_calibration_error(y_true, prob_real, n_bins=10):
     return float(ece)
 
 
-def classification_metrics(y_true, prob_real):
+def classification_metrics(y_true, prob_real, fake_max_prob=0.3, real_min_prob=0.7):
+    """Classification metrics for three-state decision (REAL, FAKE, INSUFFICIENT EVIDENCE).
+    
+    Args:
+        y_true: True labels (0=FAKE, 1=REAL)
+        prob_real: Predicted probability of REAL
+        fake_max_prob: Threshold below which prediction is FAKE
+        real_min_prob: Threshold above which prediction is REAL
+    """
     sk = _sklearn()
-    predictions = (prob_real >= 0.5).astype(int)
-    precision, recall, f1, _ = sk["precision_recall_fscore_support"](
-        y_true, predictions, average="binary", zero_division=0
-    )
-    n_classes = len(set(int(v) for v in y_true))
-    if n_classes < 2:
-        auc_roc = None
-        pr_auc = None
+    
+    # Three-state predictions
+    predictions = np.full_like(prob_real, -1, dtype=int)  # -1 = INSUFFICIENT EVIDENCE
+    predictions[prob_real >= real_min_prob] = 1  # REAL
+    predictions[prob_real <= fake_max_prob] = 0  # FAKE
+    # -1 remains for INSUFFICIENT EVIDENCE
+    
+    # Binary metrics for REAL vs FAKE (ignoring INSUFFICIENT EVIDENCE)
+    has_sufficient = predictions != -1
+    if has_sufficient.any():
+        y_sufficient = y_true[has_sufficient]
+        pred_sufficient = predictions[has_sufficient]
+        prob_sufficient = prob_real[has_sufficient]
+        
+        precision, recall, f1, _ = sk["precision_recall_fscore_support"](
+            y_sufficient, pred_sufficient, average="binary", zero_division=0
+        )
+        if len(set(int(v) for v in y_sufficient)) >= 2:
+            auc_roc = float(sk["roc_auc_score"](y_sufficient, prob_sufficient))
+            pr_auc = float(sk["average_precision_score"](y_sufficient, prob_sufficient))
+        else:
+            auc_roc = None
+            pr_auc = None
+        
+        tn, fp, fn, tp = sk["confusion_matrix"](y_sufficient, pred_sufficient).ravel()
+        specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+        accuracy = float(sk["accuracy_score"](y_sufficient, pred_sufficient))
     else:
-        auc_roc = float(sk["roc_auc_score"](y_true, prob_real))
-        pr_auc = float(sk["average_precision_score"](y_true, prob_real))
-    tn, fp, fn, tp = sk["confusion_matrix"](y_true, predictions).ravel()
-    specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+        precision = recall = f1 = 0.0
+        auc_roc = pr_auc = None
+        specificity = 0.0
+        accuracy = 0.0
+        tn = fp = fn = tp = 0
+    
+    # Coverage metrics
+    n_total = len(y_true)
+    n_classified = int(has_sufficient.sum()) if has_sufficient.any() else 0
+    coverage = n_classified / n_total if n_total > 0 else 0.0
+    
+    # Three-class confusion matrix (REAL=1, FAKE=0, INSUFFICIENT=-1)
+    y_true_3class = np.full_like(y_true, -1)
+    y_true_3class[y_true == 1] = 1  # REAL
+    y_true_3class[y_true == 0] = 0  # FAKE
+    
+    cm_3class = sk["confusion_matrix"](y_true_3class, predictions, labels=[-1, 0, 1])
+    
     return {
-        "accuracy": float(sk["accuracy_score"](y_true, predictions)),
+        "accuracy": float(accuracy),
         "precision": float(precision),
         "recall": float(recall),
         "specificity": specificity,
         "f1": float(f1),
         "auc_roc": auc_roc,
         "pr_auc": pr_auc,
-        "confusion_matrix": [[int(tn), int(fp)], [int(fn), int(tp)]],
-        "ece": expected_calibration_error(y_true, prob_real),
+        "confusion_matrix_binary": [[int(tn), int(fp)], [int(fn), int(tp)]],
+        "confusion_matrix_3class": cm_3class.tolist(),
+        "ece": expected_calibration_error(
+            y_true[has_sufficient] if has_sufficient.any() else y_true, 
+            prob_real[has_sufficient] if has_sufficient.any() else prob_real
+        ),
+        "coverage": float(coverage),
+        "n_classified": int(n_classified),
+        "n_total": int(n_total),
+        "n_insufficient": int((~has_sufficient).sum()) if has_sufficient.any() else n_total,
     }
 
 
-def balanced_accuracy(y_true, prob_real):
-    """Balanced accuracy (mean of per-class recall) from probabilities."""
+def balanced_accuracy(y_true, prob_real, fake_max_prob=0.3, real_min_prob=0.7):
+    """Balanced accuracy (mean of per-class recall) from probabilities for three-state."""
     sk = _sklearn()
-    predictions = (prob_real >= 0.5).astype(int)
+    
+    predictions = np.full_like(prob_real, -1, dtype=int)
+    predictions[prob_real >= real_min_prob] = 1
+    predictions[prob_real <= fake_max_prob] = 0
+    
+    has_sufficient = predictions != -1
+    if not has_sufficient.any():
+        return 0.0
+    
+    y_sufficient = y_true[has_sufficient]
+    pred_sufficient = predictions[has_sufficient]
+    
     _, recall, _, _ = sk["precision_recall_fscore_support"](
-        y_true, predictions, average=None, zero_division=0
+        y_sufficient, pred_sufficient, average=None, zero_division=0
     )
     return float(np.mean(recall)) if len(recall) else 0.0
 
@@ -177,15 +237,51 @@ def _enough_for_cv(y, n_splits=5):
     return min(counts) >= 2 * n_splits
 
 
-def decision_bins(y_true, prob_real, cfg=None):
+def decision_bins(y_true, prob_real, cfg=None, pqs=None):
+    """Three-state decision bins: REAL, FAKE, INSUFFICIENT EVIDENCE / REVIEW REQUIRED.
+    
+    Decision logic:
+    - prob_real >= real_min_prob -> REAL
+    - prob_real <= fake_max_prob -> FAKE
+    - fake_max_prob < prob_real < real_min_prob -> INSUFFICIENT EVIDENCE
+    - If pqs is provided and pqs < quality_threshold -> INSUFFICIENT EVIDENCE (overrides prob_real)
+    """
     cfg = cfg or DecisionConfig()
-    threshold = cfg.decision_threshold
-    real = prob_real >= threshold
-    fake = prob_real < threshold
+    real_min = cfg.real_min_prob
+    fake_max = cfg.fake_max_prob
+    quality_thresh = cfg.quality_threshold
+    
+    # Start with all samples as INSUFFICIENT EVIDENCE
+    n = len(prob_real)
+    decision = np.full(n, "INSUFFICIENT EVIDENCE", dtype=object)
+    
+    # Apply quality threshold if PQS provided
+    if pqs is not None:
+        sufficient_quality = pqs >= cfg.quality_threshold
+    else:
+        sufficient_quality = np.ones(len(prob_real), dtype=bool)
+    
+    # Classify as REAL
+    real_mask = (prob_real >= real_min) & sufficient_quality
+    decision[real_mask] = "REAL"
+    
+    # Classify as FAKE
+    fake_mask = (prob_real <= fake_max) & sufficient_quality
+    decision[fake_mask] = "FAKE"
+    
+    # Count results
+    real_count = int(real_mask.sum())
+    fake_count = int(fake_mask.sum())
+    insufficient_count = int((~real_mask & ~fake_mask).sum())
+    
     return {
-        "real": int(real.sum()),
-        "fake": int(fake.sum()),
-        "threshold": float(threshold),
+        "real": real_count,
+        "fake": fake_count,
+        "insufficient_evidence": insufficient_count,
+        "coverage": float((real_mask | fake_mask).sum()) / len(prob_real) if len(prob_real) > 0 else 0.0,
+        "fake_max_prob": float(fake_max),
+        "real_min_prob": float(real_min),
+        "quality_threshold": float(quality_thresh),
     }
 
 
@@ -302,7 +398,7 @@ def _fit_vqc_fold(Xtr, ytr, Xte, yte, cfg):
 
 
 def evaluate_quantum_model(
-    X_test, y_test, vqc_cfg=None, decision_cfg=None, X_train=None, y_train=None, groups_train=None
+    X_test, y_test, vqc_cfg=None, decision_cfg=None, X_train=None, y_train=None, groups_train=None, pqs=None
 ):
     vqc_cfg = vqc_cfg or VQCConfig()
     decision_cfg = decision_cfg or DecisionConfig()
@@ -319,7 +415,7 @@ def evaluate_quantum_model(
     payload = {
         "metrics": classification_metrics(y_test, prob_real),
         "balanced_accuracy": balanced_accuracy(y_test, prob_real),
-        "decision_bins": decision_bins(y_test, prob_real, decision_cfg_opt),
+        "decision_bins": decision_bins(y_test, prob_real, decision_cfg_opt, pqs=pqs),
     }
 
     # Cross-validation of the training procedure on the train split (the

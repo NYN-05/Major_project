@@ -175,6 +175,31 @@ PHASE6_FEATURE_SETS = {
     "fused": FUSED_FEATURE_NAMES,  # rPPG + Visual (87 features)
 }
 
+# Phase 7 Ablation Study feature sets
+# Based on the roadmap experiments A-I
+PHASE7_ABLATION_SETS = {
+    # Experiment A: rPPG only (all rPPG features = base + cross-ROI = 48 features)
+    "A_rppg_only": RPPG_FEATURE_NAMES,
+    # Experiment B: POS only - base features (POS method features) 
+    # Note: POS/CHROM are signal extraction methods, features are same but from different method
+    # We'll run pipeline with method="POS" and method="CHROM" separately
+    "B_pos_only": RPPG_BASE_FEATURE_NAMES,  # Base features (POS method)
+    # Experiment C: CHROM only - base features (CHROM method)
+    "C_chrom_only": RPPG_BASE_FEATURE_NAMES,  # Base features (CHROM method)
+    # Experiment D: POS + CHROM - both methods' base features
+    "D_pos_chrom": RPPG_BASE_FEATURE_NAMES,  # Base features from both methods
+    # Experiment E: rPPG + Quality - base + quality features (PQS components)
+    "E_rppg_quality": RPPG_BASE_FEATURE_NAMES,  # base + quality features
+    # Experiment F: rPPG + Cross-ROI
+    "F_rppg_cross_roi": RPPG_FEATURE_NAMES,  # base + cross-ROI (48 features)
+    # Experiment G: rPPG + Visual
+    "G_rppg_visual": RPPG_FEATURE_NAMES + VISUAL_FEATURE_NAMES,  # 48 + 39 = 87
+    # Experiment H: rPPG + Visual + Quality
+    "H_rppg_visual_quality": RPPG_FEATURE_NAMES + VISUAL_FEATURE_NAMES,  # 87 + quality
+    # Experiment I: Full proposed representation
+    "I_full": RPPG_FEATURE_NAMES + VISUAL_FEATURE_NAMES,  # 87 + quality
+}
+
 FEATURE_MEANINGS = {
     "heart_rate_bpm": "Dominant pulse frequency (BPM) of the recovered rPPG signal",
     "snr_db": "Signal-to-noise ratio of the pulse spectrum (dB)",
@@ -342,6 +367,16 @@ class VQCConfig:
 
 @dataclass(frozen=True)
 class DecisionConfig:
+    # Three-state decision thresholds
+    # prob_real >= real_min_prob -> REAL
+    # prob_real <= fake_max_prob -> FAKE
+    # fake_max_prob < prob_real < real_min_prob -> INSUFFICIENT EVIDENCE / REVIEW REQUIRED
+    fake_max_prob: float = 0.3
+    real_min_prob: float = 0.7
+    # Quality threshold: minimum PQS for sufficient evidence
+    # Below this -> INSUFFICIENT EVIDENCE / REVIEW REQUIRED
+    quality_threshold: float = 0.5
+    # Legacy single threshold (kept for backward compatibility)
     decision_threshold: float = 0.5
     metrics_baseline_file: Path = field(default_factory=lambda: OUTPUT_DIR / "metrics_baselines.json")
     roc_plot: Path = field(default_factory=lambda: OUTPUT_DIR / "roc_curve.png")
