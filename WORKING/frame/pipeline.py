@@ -15,9 +15,9 @@ if str(ROOT_DIR) not in sys.path:
 WORKING_ROOT = Path(__file__).resolve().parents[2]
 GLOBAL_OUTPUT = WORKING_ROOT / "output" / "frames"
 
-from WORKING.frame.config import MODEL_WEIGHTS, build_config
-from WORKING.frame.detector import FaceDetector, annotate_frame, crop_faces
-from WORKING.frame.processing import FrameIngestor, FrameQualityAssessor, StorageManager
+from .config import MODEL_WEIGHTS, build_config
+from .detector import FaceDetector, annotate_frame, crop_faces
+from .processing import FrameIngestor, FrameQualityAssessor, StorageManager
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 

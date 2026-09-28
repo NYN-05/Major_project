@@ -7,7 +7,7 @@ from typing import Any
 
 import cv2
 
-from WORKING.frame.detector import FaceDetection
+from .detector import FaceDetection
 
 logger = logging.getLogger("face_pipeline")
 

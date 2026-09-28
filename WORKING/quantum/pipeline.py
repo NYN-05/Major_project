@@ -39,9 +39,12 @@ from quantum.ensemble import run_phase8_ensemble_comparison
 from quantum.explain import build_explanation, DecisionExplanation
 
 
+# First 23 features of RPPG_FEATURE_NAMES (matching existing scaler/selection artifacts)
+RPPG_23_FEATURE_NAMES = RPPG_BASE_FEATURE_NAMES
+
 FEATURE_SET_CONFIGS = {
     "rppg_only": {
-        "feature_names": RPPG_FEATURE_NAMES,
+        "feature_names": RPPG_23_FEATURE_NAMES,
         "data_file": OUTPUT_DIR / "data_rppg_only.npz",
         "scaler_file": OUTPUT_DIR / "feature_scaler_rppg_only.json",
         "selection_file": OUTPUT_DIR / "qaoa_selection_rppg_only.json",
@@ -217,7 +220,6 @@ def predict_features(features, feature_set: str = "rppg_only"):
     return build_explanation(
         prob_real=prob_real,
         decision_cfg=decision_cfg,
-        feature_set=feature_set,
     )
 
 

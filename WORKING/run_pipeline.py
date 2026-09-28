@@ -46,7 +46,7 @@ for _root in (FRAME_ROOT, RPPG_ROOT, WORKING):
     if str(_root) not in sys.path:
         sys.path.insert(0, str(_root))
 
-from app.pipeline import run_frame_sampling_quality_layer  # stage 1
+from frame.pipeline import run_frame_sampling_quality_layer  # stage 1
 from rppg import RPPGPipeline  # stage 2
 
 # Stage 3 (quantum.pipeline) imports torch + pennylane (~7 s); it is imported
@@ -190,12 +190,25 @@ def quantum_inference(features: dict) -> dict:
     """QAOA-selected subset of the actual rPPG features -> trained hybrid VQC.
 
     `predict_features` is the quantum layer's own inference entry point: it
-    applies the saved training-time QAOA indices to the 10-feature rPPG output
+    applies the saved training-time QAOA indices to the 25-feature rPPG output
     and returns P(real) plus the KYC verdict (REAL / FAKE / UNCERTAIN).
     """
     from quantum.pipeline import predict_features  # deferred: torch+pennylane ~7 s
 
-    return predict_features(features)
+    explanation = predict_features(features, feature_set="rppg_only")
+    # Convert DecisionExplanation to legacy dict format
+    phys = explanation.physiological_evidence
+    verdict_map = {
+        "REAL": "REAL",
+        "FAKE": "FAKE",
+        "INSUFFICIENT EVIDENCE / REVIEW REQUIRED": "UNCERTAIN",
+    }
+    return {
+        "prob_real": phys.probability_real,
+        "verdict": verdict_map.get(phys.verdict.value, "UNCERTAIN"),
+        "confidence": phys.confidence,
+        "explanation": explanation.to_dict(),
+    }
 
 
 def emit_signal(result, path: str | None) -> None:
