@@ -119,8 +119,14 @@ if run:
             model_path = os.environ.get(
                 "RPPG_CLASSIFIER_PKL",
                 os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                    "output", "rppg", "rppg_classifier.pkl"))
+                    os.environ.get(
+                        "MAJ_OUTPUT_ROOT",
+                        os.path.join(
+                            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                            "Scrape", "output",
+                        ),
+                    ),
+                    "rppg", "rppg_classifier.pkl"))
             if os.path.exists(model_path):
                 st.subheader("Deepfake Detection Result")
                 try:

@@ -34,6 +34,10 @@ from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
 from quantum.explain import build_explanation, DecisionExplanation
 
 
+def _fmt4(v):
+    return "n/a" if v is None else f"{v:.4f}"
+
+
 # Only fused mode is supported
 FEATURE_SET_CONFIGS = {
     "fused": {
@@ -102,10 +106,10 @@ def predict_features(features, feature_set: str = "rppg_only"):
             f"{indices}. Rerun training for feature_set={feature_set}."
         )
     try:
-        model = load_vqc_model(len(indices))
+        model = load_vqc_model(len(indices), VQCConfig(checkpoint_file=checkpoint_file))
     except Exception as exc:
         raise RuntimeError(
-            f"hybrid_vqc.pt incompatible with the QAOA selection "
+            f"{checkpoint_file.name} incompatible with the QAOA selection "
             f"({len(indices)} features): {type(exc).__name__}: {exc}. "
             f"Rerun training for feature_set={feature_set}."
         ) from exc
@@ -263,7 +267,7 @@ def run_pipeline_for_feature_set(
     if run_train:
         print("  Computing optimal threshold (Youden's J) on validation set...")
         from quantum.evaluation import optimal_threshold_youden
-        val_probs = predict_vqc(load_vqc_model(len(indices)), X_val[:, indices])
+        val_probs = predict_vqc(load_vqc_model(len(indices), vqc_cfg), X_val[:, indices])
         opt_threshold = optimal_threshold_youden(data["y_val"].astype(int), val_probs)
         print(f"    Optimal threshold: {opt_threshold:.6f}")
         # Update checkpoint metadata with optimal threshold
@@ -302,13 +306,13 @@ def run_pipeline_for_feature_set(
         metrics = eval_results["metrics"]
         print(
             f"  accuracy={metrics['accuracy']:.4f} f1={metrics['f1']:.4f} "
-            f"auc={metrics['auc_roc']:.4f} ece={metrics['ece']:.4f}"
+            f"auc={_fmt4(metrics['auc_roc'])} ece={metrics['ece']:.4f}"
         )
         if "cv" in eval_results:
             cv = eval_results["cv"]["mean"]
             print(
                 f"  CV(5-fold): accuracy={cv['accuracy']:.4f}+-{eval_results['cv']['std']['accuracy']:.4f} "
-                f"balanced_acc={cv['balanced_accuracy']:.4f} auc={cv['auc_roc']:.4f}"
+                f"balanced_acc={cv['balanced_accuracy']:.4f} auc={_fmt4(cv['auc_roc'])}"
             )
         print(f"  decision bins: {eval_results['decision_bins']}")
 
@@ -331,7 +335,7 @@ def run_pipeline_for_feature_set(
         for name, metrics in baseline_results.items():
             print(
                 f"  {name}: accuracy={metrics['accuracy']:.4f} "
-                f"f1={metrics['f1']:.4f} auc={metrics['auc_roc']:.4f}"
+                f"f1={metrics['f1']:.4f} auc={_fmt4(metrics['auc_roc'])}"
             )
             if "cv" in metrics:
                 cv = metrics["cv"]["mean"]

@@ -174,14 +174,12 @@ class FrameQualityAssessor:
         dark_threshold: float,
         bright_threshold: float,
         min_face_area_ratio: float = 0.02,
-        edge_margin_ratio: float = 0.03,
         score_weights: tuple[float, float, float] = (0.4, 0.3, 0.3),
     ):
         self.blur_threshold = blur_threshold
         self.dark_threshold = dark_threshold
         self.bright_threshold = bright_threshold
         self.min_face_area_ratio = min_face_area_ratio
-        self.edge_margin_ratio = edge_margin_ratio
         self.score_weights = score_weights
 
     @staticmethod
@@ -202,22 +200,17 @@ class FrameQualityAssessor:
         if face_visible:
             h, w = frame.shape[:2]
             frame_area = max(1, h * w)
-            margin_x = int(w * self.edge_margin_ratio)
-            margin_y = int(h * self.edge_margin_ratio)
             for det in detections:
                 bw = max(1, det.x2 - det.x1)
                 bh = max(1, det.y2 - det.y1)
                 area_ratio = (bw * bh) / frame_area
                 max_face_area_ratio = max(max_face_area_ratio, area_ratio)
                 aspect_ratio = bw / bh
-                touches_edge = (
-                    det.x1 <= margin_x
-                    or det.y1 <= margin_y
-                    or det.x2 >= w - margin_x
-                    or det.y2 >= h - margin_y
-                )
+                # Edge-touch is not rejected: face-cropped datasets (e.g. DFDC
+                # 112x112 tiles) abut the border on every frame, and the
+                # downstream rPPG/visual stages gate quality themselves.
                 unusual_shape = aspect_ratio < 0.65 or aspect_ratio > 1.7
-                if touches_edge or unusual_shape:
+                if unusual_shape:
                     extreme_pose = True
 
             if max_face_area_ratio < self.min_face_area_ratio:

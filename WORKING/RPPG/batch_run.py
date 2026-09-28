@@ -14,7 +14,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from WORKING.RPPG import RPPGPipeline
 
 RPPG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUTPUT_DIR = os.path.join(os.path.dirname(RPPG_ROOT), 'output', 'rppg')
+OUTPUT_DIR = os.path.join(
+    os.environ.get("MAJ_OUTPUT_ROOT", os.path.join(os.path.dirname(RPPG_ROOT), "Scrape", "output")),
+    "rppg",
+)
 
 VIDEO_DIR = os.path.join(RPPG_ROOT, 'archive (1)', 'video')
 OUT_CSV = os.path.join(OUTPUT_DIR, 'batch_results.csv')

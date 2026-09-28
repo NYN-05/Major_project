@@ -4,7 +4,16 @@ import cv2
 import numpy as np
 from WORKING.RPPG.face_roi import FaceROIExtractor
 
-OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "output", "rppg")
+OUTPUT_DIR = os.path.join(
+    os.environ.get(
+        "MAJ_OUTPUT_ROOT",
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "Scrape", "output",
+        ),
+    ),
+    "rppg",
+)
 
 
 def main(path):

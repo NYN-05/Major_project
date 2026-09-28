@@ -24,8 +24,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from WORKING.RPPG import RPPGPipeline
 
 OUTPUT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "output", "rppg",
+    os.environ.get(
+        "MAJ_OUTPUT_ROOT",
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "Scrape", "output",
+        ),
+    ),
+    "rppg",
 )
 
 

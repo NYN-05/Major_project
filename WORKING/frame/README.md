@@ -63,7 +63,7 @@ Input video
 | `overexposed_frame` | Gray mean > `--bright-threshold` | `235.0` (was 220.0) |
 | `no_face` | YOLO detects no face above `--conf` | `0.25` (was 0.35) |
 | `face_too_small` | Largest face area ratio < `--min-face-area-ratio` | `0.002` (was 0.005) |
-| `extreme_pose` | Face touches frame edge or unusual aspect ratio | - |
+| `extreme_pose` | Unusual face aspect ratio (edge-touch allowed for cropped inputs) | - |
 
 ## Install
 

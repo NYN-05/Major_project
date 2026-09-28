@@ -45,7 +45,7 @@ from WORKING.RPPG import RPPGPipeline  # noqa: E402
 from WORKING.RPPG.features import RPPGFeatures  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR = REPO_ROOT.parent / "output" / "rppg"
+OUTPUT_DIR = Path(os.environ.get("MAJ_OUTPUT_ROOT", REPO_ROOT.parent / "Scrape" / "output")) / "rppg"
 DFDC_ROOT = get_dfdc_dataset_path()
 FAKE_DIR = DFDC_ROOT / "Fake"
 REAL_DIR = DFDC_ROOT / "Real"

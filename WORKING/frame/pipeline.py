@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from collections import Counter
@@ -13,7 +14,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 WORKING_ROOT = Path(__file__).resolve().parents[2]
-GLOBAL_OUTPUT = WORKING_ROOT / "output" / "frames"
+GLOBAL_OUTPUT = Path(os.environ.get("MAJ_OUTPUT_ROOT", WORKING_ROOT / "Scrape" / "output")) / "frames"
 
 from .config import MODEL_WEIGHTS, build_config
 from .detector import FaceDetector, annotate_frame, crop_faces

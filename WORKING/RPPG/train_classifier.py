@@ -37,7 +37,7 @@ def _repo_root() -> Path:
 
 
 def _output_dir() -> Path:
-    return _repo_root().parent / "output" / "rppg"
+    return Path(os.environ.get("MAJ_OUTPUT_ROOT", _repo_root().parent / "Scrape" / "output")) / "rppg"
 
 
 def main() -> None:

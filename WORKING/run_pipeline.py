@@ -24,13 +24,15 @@ Usage
 -----
     python run_pipeline.py --source path/to/video.mp4 [--method POS|CHROM] [--out result.json]
 
-Requires pre-trained quantum artifacts (output/qaoa_selection_fused.json,
-output/hybrid_vqc_fused.pt, output/feature_scaler_fused.json). If missing, run once from this folder:
+Requires pre-trained quantum artifacts (Scrape/output/quantum/qaoa_selection_fused.json,
+Scrape/output/quantum/hybrid_vqc_fused.pt, Scrape/output/quantum/feature_scaler_fused.json).
+If missing, run once from this folder:
     python -m quantum.pipeline --all --feature-set fused
 """
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -40,9 +42,11 @@ import numpy as np
 WORKING = Path(__file__).resolve().parent
 FRAME_ROOT = WORKING / "frame"
 RPPG_ROOT = WORKING / "RPPG"
-OUTPUT_ROOT = WORKING / "output" / "pipeline"
-FRAMES_OUTPUT = WORKING / "output" / "frames"
-RPPG_OUTPUT = WORKING / "output" / "rppg"
+
+_OUTPUT_BASE = Path(os.environ.get("MAJ_OUTPUT_ROOT", WORKING.parent / "Scrape" / "output"))
+OUTPUT_ROOT = _OUTPUT_BASE / "pipeline"
+FRAMES_OUTPUT = _OUTPUT_BASE / "frames"
+RPPG_OUTPUT = _OUTPUT_BASE / "rppg"
 
 for _root in (FRAME_ROOT, RPPG_ROOT, WORKING):
     if str(_root) not in sys.path:
@@ -197,7 +201,7 @@ def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None =
 def run_visual_stage(video_path: Path, frame_handoff: dict | None = None) -> tuple[dict, dict | None]:
     """Visual feature extraction from stage-1 face crops.
     
-    Uses the face crops saved by stage-1 (output/frames/frame_sequences/<video>/cropped_faces/).
+    Uses the face crops saved by stage-1 (Scrape/output/frames/frame_sequences/<video>/cropped_faces/).
     Returns visual features dict or None if extraction fails."""
     if not frame_handoff:
         return {"status": "skipped", "reason": "no frame handoff"}, None
@@ -285,7 +289,7 @@ def build_parser():
     )
     parser.add_argument("--source", required=True, help="Path to the input video (mp4/avi/...)")
     parser.add_argument("--method", default="POS", choices=["POS", "CHROM"], help="rPPG reconstruction method")
-    parser.add_argument("--out", default=None, help="Output JSON path (default: output/pipeline/pipeline_result.json)")
+    parser.add_argument("--out", default=None, help="Output JSON path (default: Scrape/output/pipeline/pipeline_result.json)")
     parser.add_argument(
         "--signal-out",
         default=None,

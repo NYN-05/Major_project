@@ -797,14 +797,11 @@ def _fill_nan_with_median(features: RPPGFeatures) -> None:
         "signal_to_motion_ratio": 0.0,
         "peak_amplitude_variability": 0.0,
         "pulse_transit_time_proxy": 0.0,
-        # Probe features (Phase 4)
+        # Probe features (Phase 4) - 4 selected
         "spectral_flatness": 1.0,
         "spectral_centroid": 1.5,
         "kurtosis": 0.0,
         "phase_coherence_lr": 1.0,
-        "phase_coherence_cf": 1.0,
-        "pulse_cv_interval": 0.05,
-        "zero_crossing_rate": 0.5,
     }
     for name in fallbacks:
         value = getattr(features, name)

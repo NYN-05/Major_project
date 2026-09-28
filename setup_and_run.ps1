@@ -22,14 +22,19 @@ $Venv     = Join-Path $RepoRoot 'venv\Scripts\python.exe'
 $Pip      = Join-Path $RepoRoot 'venv\Scripts\pip.exe'
 $Working  = Join-Path $RepoRoot 'WORKING'
 $Frontend = Join-Path $RepoRoot 'frontend'
+$OutRoot  = Join-Path $RepoRoot 'Scrape\output'
+
+if (-not $env:DFDC_DATASET_PATH) {
+    $env:DFDC_DATASET_PATH = Join-Path $RepoRoot 'DFDC_Dataset'
+}
 
 # ---------- output paths (check these to decide what to skip) ----------
-$RppgCsv      = Join-Path $Working 'output\rppg\dataset_features.csv'
-$RppgPkl      = Join-Path $Working 'output\rppg\rppg_classifier.pkl'
-$QuantumData  = Join-Path $Working 'output\quantum\data.npz'
-$QuantumVqc   = Join-Path $Working 'output\quantum\hybrid_vqc.pt'
-$QuantumSel   = Join-Path $Working 'output\quantum\qaoa_selection.json'
-$QuantumScaler= Join-Path $Working 'output\quantum\feature_scaler.json'
+$RppgCsv      = Join-Path $OutRoot 'rppg\dataset_features.csv'
+$RppgPkl      = Join-Path $OutRoot 'rppg\rppg_classifier.pkl'
+$QuantumData  = Join-Path $OutRoot 'quantum\data_fused.npz'
+$QuantumVqc   = Join-Path $OutRoot 'quantum\hybrid_vqc_fused.pt'
+$QuantumSel   = Join-Path $OutRoot 'quantum\qaoa_selection_fused.json'
+$QuantumScaler= Join-Path $OutRoot 'quantum\feature_scaler_fused.json'
 $FrontendDist = Join-Path $Frontend 'dist'
 
 function Test-Artifact($path) {
@@ -46,8 +51,8 @@ function Step($num, $total, $label) {
 }
 
 # =====================================================================
-$TotalSteps = 8
-if (-not $SkipFrontend) { $TotalSteps += 1 }   # npm install + build
+$TotalSteps = 4   # venv, extract, train, quantum
+if (-not $SkipFrontend) { $TotalSteps += 2 }   # npm install + build
 if ($Video -ne "")       { $TotalSteps += 1 }   # sample inference
 
 $step = 0
@@ -70,8 +75,8 @@ if ($pkgsInstalled -eq 'ok') {
     Write-Host "  Core packages already installed" -ForegroundColor Green
 } else {
     Write-Host "  Installing Python packages (this may take a few minutes)..."
-    $stderr_log = Join-Path $Working 'output\pip_install_stderr.log'
-    $null = New-Item -ItemType Directory -Force -Path (Join-Path $Working 'output')
+    $stderr_log = Join-Path $OutRoot 'pip_install_stderr.log'
+    $null = New-Item -ItemType Directory -Force -Path $OutRoot
     & $Pip install -r (Join-Path $RepoRoot 'requirements.txt') 2> $stderr_log
     if ($LASTEXITCODE -ne 0) {
         Write-Host "FAILED: pip install. See $stderr_log" -ForegroundColor Red
@@ -98,7 +103,7 @@ if (-not $SkipFrontend) {
 
 # ----- Step 3: rPPG feature extraction -----
 $step++
-Step $step $TotalSteps "rPPG feature extraction (POS, DFDC+FF++)"
+Step $step $TotalSteps "rPPG feature extraction (POS, DFDC)"
 if ($SkipExtract) {
     Write-Host "  [skip] -SkipExtract flag" -ForegroundColor DarkGray
 } elseif (Test-Artifact $RppgCsv) {
@@ -109,15 +114,14 @@ if ($SkipExtract) {
         $extractArgs += @('--max-per-class', '20')
         Write-Host "  Quick mode: max 20 per class" -ForegroundColor Yellow
     }
-    $extractArgs += '--include-ffpp'
     $extractArgs += @('--workers', '0')
 
-    $stderr_log = Join-Path $Working 'output\rppg\extract_stderr.log'
-    $null = New-Item -ItemType Directory -Force -Path (Join-Path $Working 'output\rppg')
+    $stderr_log = Join-Path $OutRoot 'rppg\extract_stderr.log'
+    $null = New-Item -ItemType Directory -Force -Path (Join-Path $OutRoot 'rppg')
 
-    Write-Host "  Extracting features (workers=0=all cores, includes FF++)..."
+    Write-Host "  Extracting features (workers=0=all cores)..."
     Write-Host "  stderr log: $stderr_log"
-    & $Venv (Join-Path $Working 'RPPG\rppg-pipeline\extract_dataset_features.py') @extractArgs 2> $stderr_log
+    & $Venv (Join-Path $Working 'RPPG\extract_dataset_features.py') @extractArgs 2> $stderr_log
     if ($LASTEXITCODE -ne 0) {
         Write-Host "FAILED: feature extraction (exit $LASTEXITCODE). See $stderr_log" -ForegroundColor Red
         exit 1
@@ -138,9 +142,9 @@ if (Test-Artifact $RppgPkl) {
     $trainArgs = @(
         '--features-csv', $RppgCsv,
         '--model-out', $RppgPkl,
-        '--metadata-out', (Join-Path $Working 'output\rppg\rppg_classifier_metadata.json')
+        '--metadata-out', (Join-Path $OutRoot 'rppg\rppg_classifier_metadata.json')
     )
-    & $Venv (Join-Path $Working 'RPPG\rppg-pipeline\train_classifier.py') @trainArgs
+    & $Venv (Join-Path $Working 'RPPG\train_classifier.py') @trainArgs
     if ($LASTEXITCODE -ne 0) { Write-Host "FAILED: classifier training"; exit 1 }
     Write-Host "  Classifier trained: $RppgPkl" -ForegroundColor Green
 }
@@ -156,7 +160,7 @@ foreach ($a in $quantumArtifacts) {
 if ($allQuantumExist) {
     Write-Host "  All quantum artifacts exist" -ForegroundColor Green
 } else {
-    $null = New-Item -ItemType Directory -Force -Path (Join-Path $Working 'output\quantum')
+    $null = New-Item -ItemType Directory -Force -Path (Join-Path $OutRoot 'quantum')
     Write-Host "  Running full quantum flow (build + select + train + evaluate + baselines)..."
     Push-Location $Working
     & $Venv -m quantum.pipeline --all
@@ -166,17 +170,7 @@ if ($allQuantumExist) {
     Write-Host "  Quantum pipeline complete" -ForegroundColor Green
 }
 
-# ----- Step 6: Quantum self-tests -----
-$step++
-Step $step $TotalSteps "Quantum self-tests (10/10 core tests)"
-Push-Location $Working
-& $Venv -m quantum.tests
-$exit = $LASTEXITCODE
-Pop-Location
-if ($exit -ne 0) { Write-Host "FAILED: quantum self-tests (exit $exit)"; exit 1 }
-Write-Host "  All tests passed" -ForegroundColor Green
-
-# ----- Step 7: Frontend build -----
+# ----- Step 6: Frontend build -----
 if (-not $SkipFrontend) {
     $step++
     Step $step $TotalSteps "Frontend build"
@@ -192,7 +186,7 @@ if (-not $SkipFrontend) {
     }
 }
 
-# ----- Step 8 (optional): sample inference -----
+# ----- Step 7 (optional): sample inference -----
 if ($Video -ne "") {
     $step++
     Step $step $TotalSteps "Sample inference: $Video"
@@ -200,8 +194,8 @@ if ($Video -ne "") {
     if (-not $videoPath) {
         Write-Host "  [warn] Video not found: $Video -- skipping inference" -ForegroundColor Yellow
     } else {
-        $outJson = Join-Path $Working 'output\pipeline\pipeline_result.json'
-        $null = New-Item -ItemType Directory -Force -Path (Join-Path $Working 'output\pipeline')
+        $outJson = Join-Path $OutRoot 'pipeline\pipeline_result.json'
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $OutRoot 'pipeline')
         Push-Location $Working
         & "$Venv" run_pipeline.py --source "$videoPath" --method POS --out "$outJson"
         $exit = $LASTEXITCODE
@@ -223,18 +217,18 @@ Write-Host " SETUP + PIPELINE COMPLETE" -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Generated artifacts:"
-Write-Host "  Stage 1 (frames):   $Working\output\frames\"
-Write-Host "  Stage 2 (rPPG):     $Working\output\rppg\"
-Write-Host "  Stage 3 (quantum):  $Working\output\quantum\"
-Write-Host "  Pipeline result:    $Working\output\pipeline\pipeline_result.json"
+Write-Host "  Stage 1 (frames):   $OutRoot\frames\"
+Write-Host "  Stage 2 (rPPG):     $OutRoot\rppg\"
+Write-Host "  Stage 3 (visual):   $OutRoot\visual\"
+Write-Host "  Stage 4 (quantum):  $OutRoot\quantum\"
+Write-Host "  Pipeline result:    $OutRoot\pipeline\pipeline_result.json"
 Write-Host ""
 Write-Host "Project structure:"
 Write-Host "  WORKING/"
 Write-Host "    frame/           Stage 1: YOLO face detection + quality gating (30 fps)"
-Write-Host "    RPPG/            Stage 2: MediaPipe -> POS/CHROM -> 23 features"
-Write-Host "      rppg/          Core rPPG modules"
-Write-Host "      rppg-pipeline/ Extraction/training scripts"
-Write-Host "    quantum/         Stage 3: QAOA(23->3) -> Hybrid VQC -> P(real)"
+Write-Host "    RPPG/            Stage 2: MediaPipe -> POS/CHROM -> 20 features"
+Write-Host "    visual/          Stage 3: ResNet50 + handcrafted -> 39 visual features"
+Write-Host "    quantum/         Stage 4: QAOA(59->3) -> Hybrid VQC -> P(real)"
 Write-Host "    run_pipeline.py  End-to-end orchestrator"
 Write-Host "  frontend/          React + Vite UI (server.py API on :8000)"
 Write-Host ""

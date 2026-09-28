@@ -309,7 +309,9 @@ if __name__ == "__main__":
     parser.add_argument("--frames-root", type=str, default=None, help="Root of stage-1 frame sequences")
     parser.add_argument("--video-root", type=str, default=None, help="Root of raw videos (fallback)")
     parser.add_argument("--rppg-csv", type=str, default=None, help="Path to rPPG features CSV")
-    parser.add_argument("--output-dir", type=str, default="output/visual", help="Output directory")
+    parser.add_argument("--output-dir", type=str, default=str(
+        Path(os.environ.get("MAJ_OUTPUT_ROOT", WORKING_ROOT.parent / "Scrape" / "output")) / "visual"
+    ), help="Output directory")
     parser.add_argument("--max-frames", type=int, default=100, help="Max frames per video")
     parser.add_argument("--backbone", type=str, default="resnet50", help="CNN backbone")
     parser.add_argument("--device", type=str, default="auto", help="Torch device")
@@ -358,20 +360,7 @@ if __name__ == "__main__":
         )
 
         if args.create_splits:
-            from quantum.config import FEATURE_NAMES
-
-            # Define feature sets for experiments
-            visual_cols = [c for c in pd.read_csv(visual_csv).columns if c not in ["label", "video_path", "video_id", "source"]]
-            rppg_cols = FEATURE_NAMES
-
-            feature_sets = {
-                "rppg_only": rppg_cols,
-                "visual_only": visual_cols,
-                "fused": rppg_cols + visual_cols,
-            }
-
             create_experiment_splits(
                 fused_csv=fused_csv,
                 output_dir=output_dir / "experiments",
-                feature_sets=feature_sets,
             )

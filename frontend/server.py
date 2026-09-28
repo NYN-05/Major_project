@@ -10,8 +10,8 @@ GET  /api/jobs/<id>                 {done, error, lines, result}
 GET  /api/jobs/<id>/events          SSE: line / stage / result / error events
 GET  /api/health                    {ok, artifacts...}
 GET  /api/previous                  last canonical pipeline result, if any
-GET  /api/artifacts?dir=<rel>       list files under output/<rel>
-GET  /api/files?rel=output/...      serve an artifact file
+GET  /api/artifacts?dir=<rel>       list files under Scrape/output/<rel>
+GET  /api/files?rel=<rel>           serve a file relative to Scrape/output/
 
 The heavy lifting is delegated to the existing stack unchanged: each job
 spawns `python run_pipeline.py` inside WORKING/ as a subprocess. No
@@ -40,7 +40,7 @@ load_dotenv()
 
 HERE = Path(__file__).resolve().parent
 WORKING = HERE.parent / "WORKING"
-OUTPUT_ROOT = WORKING / "output"
+OUTPUT_ROOT = Path(os.environ.get("MAJ_OUTPUT_ROOT", WORKING.parent / "Scrape" / "output"))
 INBOX = OUTPUT_ROOT / "frontend_inbox"
 RESULTS_DIR = OUTPUT_ROOT / "pipeline"
 CANONICAL_RESULT = RESULTS_DIR / "pipeline_result.json"

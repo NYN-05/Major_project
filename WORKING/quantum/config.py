@@ -161,7 +161,8 @@ FEATURE_MEANINGS = {
 
 QUANTUM_ROOT = Path(__file__).resolve().parent
 WORKING_ROOT = QUANTUM_ROOT.parent
-OUTPUT_DIR = WORKING_ROOT / "output" / "quantum"
+OUTPUT_ROOT = Path(os.environ.get("MAJ_OUTPUT_ROOT", WORKING_ROOT.parent / "Scrape" / "output"))
+OUTPUT_DIR = OUTPUT_ROOT / "quantum"
 
 
 @dataclass(frozen=True)
@@ -173,7 +174,7 @@ class DataConfig:
     hr_min: float = 30.0
     hr_max: float = 220.0
     csv_file: Path = field(
-        default_factory=lambda: WORKING_ROOT / "output" / "rppg" / "dataset_features.csv"
+        default_factory=lambda: OUTPUT_ROOT / "rppg" / "dataset_features.csv"
     )
     data_file: Path = field(default_factory=lambda: OUTPUT_DIR / "data.npz")
 

@@ -35,7 +35,7 @@ from pathlib import Path
 import numpy as np
 
 # ── Paths ──────────────────────────────────────────────────────────────
-SWEEP_DIR = Path(__file__).resolve().parent.parent / "output" / "sweep"
+SWEEP_DIR = Path(os.environ.get("MAJ_OUTPUT_ROOT", Path(__file__).resolve().parents[2] / "Scrape" / "output")) / "sweep"
 CHECKPOINT_DIR = SWEEP_DIR / "sweep_checkpoints"
 
 # ── Grid definitions ───────────────────────────────────────────────────
@@ -514,7 +514,8 @@ def run_sweep(timeout_s=600, patience=10, out_dir=None):
 
         if result["status"] == "ok":
             n_ok += 1
-            print(f"AUC={result['auc_roc']:.4f} F1={result['f1']:.4f} "
+            auc = result['auc_roc'] if result['auc_roc'] is not None else float('nan')
+            print(f"AUC={auc:.4f} F1={result['f1']:.4f} "
                   f"acc={result['accuracy']:.4f} ece={result['ece']:.4f} "
                   f"({result['wall_time_s']:.0f}s)")
         else:
