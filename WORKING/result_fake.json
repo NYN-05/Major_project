@@ -1,0 +1,36 @@
+{
+  "video": "C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\DFDC_Dataset\\Fake\\aaagqkcdis.mp4",
+  "timestamp": "2026-09-28T14:11:04.551882",
+  "stages": {
+    "frames": {
+      "status": "success",
+      "layer_status": "success",
+      "stats": {
+        "sampled_frames": 128,
+        "accepted_frames": 0,
+        "rejections": {
+          "extreme_pose": 102,
+          "no_face": 26
+        },
+        "mean_quality_score": 0.7432414062499999,
+        "mean_face_confidence": 0.0,
+        "temporal_coverage_ratio": 0.0
+      }
+    },
+    "rppg": {
+      "method": "POS",
+      "input_mode": "video_direct",
+      "fps_used": 30.0,
+      "n_frames_total": 148,
+      "n_frames_usable": 17,
+      "warnings": [
+        "Only 17/148 usable frames (need >= 48); result unreliable."
+      ]
+    }
+  },
+  "verdict": {
+    "label": "INCONCLUSIVE",
+    "confidence": null,
+    "reason": "rPPG produced no feature vector (insufficient usable frames)"
+  }
+}

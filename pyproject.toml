@@ -1,0 +1,58 @@
+[project]
+name = "deepfake-rppg"
+version = "1.0.0"
+description = "Deepfake detection using rPPG + hybrid quantum ML"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy==1.26.4",
+    "scipy>=1.11.0",
+    "scikit-learn>=1.2.0",
+    "matplotlib>=3.7.0",
+    "opencv-python>=4.8.0,<5.0.0",
+    "mediapipe>=0.10.9",
+    "pandas>=2.0.0",
+    "scikit-image>=0.26.0",
+    "pennylane>=0.36.0",
+    "pennylane-lightning>=0.36.0",
+    "torch==2.5.1+cu121",
+    "torchvision==0.20.1+cu121",
+    "torchaudio==2.5.1+cu121",
+    "ultralytics==8.3.0",
+    "xgboost>=2.0.0",
+    "pandas>=2.0.0",
+    "streamlit>=1.30.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["WORKING"]
+include = ["rppg*", "visual*", "quantum*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests as integration tests",
+    "gpu: marks tests requiring GPU",
+    "slow: marks tests as slow",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::UserWarning:pennylane",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "PIE", "T20", "PTH", "RUF", "PL"]
+ignore = ["E501", "B008", "B011"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

@@ -1,0 +1,106 @@
+{
+  "video": "C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\DFDC_Dataset\\Real\\00000.mp4",
+  "timestamp": "2026-09-28T14:10:37.678092",
+  "stages": {
+    "frames": {
+      "status": "success",
+      "layer_status": "success",
+      "stats": {
+        "sampled_frames": 380,
+        "accepted_frames": 186,
+        "rejections": {
+          "extreme_pose": 194
+        },
+        "mean_quality_score": 0.8563752631578948,
+        "mean_face_confidence": 0.8793946236559139,
+        "temporal_coverage_ratio": 0.48947368421052634
+      }
+    },
+    "rppg": {
+      "method": "POS",
+      "input_mode": "stage1_frames",
+      "fps_used": 30.0,
+      "n_frames_total": 186,
+      "n_frames_usable": 186,
+      "warnings": [
+        "Signal diagnostics: fps=30.0, n_total=186, n_usable=186, valid_ratio=1.00, combined_signal_len=186, left_valid=True, right_valid=True, forehead_valid=True",
+        "Feature diagnostics: raw_nan_count=0, SQI=0.634, HR=56.2BPM, SNR=2.5dB, PRV=228.5ms, Entropy=0.839, MAD=0.381",
+        "PQS: 0.601 (MEDIUM), components: SNR=0.27, frames=1.00, ROI=0.00, crossROI=0.91, freq=0.93, amp=0.73, temp=0.50"
+      ],
+      "features": {
+        "heart_rate_bpm": 56.25,
+        "snr_db": 2.486834510512906,
+        "prv_std_ms": 228.45427994391213,
+        "spectral_entropy": 0.839314410173709,
+        "mad": 0.3811720624736007,
+        "signal_quality_index": 0.6338223594398704,
+        "cheek_forehead_correlation": 0.8839098767549798,
+        "left_right_cheek_correlation": 0.7005045294685661,
+        "hr_half_diff": 42.1875,
+        "peak_prominence": 4.712125453282263,
+        "systolic_peak_width": 200.54819972886713,
+        "diastolic_notch_ratio": 2.564826574548945,
+        "forehead_cheek_phase_lag": 0.0,
+        "signal_to_motion_ratio": 7.531422911927061,
+        "peak_amplitude_variability": 2.5372742743328436,
+        "pulse_transit_time_proxy": 0.0,
+        "spectral_flatness": 0.38579789491139094,
+        "spectral_centroid": 1.7806446397892455,
+        "kurtosis": 33.48359544482877,
+        "phase_coherence_lr": 1.7059328026104057,
+        "phase_coherence_cf": 0.9176989842426034,
+        "pulse_cv_interval": 0.48378553399887264,
+        "zero_crossing_rate": 0.12972972972972974,
+        "cross_corr_lr": 0.7214084840165649,
+        "cross_corr_lf": 0.9797278027711845,
+        "cross_corr_rf": 0.7880919507387741,
+        "freq_agreement_lr": 0.9296875,
+        "freq_agreement_lf": 0.71875,
+        "freq_agreement_rf": 0.6484375,
+        "spectral_similarity_lr": 0.6251063798681332,
+        "spectral_similarity_lf": 0.5407857243119444,
+        "spectral_similarity_rf": 0.4421874457378465,
+        "cross_roi_corr_mean": 0.8147285287500139,
+        "cross_roi_corr_std": 0.10438015078389908,
+        "cross_roi_corr_min": 0.7005045294685661,
+        "cross_roi_corr_max": 0.9797278027711845,
+        "cross_roi_corr_cv": 0.1281164794168223,
+        "cross_roi_phase_lag_mean": 0.0,
+        "cross_roi_phase_lag_std": 0.0,
+        "cross_roi_phase_lag_min": 0.0,
+        "cross_roi_phase_lag_max": 0.0,
+        "cross_roi_coherence_mean": 1.1804435903652042,
+        "cross_roi_coherence_std": 0.37157698541895895,
+        "cross_roi_coherence_min": 0.9176989842426034,
+        "cross_roi_coherence_max": 1.7059328026104057,
+        "cross_roi_cross_corr_mean": 0.8297427458421746,
+        "cross_roi_freq_agreement_mean": 0.765625,
+        "cross_roi_spectral_similarity_mean": 0.536026516639308
+      }
+    },
+    "quantum": {
+      "prob_real": 0.5037096738815308,
+      "verdict": "UNCERTAIN",
+      "confidence": 0.0074193477630615234,
+      "explanation": {
+        "final_verdict": "INSUFFICIENT EVIDENCE / REVIEW REQUIRED",
+        "physiological_evidence": {
+          "verdict": "INSUFFICIENT EVIDENCE / REVIEW REQUIRED",
+          "probability_real": 0.5037096738815308,
+          "confidence": 0.0074193477630615234,
+          "reliability": "Unknown reliability",
+          "insufficient_reason": "Probability in uncertain range"
+        },
+        "visual_evidence": null,
+        "decision_logic": "P(Real)=0.504 in uncertain range (0.3-0.7) \u2192 INSUFFICIENT",
+        "requires_verification": true,
+        "coverage": 1.0,
+        "overall_confidence": 0.0074193477630615234
+      }
+    }
+  },
+  "verdict": {
+    "label": "UNCERTAIN",
+    "confidence": 0.0074193477630615234
+  }
+}
