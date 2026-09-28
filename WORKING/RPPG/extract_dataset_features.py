@@ -36,11 +36,10 @@ import pandas as pd  # noqa: E402
 import numpy as np  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from quantum.config import get_dfdc_dataset_path  # noqa: E402
-from WORKING.RPPG import RPPGPipeline  # noqa: E402
-from WORKING.RPPG.face_roi import FaceROIExtractor  # noqa: E402
+from RPPG import RPPGPipeline  # noqa: E402
+from RPPG.face_roi import FaceROIExtractor  # noqa: E402
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
@@ -333,7 +332,7 @@ def _cap_per_class(groups: List[list], max_per_class: Optional[int]) -> None:
         del files[max_per_class:]
 
 
-def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = False) -> List[Tuple[int, Path, str]]:
+def collect_samples(max_per_class: Optional[int] = None) -> List[Tuple[int, Path, str]]:
     samples: List[Tuple[int, Path, str]] = []
 
     dfdc_root = get_dfdc_dataset_path()
@@ -352,29 +351,7 @@ def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = Fa
             for path in real_files:
                 _add_sample(samples, 0, path, "DFDC_Dataset/Real")
 
-    if include_ffpp:
-        # FF++ (FaceForensics++): FF-synthesis clips are fully re-rendered
-        # fakes (Deepfakes/Face2Face/FaceShifter/NeuralTextures) where the
-        # physiological pulse is genuinely synthesized/altered; FF-real and
-        # YouTube-real are pristine real recordings.
-        ffpp_root = _repo_root().parent.parent / "FF++"
-        if ffpp_root.exists():
-            for split in ("train", "val", "test"):
-                synth_dir = ffpp_root / split / "FF-synthesis"
-                real_dirs = [ffpp_root / split / "FF-real", ffpp_root / split / "YouTube-real"]
-                synth_files = sorted(_iter_video_files(synth_dir)) if synth_dir.exists() else []
-                real_files = []
-                for rd in real_dirs:
-                    if rd.exists():
-                        real_files.extend(_iter_video_files(rd))
-                real_files = sorted(real_files)
-                if max_per_class is not None:
-                    _cap_per_class([synth_files, real_files], max_per_class)
-                for path in synth_files:
-                    _add_sample(samples, 1, path, f"FF++/{split}/FF-synthesis")
-                for path in real_files:
-                    _add_sample(samples, 0, path, f"FF++/{split}/FF-real")
-
+    # Legacy archive (1) dataset support (optional, if CSV exists)
     legacy_root = _repo_root().parent / "archive (1)"
     legacy_csv = legacy_root / "DeepFake Videos Dataset.csv"
     if legacy_csv.exists():
@@ -398,19 +375,18 @@ def collect_samples(max_per_class: Optional[int] = None, include_ffpp: bool = Fa
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Extract rPPG features from deepfake and real video datasets.")
+    parser = argparse.ArgumentParser(description="Extract rPPG features from deepfake and real video datasets (DFDC only).")
     parser.add_argument("--method", default="POS", choices=["POS", "CHROM"], help="rPPG reconstruction method")
     parser.add_argument("--target-fps", type=float, default=None, help="Optional target FPS for sampling")
-    parser.add_argument("--blur-threshold", type=float, default=15.0, help="Minimum Laplacian variance to keep a frame")
-    parser.add_argument("--brightness-min", type=int, default=25, help="Minimum mean pixel intensity to keep a frame (0-255)")
-    parser.add_argument("--brightness-max", type=int, default=230, help="Maximum mean pixel intensity to keep a frame (0-255)")
-    parser.add_argument("--min-usable-frames", type=int, default=48, help="Minimum usable frames required per clip")
+    parser.add_argument("--blur-threshold", type=float, default=3.0, help="Minimum Laplacian variance to keep a frame (lowered for compressed video)")
+    parser.add_argument("--brightness-min", type=int, default=15, help="Minimum mean pixel intensity to keep a frame (0-255)")
+    parser.add_argument("--brightness-max", type=int, default=245, help="Maximum mean pixel intensity to keep a frame (0-255)")
+    parser.add_argument("--min-usable-frames", type=int, default=24, help="Minimum usable frames required per clip (lowered for short videos)")
     parser.add_argument("--max-per-class", type=int, default=None, help="Optional cap for each label when extracting features")
-    parser.add_argument("--include-ffpp", action="store_true", help="Also include FaceForensics++ clips (FF-synthesis fakes, FF-real/YouTube-real reals)")
     parser.add_argument("--output", default=None, help="Optional output CSV path")
     parser.add_argument("--workers", type=int, default=1, help="Number of parallel worker processes (0 = all CPU cores)")
-    parser.add_argument("--min-sqi", type=float, default=0.10, help="Drop clips whose signal_quality_index is below this (0 disables)")
-    parser.add_argument("--max-nan-features", type=int, default=1, help="Drop clips with more than this many median-filled (raw-NaN) features")
+    parser.add_argument("--min-sqi", type=float, default=0.05, help="Drop clips whose signal_quality_index is below this (0 disables)")
+    parser.add_argument("--max-nan-features", type=int, default=2, help="Drop clips with more than this many median-filled (raw-NaN) features")
     parser.add_argument("--gpu", action="store_true", help="Use GPU-accelerated face detection (YuNet via ONNX Runtime CUDA) instead of MediaPipe")
     parser.add_argument("--gpu-workers", type=int, default=None, help="Number of GPU worker processes (default: 8 when --gpu is set)")
     parser.add_argument("--roi-weights", type=float, nargs=3, default=None, metavar=("LEFT", "RIGHT", "FOREHEAD"), help="ROI weights for left cheek, right cheek, forehead (default: 0.35 0.35 0.30)")
@@ -419,7 +395,7 @@ def main() -> None:
     parser.add_argument("--quality-weight-min", type=float, default=0.05, help="Minimum weight for poor-quality frames (default: 0.05)")
     args = parser.parse_args()
 
-    samples = collect_samples(max_per_class=args.max_per_class, include_ffpp=args.include_ffpp)
+    samples = collect_samples(max_per_class=args.max_per_class)
     if not samples:
         print("No dataset videos were found. Check DFDC_DATASET_PATH in .env or archive (1).")
         return

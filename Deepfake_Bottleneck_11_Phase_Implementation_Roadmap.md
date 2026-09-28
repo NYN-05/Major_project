@@ -1121,9 +1121,7 @@ PHASE 11
 Separate signal reliability from deepfake evidence
 ```
 
-# Recommended Experimental Discipline
-
-## Keep the Dataset Fixed
+# Recommended Experimental DisciplineKeep the Dataset Fixed
 
 Do not add external videos, synthetic videos, additional DFDC samples, or new physiological ground-truth data if the project requirement is to keep the dataset unchanged.
 

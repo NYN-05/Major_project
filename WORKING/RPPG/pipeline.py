@@ -119,13 +119,13 @@ class RPPGPipeline:
         self,
         method: str = "POS",
         target_fps: Optional[float] = None,
-        blur_threshold: float = 5.0,
-        brightness_min: int = 20,
-        brightness_max: int = 240,
+        blur_threshold: float = 3.0,
+        brightness_min: int = 15,
+        brightness_max: int = 245,
         low_hz: float = 0.7,
         high_hz: float = 4.0,
-        min_usable_frames: int = 48,
-        min_sqi: float = 0.10,
+        min_usable_frames: int = 24,
+        min_sqi: float = 0.05,
         roi_weights: tuple = (0.35, 0.35, 0.30),  # left cheek, right cheek, forehead
         # Phase 2: quality-weighted rPPG
         use_quality_weighting: bool = False,
@@ -133,7 +133,7 @@ class RPPGPipeline:
         # Phase 3: temporal window analysis
         window_duration_sec: float = 8.0,  # duration of each window in seconds
         window_overlap_sec: float = 4.0,   # overlap between windows in seconds
-        min_window_usable_frames: int = 24,  # minimum usable frames per window
+        min_window_usable_frames: int = 12,  # minimum usable frames per window
         enable_window_analysis: bool = False,  # enable temporal window analysis
     ):
         """
@@ -144,17 +144,17 @@ class RPPGPipeline:
                               this rate; otherwise the video's native
                               fps is used.
         blur_threshold      : minimum Laplacian variance to keep a frame.
-                              Lowered from 15.0 to 5.0 (P7) for low-res compressed video.
+                              Lowered to 3.0 for low-res compressed video.
         brightness_min       : minimum mean pixel intensity to keep a frame.
-                              Lowered from 25 to 20 (P7) for darker videos.
+                              Lowered to 15 for darker videos.
         brightness_max       : maximum mean pixel intensity to keep a frame.
-                              Raised from 230 to 240 (P7) for brighter videos.
+                              Raised to 245 for brighter videos.
         low_hz, high_hz      : physiological frequency band (Hz).
         min_usable_frames    : minimum number of usable frames required
-                                to attempt signal extraction (~1.5-2s at
-                                25-30fps).
+                                to attempt signal extraction (~1s at
+                                25-30fps; lowered for short videos).
         min_sqi              : minimum signal quality index to accept a clip
-                                (aligned with training gate in extract_dataset_features.py).
+                                (lowered to 0.05 for low-quality inputs).
         roi_weights          : weighting for combining left cheek /
                                 right cheek / forehead signals.
         use_quality_weighting: if True, use continuous quality weights instead

@@ -7,24 +7,11 @@ convention (CSV: 1 = deepfake, 0 = real; quantum: LABEL_REAL = 1,
 LABEL_FAKE = 0), and stores a subject-grouped train/val/test split as
 data.npz for QAOA selection, VQC training, and evaluation.
 
-Supports multiple feature configurations:
-- rPPG only (original 23 features)
-- Visual only (39 features)
-- Fused (rPPG + Visual = 62 features)
-
-Subject grouping: the CSV carries no explicit subject IDs, so the
-group key is derived from the clip path. FF++ clips are grouped by
-source subject so a real clip and its synthesized counterpart can
-never straddle train/val/test:
-  - FF-real / FF-synthesis (e.g. id0_0000.mp4, id0_id16_0002.mp4)
-    -> "ffpp:src:<source-subject>" (first "id" token of the stem).
-  - YouTube-real clips (e.g. 00000.mp4) -> "ffpp:yt:<stem>" (each
-    unpaired YouTube clip is its own group).
-DFDC clips carry no pairing or subject information on disk, so each
-is treated as an individual group ("clip:<path>") - a documented
-limitation (DFDC subject-level separation is unrecoverable here).
-The split is seeded and balanced per class, and a leakage assertion
-aborts the build if any group key appears in more than one split.
+Only DFDC dataset is supported. Subject grouping: each clip is treated as 
+an individual group ("clip:<path>") - a documented limitation (DFDC subject-level 
+separation is unrecoverable from filenames). The split is seeded and balanced 
+per class, and a leakage assertion aborts the build if any group key appears 
+in more than one split.
 """
 
 import csv
@@ -36,7 +23,6 @@ from quantum.config import (
     DataConfig,
     FEATURE_NAMES,  # alias for RPPG_FEATURE_NAMES
     RPPG_FEATURE_NAMES,
-    RPPG_BASE_FEATURE_NAMES,
     VISUAL_FEATURE_NAMES,
     FUSED_FEATURE_NAMES,
     LABEL_FAKE,
@@ -50,12 +36,8 @@ LABEL_FAKE = 0  # quantum convention: 0 = fake
 
 SPLITS = ("train", "val", "test")
 
-# Feature set configurations
+# Feature set configurations - only fused is supported
 FEATURE_SETS = {
-    "rppg_only": RPPG_FEATURE_NAMES,
-    "rppg_base": RPPG_BASE_FEATURE_NAMES,
-    "rppg_cross_roi": RPPG_FEATURE_NAMES,
-    "visual_only": VISUAL_FEATURE_NAMES,
     "fused": FUSED_FEATURE_NAMES,
 }
 
@@ -103,38 +85,20 @@ def quantum_to_display_label(label):
 def _infer_subject_key(row):
     """Derive a subject group key from the video path.
 
-    FF++ clips are grouped by source subject (first "id" token of the
-    filename stem) so a real clip and its synthesized counterpart stay
-    in the same split: id0_0000.mp4 and id0_id16_0002.mp4 -> "ffpp:src:id0".
-    YouTube-real clips (numeric stems, no pairing) are their own group.
-    DFDC clip names carry no subject info -> clip id (documented
-    limitation: DFDC subject-level separation is unrecoverable on disk).
+    Only DFDC dataset is supported. Each clip is treated as its own group
+    since DFDC clip names carry no subject information on disk.
     """
     path = row["video_path"].replace("\\", "/").strip().lower()
-    if "/ff++/" in path or path.startswith("ff++/"):
-        stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-        folder = path.rstrip("/").rsplit("/", 2)[-2]
-        if folder == "youtube-real" or not stem.split("_")[0].startswith("id"):
-            return "ffpp:yt:" + stem
-        return "ffpp:src:" + stem.split("_")[0]
-    if "archive (1)" in path:
-        stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-        return "subj:" + stem
+    # DFDC clips - each clip is its own group (documented limitation)
     return "clip:" + path
 
 
 def _infer_split_key(row):
     """Official dataset split when the source layout declares one.
 
-    FF++ clips live under FF++/<split>/..., so their train/val/test
-    folders are used directly (no random regrouping); anything else
-    returns None and falls back to the seeded grouped random split.
+    DFDC has no official train/val/test folder structure, so returns None
+    and falls back to the seeded grouped random split.
     """
-    path = row["video_path"].replace("\\", "/").strip().lower()
-    if "/ff++/" in path:
-        for split in SPLITS:
-            if f"/ff++/{split}/" in path:
-                return split
     return None
 
 
@@ -213,11 +177,6 @@ def _load_feature_rows(csv_file, feature_names, cfg=None):
     return X, y, groups, paths, split_keys, filter_stats
 
 
-def _load_rppg_rows(csv_file, cfg=None):
-    """Backward compatibility: load rPPG features only."""
-    return _load_feature_rows(csv_file, RPPG_FEATURE_NAMES, cfg)
-
-
 def _grouped_train_val_test_split(X, y, groups, paths, cfg):
     """Deterministic subject-grouped train/val/test split, balanced per class.
 
@@ -291,24 +250,6 @@ def _grouped_train_val_test_split(X, y, groups, paths, cfg):
     return data
 
 
-def _split_by_source(X, y, groups, paths, split_keys):
-    """Explicit train/val/test split from the dataset's own folders.
-
-    Used when every row carries an official split hint (FF++ layout);
-    returns the same dict keys as _grouped_train_val_test_split.
-    """
-    data = {}
-    for s in SPLITS:
-        mask = split_keys == s
-        if not mask.any():
-            raise ValueError(f"Official split '{s}' has no samples")
-        data[f"X_{s}"] = X[mask]
-        data[f"y_{s}"] = y[mask]
-        data[f"groups_{s}"] = groups[mask]
-        data[f"paths_{s}"] = paths[mask]
-    return data
-
-
 def _assert_no_group_leakage(split):
     """Fail loudly if any subject group appears in more than one split.
 
@@ -351,27 +292,25 @@ def _write_split_manifest(split, cfg):
     return out
 
 
-def build_dataset(cfg=None, feature_set: str = "rppg_only", csv_file=None):
+def build_dataset(cfg=None, feature_set: str = "fused", csv_file=None):
     """Build data.npz from a feature table.
+
+    Only fused mode (rPPG + Visual) is supported.
 
     Args:
         cfg: DataConfig instance
-        feature_set: One of "rppg_only", "visual_only", "fused"
-        csv_file: Optional path to CSV file (for visual_only or fused)
+        feature_set: Must be "fused"
+        csv_file: Optional path to fused features CSV file
     """
+    if feature_set != "fused":
+        raise ValueError(f"Only 'fused' feature set is supported, got: {feature_set}")
+    
     cfg = cfg or DataConfig()
-    feature_names = FEATURE_SETS.get(feature_set, RPPG_FEATURE_NAMES)
+    feature_names = FEATURE_SETS.get(feature_set, FUSED_FEATURE_NAMES)
 
-    # Determine CSV file
+    # Determine CSV file - must provide fused CSV
     if csv_file is None:
-        if feature_set == "rppg_only":
-            csv_file = cfg.csv_file
-        elif feature_set == "visual_only":
-            csv_file = cfg.csv_file.parent.parent / "visual" / "visual_features.csv"
-        elif feature_set == "fused":
-            csv_file = cfg.csv_file.parent.parent / "visual" / "fused_features.csv"
-        else:
-            csv_file = cfg.csv_file
+        csv_file = cfg.csv_file.parent.parent / "visual" / "fused_features.csv"
 
     X, y, groups, paths, split_keys, stats = _load_feature_rows(csv_file, feature_names, cfg)
 
@@ -388,12 +327,8 @@ def build_dataset(cfg=None, feature_set: str = "rppg_only", csv_file=None):
             f"(HR filter skipped for feature_set={feature_set})"
         )
 
-    use_official = bool(split_keys.size) and all(k is not None for k in split_keys)
-    if use_official:
-        print("  Using official dataset train/val/test folders (no regrouping).")
-        split = _split_by_source(X, y, groups, paths, split_keys)
-    else:
-        split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
+    # Always use grouped random split for DFDC (no official splits)
+    split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
     _assert_no_group_leakage(split)
 
     # Save manifest with feature set info
@@ -454,22 +389,6 @@ def load_dataset(path=None):
             f"Dataset not found at {path}. Build it first with: python -m quantum.pipeline --build-data"
         )
     data = np.load(path, allow_pickle=True)
-    return {
-        key: data[key]
-        for key in (
-            "X_train", "y_train", "X_val", "y_val", "X_test", "y_test",
-            "groups_train", "groups_val", "groups_test",
-        )
-    }
-
-
-def load_dataset(path=None):
-    path = path or DataConfig().data_file
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Dataset not found at {path}. Build it first with: python -m quantum.pipeline --build-data"
-        )
-    data = np.load(path)
     return {
         key: data[key]
         for key in (

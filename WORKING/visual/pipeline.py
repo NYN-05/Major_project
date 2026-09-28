@@ -234,23 +234,21 @@ def fuse_features(
 def create_experiment_splits(
     fused_csv: Path,
     output_dir: Path,
-    feature_sets: dict,
     test_ratio: float = 0.2,
     val_ratio: float = 0.2,
     seed: int = 42,
 ) -> None:
     """
-    Create train/val/test splits for different feature configurations.
+    Create train/val/test splits for fused features only.
 
     Args:
         fused_csv: Path to fused features CSV
         output_dir: Output directory for split files
-        feature_sets: Dict of {name: [feature_columns]} for different experiments
         test_ratio: Test split ratio
         val_ratio: Validation split ratio
         seed: Random seed
     """
-    from sklearn.model_selection import StratifiedGroupKFold
+    from sklearn.model_selection import train_test_split
 
     df = pd.read_csv(fused_csv)
     if "label" not in df.columns:
@@ -266,8 +264,6 @@ def create_experiment_splits(
     y = df["label"].values
 
     # Simple random split with stratification (for now)
-    from sklearn.model_selection import train_test_split
-
     # First split: train+val vs test
     train_val_idx, test_idx = train_test_split(
         np.arange(len(df)), test_size=test_ratio, stratify=y, random_state=seed
@@ -281,26 +277,22 @@ def create_experiment_splits(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for set_name, feature_cols in feature_sets.items():
-        # Check which features exist
-        available_cols = [c for c in feature_cols if c in df.columns]
-        missing = set(feature_cols) - set(available_cols)
-        if missing:
-            print(f"  Warning: {set_name} missing features: {missing}")
+    # Only fused feature set
+    feature_cols = [c for c in df.columns if c not in ["label", "video_path", "video_id", "source", "video_stem"]]
+    
+    if not feature_cols:
+        print("  No features available for fused set")
+        return
 
-        if not available_cols:
-            print(f"  Skipping {set_name}: no features available")
-            continue
-
-        X = df[available_cols].values
-        # Save splits
-        np.savez_compressed(
-            output_dir / f"{set_name}_split.npz",
-            X_train=X[train_idx], y_train=y[train_idx],
-            X_val=X[val_idx], y_val=y[val_idx],
-            X_test=X[test_idx], y_test=y[test_idx],
-            feature_names=np.array(available_cols),
-        )
+    X = df[feature_cols].values
+    # Save splits
+    np.savez_compressed(
+        output_dir / "fused_split.npz",
+        X_train=X[train_idx], y_train=y[train_idx],
+        X_val=X[val_idx], y_val=y[val_idx],
+        X_test=X[test_idx], y_test=y[test_idx],
+        feature_names=np.array(feature_cols),
+    )
 
     # Save split indices for reproducibility
     np.savez_compressed(

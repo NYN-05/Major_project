@@ -11,7 +11,6 @@ from quantum.config import (
     DecisionConfig, DataConfig, QAOASelectionConfig, VQCConfig,
     RPPG_FEATURE_NAMES, VISUAL_FEATURE_NAMES, FUSED_FEATURE_NAMES,
     RPPG_BASE_FEATURE_NAMES, CROSS_ROI_FEATURE_NAMES,
-    PHASE6_FEATURE_SETS, PHASE7_ABLATION_SETS
 )
 from quantum.evaluation import (
     classification_metrics, balanced_accuracy, decision_bins,
@@ -57,28 +56,17 @@ class TestQuantumConfig(unittest.TestCase):
 
     def test_feature_names_lengths(self):
         """Test feature name list lengths."""
-        self.assertEqual(len(RPPG_FEATURE_NAMES), 48)
+        # RPPG has 20 features (Phase 4 cross-ROI features removed)
+        self.assertEqual(len(RPPG_FEATURE_NAMES), 20)
         self.assertEqual(len(VISUAL_FEATURE_NAMES), 39)
-        self.assertEqual(len(FUSED_FEATURE_NAMES), 87)
+        # Fused = 20 rPPG + 39 visual = 59
+        self.assertEqual(len(FUSED_FEATURE_NAMES), 59)
 
-    def test_phase6_feature_sets(self):
-        """Test Phase 6 feature set definitions."""
-        self.assertIn('rppg_base', PHASE6_FEATURE_SETS)
-        self.assertIn('rppg_cross_roi', PHASE6_FEATURE_SETS)
-        self.assertIn('visual_only', PHASE6_FEATURE_SETS)
-        self.assertIn('fused', PHASE6_FEATURE_SETS)
-
-    def test_phase7_ablation_sets(self):
-        """Test Phase 7 ablation feature sets."""
-        self.assertIn('A_rppg_only', PHASE7_ABLATION_SETS)
-        self.assertIn('B_pos_only', PHASE7_ABLATION_SETS)
-        self.assertIn('C_chrom_only', PHASE7_ABLATION_SETS)
-        self.assertIn('D_pos_chrom', PHASE7_ABLATION_SETS)
-        self.assertIn('E_rppg_quality', PHASE7_ABLATION_SETS)
-        self.assertIn('F_rppg_cross_roi', PHASE7_ABLATION_SETS)
-        self.assertIn('G_rppg_visual', PHASE7_ABLATION_SETS)
-        self.assertIn('H_rppg_visual_quality', PHASE7_ABLATION_SETS)
-        self.assertIn('I_full', PHASE7_ABLATION_SETS)
+    def test_feature_sets_only_fused(self):
+        """Test that only fused feature set is supported."""
+        self.assertEqual(len(FEATURE_SETS), 1)
+        self.assertIn('fused', FEATURE_SETS)
+        self.assertEqual(FEATURE_SETS['fused'], FUSED_FEATURE_NAMES)
 
 
 class TestEvaluationMetrics(unittest.TestCase):
@@ -100,8 +88,7 @@ class TestEvaluationMetrics(unittest.TestCase):
 
     def test_classification_metrics_three_state(self):
         """Test classification metrics for three-state decision."""
-        cfg = DC(fake_max_prob=0.3, real_min_prob=0.7)
-        metrics = classification_metrics(self.y_true, self.prob_real, cfg=cfg)
+        metrics = classification_metrics(self.y_true, self.prob_real, fake_max_prob=0.3, real_min_prob=0.7)
         self.assertIn('accuracy', metrics)
         self.assertIn('coverage', metrics)
         self.assertIn('n_classified', metrics)
@@ -112,8 +99,7 @@ class TestEvaluationMetrics(unittest.TestCase):
         """Test balanced accuracy calculation."""
         y_true = np.array([0, 0, 1, 1])
         prob_real = np.array([0.1, 0.2, 0.8, 0.9])
-        cfg = DC(fake_max_prob=0.3, real_min_prob=0.7)
-        bal_acc = balanced_accuracy(y_true, prob_real, cfg=cfg)
+        bal_acc = balanced_accuracy(y_true, prob_real, fake_max_prob=0.3, real_min_prob=0.7)
         self.assertIsInstance(bal_acc, float)
         self.assertGreaterEqual(bal_acc, 0.0)
         self.assertLessEqual(bal_acc, 1.0)

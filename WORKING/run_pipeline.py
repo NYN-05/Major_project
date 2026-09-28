@@ -3,7 +3,7 @@ run_pipeline.py
 ================
 Single endpoint for the full deepfake-verification flow:
 
-    frames  ->  rPPG  ->  quantum  ->  final verdict (REAL / FAKE / UNCERTAIN)
+    frames  ->  rPPG  ->  visual  ->  quantum (fused)  ->  final verdict (REAL / FAKE / UNCERTAIN)
 
 Stages
 ------
@@ -11,20 +11,22 @@ Stages
              (YOLO face detection, blur/dark/bright/face checks).
 2. RPPG    : physiological feature extraction via the `RPPG/` module
              (POS/CHROM pulse reconstruction -> 20-feature vector).
-3. QUANTUM : train-fitted feature scaling + QAOA-selected subset of the
-              rPPG features -> trained Hybrid VQC checkpoint -> P(real) ->
+3. VISUAL  : visual feature extraction via the `visual/` module
+             (ResNet50 + handcrafted -> 39-feature vector from face crops).
+4. QUANTUM : train-fitted feature scaling + QAOA-selected subset of the
+              fused (rPPG + visual) features -> trained Hybrid VQC checkpoint -> P(real) ->
               KYC decision bins (real >= 0.7, fake <= 0.3).
 
-The quantum layer consumes the rPPG features directly (same names/order as
-RPPGFeatures.feature_names()); no synthetic or transformed data is used.
+The quantum layer consumes fused features directly (same names/order as
+RPPGFeatures.feature_names() + VISUAL_FEATURE_NAMES); no synthetic or transformed data is used.
 
 Usage
 -----
     python run_pipeline.py --source path/to/video.mp4 [--method POS|CHROM] [--out result.json]
 
-Requires pre-trained quantum artifacts (output/qaoa_selection.json,
-output/hybrid_vqc.pt). If missing, run once from this folder:
-    python -m quantum.pipeline --all
+Requires pre-trained quantum artifacts (output/qaoa_selection_fused.json,
+output/hybrid_vqc_fused.pt, output/feature_scaler_fused.json). If missing, run once from this folder:
+    python -m quantum.pipeline --all --feature-set fused
 """
 
 import argparse
@@ -47,10 +49,16 @@ for _root in (FRAME_ROOT, RPPG_ROOT, WORKING):
         sys.path.insert(0, str(_root))
 
 from frame.pipeline import run_frame_sampling_quality_layer  # stage 1
-from rppg import RPPGPipeline  # stage 2
+from RPPG import RPPGPipeline  # stage 2
 
-# Stage 3 (quantum.pipeline) imports torch + pennylane (~7 s); it is imported
-# lazily inside quantum_inference() so stage-1/2 progress lines stream to the
+# Visual feature extraction (stage 3)
+VISUAL_ROOT = WORKING / "visual"
+if str(VISUAL_ROOT) not in sys.path:
+    sys.path.insert(0, str(VISUAL_ROOT))
+from visual.extractor import compute_visual_features  # stage 3
+
+# Stage 4 (quantum.pipeline) imports torch + pennylane (~7 s); it is imported
+# lazily inside quantum_inference() so stage-1/2/3 progress lines stream to the
 # SSE client immediately instead of blocking on the heavy import stack.
 
 FRAME_WEIGHTS = FRAME_ROOT / "weights" / "yolov8n-face-lindevs.pt"
@@ -70,7 +78,7 @@ def run_frames_stage(video_path: Path) -> tuple[dict, dict, dict]:
     layer_result = run_frame_sampling_quality_layer(
         source=str(video_path),
         weights_path=str(FRAME_WEIGHTS),
-        confidence_threshold=0.35,
+        confidence_threshold=0.25,
         image_size=320,
         device="auto",
         use_half=False,
@@ -149,7 +157,7 @@ def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None =
     """rPPG feature extraction. Uses the stage-1 accepted frames when the
     frame layer produced them (input_mode=stage1_frames); otherwise falls
     back to reading the video directly (input_mode=video_direct)."""
-    pipeline = RPPGPipeline(method=method, min_sqi=0.10)
+    pipeline = RPPGPipeline(method=method)
     input_mode = "video_direct"
     if handoff:
         frames_dir = handoff.get("frames_dir", "")
@@ -183,19 +191,49 @@ def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None =
 
 
 # ---------------------------------------------------------------------------
+# Stage 3: Visual
+# ---------------------------------------------------------------------------
+
+def run_visual_stage(video_path: Path, frame_handoff: dict | None = None) -> tuple[dict, dict | None]:
+    """Visual feature extraction from stage-1 face crops.
+    
+    Uses the face crops saved by stage-1 (output/frames/frame_sequences/<video>/cropped_faces/).
+    Returns visual features dict or None if extraction fails."""
+    if not frame_handoff:
+        return {"status": "skipped", "reason": "no frame handoff"}, None
+    
+    frames_dir = frame_handoff.get("frames_dir", "")
+    if not frames_dir or not Path(frames_dir).is_dir():
+        return {"status": "skipped", "reason": "no frames directory"}, None
+    
+    try:
+        visual_features = compute_visual_features(
+            frames_dir=frames_dir,
+            max_frames=100,
+            backbone="resnet50",
+            device="auto",
+            deep_feature_dim=16,
+        )
+        feat_dict = visual_features.to_dict()
+        return {"status": "success", "features": feat_dict}, feat_dict
+    except Exception as exc:
+        return {"status": "failure", "reason": str(exc)}, None
+
+
+# ---------------------------------------------------------------------------
 # Stage 4: quantum
 # ---------------------------------------------------------------------------
 
 def quantum_inference(features: dict) -> dict:
-    """QAOA-selected subset of the actual rPPG features -> trained hybrid VQC.
+    """QAOA-selected subset of the fused (rPPG + visual) features -> trained hybrid VQC.
 
     `predict_features` is the quantum layer's own inference entry point: it
-    applies the saved training-time QAOA indices to the 25-feature rPPG output
+    applies the saved training-time QAOA indices to the fused feature vector
     and returns P(real) plus the KYC verdict (REAL / FAKE / UNCERTAIN).
     """
     from quantum.pipeline import predict_features  # deferred: torch+pennylane ~7 s
 
-    explanation = predict_features(features, feature_set="rppg_only")
+    explanation = predict_features(features, feature_set="fused")
     # Convert DecisionExplanation to legacy dict format
     phys = explanation.physiological_evidence
     verdict_map = {
@@ -243,7 +281,7 @@ def emit_signal(result, path: str | None) -> None:
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="End-to-end deepfake verdict: frames -> rPPG -> quantum"
+        description="End-to-end deepfake verdict: frames -> rPPG -> visual -> quantum (fused)"
     )
     parser.add_argument("--source", required=True, help="Path to the input video (mp4/avi/...)")
     parser.add_argument("--method", default="POS", choices=["POS", "CHROM"], help="rPPG reconstruction method")
@@ -266,7 +304,7 @@ def main() -> int:
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     result = {"video": str(video_path), "timestamp": datetime.now().isoformat(), "stages": {}}
 
-    print(f"[1/3] FRAMES stage  : {video_path.name}")
+    print(f"[1/4] FRAMES stage  : {video_path.name}")
     frames_stage, frame_stats, frame_handoff = run_frames_stage(video_path)
     result["stages"]["frames"] = {**frames_stage, "stats": frame_stats}
     print(
@@ -274,11 +312,11 @@ def main() -> int:
         f"mean_quality = {frame_stats['mean_quality_score']:.3f}"
     )
 
-    print(f"[2/3] RPPG stage    : method={args.method}")
-    rppg_stage, vector, rppg_result = run_rppg_stage(video_path, args.method, frame_handoff)
+    print(f"[2/4] RPPG stage    : method={args.method}")
+    rppg_stage, rppg_vector, rppg_result = run_rppg_stage(video_path, args.method, frame_handoff)
     result["stages"]["rppg"] = rppg_stage
     emit_signal(rppg_result, args.signal_out)
-    if vector is None:
+    if rppg_vector is None:
         result["verdict"] = {
             "label": VERDICT_INCONCLUSIVE,
             "confidence": None,
@@ -292,8 +330,24 @@ def main() -> int:
         f"HR = {rppg_stage['features']['heart_rate_bpm']:.1f} BPM"
     )
 
-    print("[3/3] QUANTUM stage : rPPG features -> QAOA subset -> hybrid VQC")
-    quantum = quantum_inference(rppg_stage["features"])
+    print("[3/4] VISUAL stage  : ResNet50 + handcrafted features from face crops")
+    visual_stage, visual_features = run_visual_stage(video_path, frame_handoff)
+    result["stages"]["visual"] = visual_stage
+    if visual_features is None:
+        result["verdict"] = {
+            "label": VERDICT_INCONCLUSIVE,
+            "confidence": None,
+            "reason": "Visual feature extraction failed",
+        }
+        _finish(result, args.out, exit_code=3)
+        return 3
+    print(f"      extracted {len(visual_features)} visual features")
+
+    # Fuse rPPG and visual features
+    fused_features = {**rppg_stage["features"], **visual_features}
+
+    print("[4/4] QUANTUM stage : fused (rPPG + visual) features -> QAOA subset -> hybrid VQC")
+    quantum = quantum_inference(fused_features)
     result["stages"]["quantum"] = quantum
     if quantum["prob_real"] is None:
         print(f"      {quantum['verdict']}: {quantum.get('reason', 'no probability produced')}")

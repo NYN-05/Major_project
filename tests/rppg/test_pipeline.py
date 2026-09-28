@@ -7,8 +7,8 @@ from pathlib import Path
 # Add WORKING directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "WORKING"))
 
-from rppg.pipeline import RPPGPipeline, RPPGResult, FrameQuality, WindowResult
-from rppg.features import RPPGFeatures
+from RPPG.pipeline import RPPGPipeline, RPPGResult, FrameQuality, WindowResult
+from RPPG.features import RPPGFeatures
 
 
 class TestRPPGResult(unittest.TestCase):

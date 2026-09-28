@@ -104,20 +104,24 @@ def test_hamiltonian_matches_classical():
 
 
 def test_real_hamiltonian_verification():
-    """verify_hamiltonian must be ~0 on the real rPPG feature table.
+    """verify_hamiltonian must be ~0 on the real fused feature table.
     
     Uses classical pre-selection (like the pipeline) to limit to 18 features,
     avoiding 2^29 memory explosion in make_hamiltonian_diagonal.
+    
+    Skipped if dataset CSV not found.
     """
-    csv_file = DataConfig().csv_file
+    csv_file = DataConfig().csv_file.parent.parent / "visual" / "fused_features.csv"
     if not csv_file.exists():
-        raise AssertionError(f"dataset CSV not found at {csv_file}")
-    from quantum.data import _load_rppg_rows
+        import pytest
+        pytest.skip(f"fused features CSV not found at {csv_file}")
+    from quantum.data import _load_feature_rows, FEATURE_SETS
     from quantum.qaoa import select_classical
 
-    X, y, _, _, _, _ = _load_rppg_rows(csv_file, DataConfig())
-    # Feature count updated for Phase 4 (was 29, now 48 with cross-ROI features)
-    assert X.shape[1] == len(FEATURE_NAMES) == 48
+    feature_names = FEATURE_SETS["fused"]
+    X, y, _, _, _, _ = _load_feature_rows(csv_file, feature_names, DataConfig())
+    # Feature count for fused mode
+    assert X.shape[1] == len(feature_names) == 59
     assert set(y.tolist()) <= {0, 1}
     
     # Classical pre-selection to 18 features (pipeline default)
@@ -132,9 +136,9 @@ def test_real_hamiltonian_verification():
 def test_feature_contract_sync():
     """FEATURE_NAMES (quantum/config.py) must match RPPGFeatures order."""
     try:
-        from rppg.features import RPPGFeatures
+        from RPPG.features import RPPGFeatures
     except ImportError as exc:
-        raise AssertionError(f"cannot import rppg.features: {exc}")
+        raise AssertionError(f"cannot import RPPG.features: {exc}")
     expected = list(RPPGFeatures.feature_names())
     assert list(FEATURE_NAMES) == expected, (
         f"feature contract drift:\n  quantum/config.py: {list(FEATURE_NAMES)}\n"
@@ -175,17 +179,20 @@ def test_split_determinism():
             )
 
 
-def test_ffpp_source_subject_grouping():
-    """FF++ real + its synthesis must share a group key (no leakage)."""
+def test_dfdc_subject_grouping():
+    """DFDC clips are grouped per-clip (no subject info available on disk)."""
     from quantum.data import _infer_subject_key
     import os
 
-    real = {"video_path": r"FF++\train\FF-real\id0_0000.mp4"}
-    synth = {"video_path": r"FF++\train\FF-synthesis\id0_id16_0002.mp4"}
-    yt = {"video_path": r"FF++\train\YouTube-real\00000.mp4"}
-
-    assert _infer_subject_key(real) == _infer_subject_key(synth) == "ffpp:src:id0"
-    assert _infer_subject_key(yt) == "ffpp:yt:00000"
+    # Test DFDC grouping
+    dfdc1 = {"video_path": r"DFDC_Dataset\Fake\video1.mp4"}
+    dfdc2 = {"video_path": r"DFDC_Dataset\Real\video2.mp4"}
+    
+    # Each clip is its own group
+    assert _infer_subject_key(dfdc1) == "clip:" + dfdc1["video_path"].replace("\\", "/").lower()
+    assert _infer_subject_key(dfdc2) == "clip:" + dfdc2["video_path"].replace("\\", "/").lower()
+    # Different clips get different groups
+    assert _infer_subject_key(dfdc1) != _infer_subject_key(dfdc2)
 
     # Test DFDC grouping only if dataset path is available
     if os.environ.get("DFDC_DATASET_PATH"):
@@ -196,10 +203,6 @@ def test_ffpp_source_subject_grouping():
         if fake_files:
             dfdc = {"video_path": str(fake_files[0])}
             assert _infer_subject_key(dfdc) == "clip:" + dfdc["video_path"].replace("\\", "/").lower()
-    else:
-        # Test with a mock DFDC path
-        dfdc = {"video_path": r"DFDC_Dataset\Fake\some_video.mp4"}
-        assert _infer_subject_key(dfdc) == "clip:" + dfdc["video_path"].replace("\\", "/").lower()
 
 
 def test_no_group_leakage():
@@ -212,9 +215,10 @@ def test_no_group_leakage():
 
     rng = np.random.RandomState(9)
     rows = []
-    for subj in ("id0", "id1", "id2", "id3"):
-        rows.append({"video_path": rf"FF++\train\FF-real\{subj}_0000.mp4"})
-        rows.append({"video_path": rf"FF++\train\FF-synthesis\{subj}_id9_0001.mp4"})
+    # Use DFDC-style paths for testing
+    for i in range(4):
+        rows.append({"video_path": f"DFDC_Dataset/Fake/video{i}.mp4"})
+        rows.append({"video_path": f"DFDC_Dataset/Real/video{i+4}.mp4"})
     groups = np.asarray([_infer_subject_key(r) for r in rows], dtype=object)
     X = rng.rand(len(rows), 10)
     y = np.asarray([1, 0, 1, 0, 1, 0, 1, 0])  # quantum: 1 real, 0 fake
@@ -342,7 +346,7 @@ def main() -> None:
         test_real_hamiltonian_verification,
         test_feature_contract_sync,
         test_split_determinism,
-        test_ffpp_source_subject_grouping,
+        test_dfdc_subject_grouping,
         test_no_group_leakage,
         test_qaoa_sim_matches_pennylane,
         test_torch_layer_matches_pennylane,

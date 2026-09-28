@@ -1,7 +1,7 @@
 # Frontend - Web UI for Deepfake KYC Verification
 
-Web UI for the deepfake-verification project (rPPG + hybrid quantum-classical
-decision layer). Upload a KYC video, watch the three-stage pipeline run live,
+Web UI for the deepfake-verification project (rPPG + visual + hybrid quantum-classical
+decision layer). Upload a KYC video, watch the four-stage pipeline run live,
 and read the verdict with its evidence dossier (accepted frames, physiological
 features, quantum probabilities and plots, the pulse waveform of the analyzed
 video).
@@ -100,10 +100,12 @@ idle
 
 1. **Upload** - Video received, validated (magic-byte check, 200 MB limit)
 2. **Frames** - Frame sampling at 30 fps + YOLO face detection + quality gates
-3. **rPPG** - MediaPipe ROIs → POS/CHROM pulse → 29 physiological features
-4. **Quantum** - QAOA feature selection (29 → 3) → Hybrid VQC → P(real)
-5. **Verdict** - Decision bins: REAL (≥0.7), FAKE (≤0.3), UNCERTAIN
-6. **Artifacts** - Result JSON, signal waveform, frame thumbnails, plots
+3. **rPPG** - MediaPipe ROIs → POS/CHROM pulse → 20 physiological features
+4. **Visual** - ResNet50 + handcrafted features from face crops → 39 visual features
+5. **Fusion** - 59 fused features (20 rPPG + 39 visual)
+6. **Quantum** - QAOA feature selection (59 → 3) → Hybrid VQC → P(real)
+7. **Verdict** - Decision bins: REAL (≥0.7), FAKE (≤0.3), UNCERTAIN
+8. **Artifacts** - Result JSON, signal waveform, frame thumbnails, plots
 
 ## Artifacts Served
 
@@ -113,7 +115,8 @@ The UI reads artifacts from `WORKING/output/` via `/api/files` and `/api/artifac
 |--------|-----------|
 | Stage 1 (frames) | `output/frames/frame_sequences/<job>/frames/*.jpg`, `frame_metadata.jsonl` |
 | Stage 2 (rPPG) | `output/rppg/plots/`, `dataset_features.csv` |
-| Stage 3 (quantum) | `output/quantum/plots/`, `metrics_quantum.json`, `hybrid_vqc.pt` |
+| Stage 3 (visual) | `output/visual/visual_features.csv`, `fused_features.csv` |
+| Stage 4 (quantum) | `output/quantum/plots/`, `metrics_quantum.json`, `hybrid_vqc_fused.pt` |
 | Pipeline | `output/pipeline/pipeline_result.json` |
 
 ## Environment Variables
@@ -139,3 +142,4 @@ The UI reads artifacts from `WORKING/output/` via `/api/files` and `/api/artifac
 - `idle` → `selected` → `running` → `done` with signal canvas, frame thumbnails (5 frames), theme toggle, sequential rerun
 - Invalid file → 415 friendly error
 - Responsive: 1920→375px no overflow
+- Signal flow: server job now serves `result._signal` synchronously with the result (verified via `Scrape/e2e_signal_flow.py`)

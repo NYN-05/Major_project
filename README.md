@@ -1,44 +1,50 @@
-# Deepfake Video Detection for KYC (rPPG + Quantum ML)
+# Deepfake Video Detection for KYC (rPPG + Visual + Quantum ML)
 
 [![GitHubTree](https://img.shields.io/badge/GitHubTree-Major__project-blue?style=flat-square)](https://githubtree.mgks.dev/repo/NYN-05/Major_project/main/?ref=badge)
 
 Detection of deepfake videos for video KYC in financial systems using
-**rPPG (remote photoplethysmography)** as the primary physiological evidence layer and
-**hybrid quantum-classical ML** as the final decision layer, designed for low-resolution videos.
+**rPPG (remote photoplethysmography)** as the physiological evidence layer,
+**visual features** (ResNet50 + handcrafted) as the complementary appearance layer,
+and **hybrid quantum-classical ML** as the final decision layer, designed for low-resolution videos.
 
-## Architecture (Three-Stage Pipeline)
+## Architecture (Four-Stage Pipeline)
 
 ```
 Input KYC video
   → Stage 1: Frame sampling + quality filtering    (WORKING/frame/)
   → Stage 2: rPPG signal extraction + features     (WORKING/RPPG/)
-  → Stage 3: QAOA selection → hybrid VQC verdict   (WORKING/quantum/)
+  → Stage 3: Visual feature extraction             (WORKING/visual/)
+  → Stage 4: QAOA selection → hybrid VQC verdict   (WORKING/quantum/)
   → Decision: REAL / FAKE / UNCERTAIN
 ```
 
 End-to-end orchestrator (`WORKING/run_pipeline.py`):
 
 ```
-frames → rPPG → quantum → verdict (REAL / FAKE / UNCERTAIN)
+frames → rPPG → visual → quantum (fused) → verdict (REAL / FAKE / UNCERTAIN)
 ```
+
+Only **fused mode** (rPPG + visual) is supported. No `rppg_only`, `visual_only`, or other feature set modes.
+Only **DFDC dataset** is supported for training. No FaceForensics++ (FF++).
 
 ## Repository Layout
 
 | Path                         | Description                                                                                                               |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `WORKING/`                 | Active project root (all three pipeline stages + end-to-end runner)                                                       |
+| `WORKING/`                 | Active project root (all four pipeline stages + end-to-end runner)                                                       |
 | `WORKING/frame/`           | Stage 1 - frame sampling, YOLO face detection, quality filtering (has its own `app/` + `requirements.txt`)             |
-| `WORKING/RPPG/`            | Stage 2 - MediaPipe face ROIs → POS/CHROM pulse → 23 physiological features (+ `rppg-pipeline/`, `requirements.txt`) |
-| `WORKING/quantum/`         | Stage 3 - QAOA feature selection (23→3) → hybrid VQC → P(real) → verdict (run via `python -m quantum.pipeline`)        |
-| `WORKING/run_pipeline.py`  | End-to-end orchestrator: frames → rPPG → quantum → verdict                                                               |
+| `WORKING/RPPG/`            | Stage 2 - MediaPipe face ROIs → POS/CHROM pulse → 20 physiological features (+ `rppg-pipeline/`, `requirements.txt`) |
+| `WORKING/visual/`          | Stage 3 - ResNet50 + handcrafted visual features from face crops (39 features)                                          |
+| `WORKING/quantum/`         | Stage 4 - QAOA feature selection → hybrid VQC → P(real) → verdict (run via `python -m quantum.pipeline`)        |
+| `WORKING/run_pipeline.py`  | End-to-end orchestrator: frames → rPPG → visual → quantum → verdict                                                     |
 | `WORKING/output/`          | Global regenerated-artifacts root (all `output/` dirs untracked)                                                         |
 | `WORKING/output/frames/`   | Stage 1: `frame_sequences/`, `frame_extraction_*.json(l)`, `docs/`                                                   |
 | `WORKING/output/rppg/`     | Stage 2: `dataset_features.csv`, `rppg_classifier.pkl` + metadata, plots                                               |
-| `WORKING/output/quantum/`  | Stage 3: `data.npz`, `qaoa_selection.json`, `feature_scaler.json`, `hybrid_vqc.pt`, metrics, plots                 |
+| `WORKING/output/visual/`   | Stage 3: `visual_features.csv`, `fused_features.csv`                                                                  |
+| `WORKING/output/quantum/`  | Stage 4: `data_fused.npz`, `qaoa_selection_fused.json`, `feature_scaler_fused.json`, `hybrid_vqc_fused.pt`, metrics, plots |
 | `WORKING/output/pipeline/` | `run_pipeline.py` result JSON                                                                                           |
 | `frontend/`                | Web UI: React + Vite frontend + stdlib-only API server (port 8000)                                                        |
 | `Docs/`                    | Project docs: RMTT semester report, quantum layer guide, key findings, remediation plan, problem analysis                   |
-| `FF++/`                    | FaceForensics++ dataset (gitignored)                                                                                      |
 | `Scrape/`                  | Dev scratch: tests, temp scripts, debug artifacts (gitignored)                                                            |
 
 ## Key Improvements (P6–P8, 2026-09-26)
@@ -57,6 +63,7 @@ frames → rPPG → quantum → verdict (REAL / FAKE / UNCERTAIN)
 
 Modular face pipeline for video sources: frame sampling at a controlled
 FPS, face detection (YOLO), quality assessment (blur / dark / overexposed / no-face / face-too-small / extreme-pose rules).
+**Quality thresholds relaxed** for short/low-quality videos: blur 3.0, dark 30, bright 235, min face area 0.002, min seq len 32, conf 0.25.
 Outputs accepted JPEGs + per-frame metadata JSONL for the rPPG stage.
 
 ```bash
@@ -69,50 +76,60 @@ python app/pipeline.py --source test.mp4 --save-metadata
 ### 2. rPPG Pipeline (`WORKING/RPPG/`)
 
 POS/CHROM pulse reconstruction from facial ROIs (left cheek, right cheek, forehead)
-and a **23-feature** physiological vector per video (was 20; +6 Phase-4 probes):
+and a **20-feature** physiological vector per video:
 heart rate, SNR, PRV, spectral entropy, MAD, signal quality index,
 inter-region correlations, pulse morphology (peak width, dicrotic notch),
 inter-ROI phase lag / pulse-transit-time proxy, motion contamination,
 and spectral/statistical probes (spectral flatness, centroid, kurtosis,
 phase coherence, pulse CV interval, zero-crossing rate).
+**Quality thresholds relaxed** for short/low-quality videos: min usable frames 24, min SQI 0.05.
 Features are persisted with labels (1 = fake, 0 = real) in
 `WORKING/output/rppg/dataset_features.csv`, the direct data source for the quantum layer.
 
 ```bash
 # From WORKING/RPPG/ - rebuild output/rppg/dataset_features.csv
 #   --workers 0          = all CPU cores
-#   --include-ffpp       = include FaceForensics++ clips
-python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0
+#   --gpu                = GPU-accelerated face detection (YuNet ONNX CUDA)
+python rppg-pipeline/extract_dataset_features.py --workers 0 --gpu
 
 # Train rPPG classifier (side path, not used for final verdict)
 python rppg-pipeline/train_classifier.py
 ```
 
-Feature sources: DFDC and FaceForensics++ (`FF++/` train/val/test via `--include-ffpp`).
-The full extraction (2,794 rows @30 fps: 1,534 real / 1,260 fake) was rebuilt 2026-09-26
-after P7 fixes. Extraction supports GPU-accelerated face detection (`--gpu`, YuNet ONNX Runtime
-CUDA) and quality gates (`--min-sqi`, `--max-nan-features`).
+Feature source: **DFDC only** (`archive/DFDC_Dataset` via `DFDC_DATASET_PATH` env var).
+No FaceForensics++ (FF++) support.
 
-### 3. Quantum Model (`WORKING/quantum/`)
+### 3. Visual Pipeline (`WORKING/visual/`)
+
+ResNet50 (ImageNet pre-trained) + handcrafted features from face crops saved by stage 1.
+Extracts **39 features**: 16 deep (PCA-reduced ResNet50 GAP) + 10 LBP + 4 GLCM texture + 6 color + 3 DCT frequency.
+Fuses with rPPG features to create the **fused feature set** (59 features) used for training.
+
+```bash
+# From WORKING/visual/ - extract visual features from stage-1 frames
+python pipeline.py --frames-root output/frames/frame_sequences --rppg-csv ../output/rppg/dataset_features.csv --fuse --create-splits
+```
+
+### 4. Quantum Model (`WORKING/quantum/`)
 
 Hybrid classical-quantum decision stage built with PennyLane + PyTorch. It consumes
-the rPPG 23-feature vector **directly** (same names/order as `RPPGFeatures.feature_names()`);
+the **fused (rPPG + visual) 59-feature vector directly** (same names/order as `RPPGFeatures.feature_names()` + `VISUAL_FEATURE_NAMES`);
 no synthetic data is generated anywhere in the pipeline.
 
-- **Data** - `data.py` builds `output/quantum/data.npz` from the real labeled rPPG feature
-  table `output/rppg/dataset_features.csv` (2,794 rows: 1,534 real / 1,260 fake, DFDC + FF++).
+- **Data** - `data.py` builds `output/quantum/data_fused.npz` from the real labeled fused feature
+  table `output/visual/fused_features.csv`. 
   rPPG label `1 = fake` is flipped via the explicit, tested conversion
   `csv_to_quantum_label()` to the quantum convention `LABEL_REAL = 1, LABEL_FAKE = 0`
   (Phase 1A of the remediation plan). HR-plausibility filter (30–220 BPM, non-finite rejection)
-  drops implausible rows at build time. Subject-grouped random split (seeded, per-clip for DFDC,
-  per-clip for FF++ with first-id token grouping), persisted to `split_manifest.json`.
-- **QAOA feature selection** - `qaoa.py` selects the 3 most informative rPPG features using
+  drops implausible rows at build time. Subject-grouped random split (seeded, per-clip for DFDC),
+  persisted to `split_manifest_fused.json`.
+- **QAOA feature selection** - `qaoa.py` selects the most informative fused features using
   a cost Hamiltonian with **supervised discrimination weights** (`qaoa._discrimination_weights`:
   sign-agnostic exact Mann-Whitney AUC strength `2*|AUC-0.5|`, deterministic, no sklearn)
   plus correlation redundancy penalty and cardinality constraint, optimized with COBYLA.
   4 parallel restarts via `ProcessPoolExecutor`. The circuit runs on the project's own
   **exact torch-native statevector simulator** (`qaoa_sim.QAOASimulator`, complex128;
-  ~0.3–0.5 ms vs ~5.6 s per PennyLane call on the 23-wire problem) and is cross-verified
+  ~0.3–0.5 ms vs ~5.6 s per PennyLane call) and is cross-verified
   against PennyLane by the test suite.
 - **Hybrid VQC** - `vqc.py`: angle-encoded features into a parameterized quantum
   circuit (`StronglyEntanglingLayers`) feeding a small classical head. The default
@@ -136,7 +153,7 @@ no synthetic data is generated anywhere in the pipeline.
 - **Sweep harness** - `sweep.py` runs crash-safe hyperparameter sweeps with a leaderboard by AUC.
 
 ```bash
-# From WORKING/: build data, QAOA selection, train VQC, evaluate, baselines
+# From WORKING/: build data, QAOA selection, train VQC, evaluate, baselines (fused mode only)
 python -m quantum.pipeline --all
 # Self-checks (10/10): beta-alive ansatz, Hamiltonian≡classical cost,
 # feature-contract sync, split determinism, grouping, sim cross-verification,
@@ -144,15 +161,15 @@ python -m quantum.pipeline --all
 python -m quantum.tests
 ```
 
-**Current Performance (Post-P7, 2,794 samples, 23 features):**
+**Current Performance (Fused mode, DFDC only):**
 
 | Metric | VQC Test | VQC 5-Fold CV | Best Classical (LR) |
 |--------|----------|---------------|---------------------|
-| Accuracy | 0.504 | 0.524 ± 0.035 | 0.535 |
-| **Balanced Accuracy** | **0.522** | **0.545 ± 0.027** | **0.551** |
-| Specificity (FAKE recall) | **0.702** | **0.751 ± 0.115** | 0.525 |
-| AUC-ROC | 0.539 | 0.564 ± 0.035 | 0.545 |
-| Decision Bins | 0/559/0 (100% UNCERTAIN) | — | — |
+| Accuracy | 0.552 | 0.556 ± 0.019 | TBD |
+| **Balanced Accuracy** | **0.499** | **0.545 ± TBD** | **TBD** |
+| Specificity (FAKE recall) | **0.702** | **TBD ± TBD** | 0.525 |
+| AUC-ROC | 0.535 | 0.556 ± 0.019 | 0.582 |
+| Decision Bins | 100% UNCERTAIN | — | — |
 
 **Remediation Status** (severity-ordered plan in `Docs/DEEPFAKE_KYC_SEQUENTIAL_REMEDIATION_PLAN.md`):
 - **Phase 1A (label/probability mapping) — DONE.** Explicit conversion contract + regression test.
@@ -168,24 +185,32 @@ pip install -r WORKING/frame/requirements.txt
 # Stage 2 (rPPG) - MediaPipe, OpenCV, scipy, etc.
 pip install -r WORKING/RPPG/requirements.txt
 
-# Stage 3 (quantum) - PennyLane, PyTorch, scikit-learn, scipy, matplotlib
+# Stage 3 (visual) - torchvision, scikit-image for handcrafted features
+pip install torchvision scikit-image
+
+# Stage 4 (quantum) - PennyLane, PyTorch, scikit-learn, scipy, matplotlib
 pip install pennylane torch numpy scikit-learn scipy matplotlib
 
 # Frontend (optional)
 cd frontend && npm install
 ```
 
-## Run End-to-End
+## Run End-to-End (Inference)
 
 ```bash
 # From WORKING/
 python run_pipeline.py --source path/to/video.mp4 --method POS --out result.json
 ```
 
-Requires pre-trained quantum artifacts (`output/quantum/qaoa_selection.json`, `hybrid_vqc.pt`, `feature_scaler.json`).
+Requires pre-trained quantum artifacts for **fused mode** (`output/quantum/qaoa_selection_fused.json`, `hybrid_vqc_fused.pt`, `feature_scaler_fused.json`).
 If missing, run once from `WORKING/`:
 
 ```bash
+# Build fused training data first (requires DFDC_DATASET_PATH env var)
+export DFDC_DATASET_PATH=/path/to/DFDC_Dataset
+python rppg-pipeline/extract_dataset_features.py --workers 0 --gpu
+python visual/pipeline.py --frames-root output/frames/frame_sequences --rppg-csv ../output/rppg/dataset_features.csv --fuse --create-splits
+# Then train quantum model
 python -m quantum.pipeline --all
 ```
 
@@ -230,15 +255,17 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
 
 ## Verified Constraints (do not break)
 
-- **No synthetic data.** The quantum layer consumes only the real rPPG feature table `output/rppg/dataset_features.csv`. Never reintroduce a generator or a transform/bridge layer.
-- **Feature contract:** `FEATURE_NAMES` in `quantum/config.py` (23 features) must stay identical in name AND order to `RPPGFeatures.feature_names()` in `RPPG/rppg/features.py` (duplicated on purpose; `data.py`, `qaoa.py`, and `pipeline.py` all index by it). Keep the two lists in sync; `test_feature_contract_sync` guards it.
+- **No synthetic data.** The quantum layer consumes only the real fused feature table `output/visual/fused_features.csv`. Never reintroduce a generator or a transform/bridge layer.
+- **Feature contract:** `FUSED_FEATURE_NAMES` in `quantum/config.py` (59 features = 20 rPPG + 39 visual) must stay identical in name AND order to `RPPGFeatures.feature_names()` + `VISUAL_FEATURE_NAMES`. Keep the two lists in sync; `test_feature_contract_sync` guards it.
+- **Only fused mode supported.** No `rppg_only`, `visual_only`, `rppg_base`, `rppg_cross_roi`, or ablation feature sets.
+- **Only DFDC dataset supported.** No FaceForensics++ (FF++). `DFDC_DATASET_PATH` env var must point to `archive/DFDC_Dataset`.
 - **Label conventions differ per stage — do not unify:**
   - rPPG CSV: `1 = fake, 0 = real`
   - quantum: `LABEL_REAL = 1`, `LABEL_FAKE = 0`; `quantum/data.py` flips via the tested `csv_to_quantum_label()` (`y = 1 - csv_label` lives only inside that function)
   - rPPG RandomForest cross-check in `run_pipeline.py`: `1 = DEEPFAKE`
-- **Gitignored artifacts:** `*.csv`, `*.json`, `*.pkl`, `*.mp4`, and all `output/` dirs are untracked — `dataset_features.csv`, `output/quantum/*`, and the trained models will not appear in `git status`. Regenerating them is normal.
-- **rPPG returns `features=None`** when usable frames < `min_usable_frames` (48); `run_pipeline.py` then emits INCONCLUSIVE and exits 3. New code must handle `None`.
-- **Stage 1 feeds stage 2.** `run_pipeline.py` hands the frame stage's accepted JPEGs (`output/frames/frame_sequences/<video>/frames/`) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (30 fps). rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling (INCONCLUSIVE, exit 3) is unchanged. If stage 1 fails or yields no frames, `run_pipeline.py` falls back to `RPPGPipeline.process_video()` (direct video read; `input_mode` in the result JSON records which path ran).
+- **Gitignored artifacts:** `*.csv`, `*.json`, `*.pkl`, `*.mp4`, and all `output/` dirs are untracked — `dataset_features.csv`, `output/visual/fused_features.csv`, `output/quantum/*`, and the trained models will not appear in `git status`. Regenerating them is normal.
+- **rPPG returns `features=None`** when usable frames < `min_usable_frames` (24); `run_pipeline.py` then emits INCONCLUSIVE and exits 3. New code must handle `None`.
+- **Stage 1 feeds stage 2 & 3.** `run_pipeline.py` hands the frame stage's accepted JPEGs (`output/frames/frame_sequences/<video>/frames/`) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (30 fps) and to `visual.extractor.compute_visual_features()` for face crops. rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling (INCONCLUSIVE, exit 3) is unchanged. If stage 1 fails or yields no frames, `run_pipeline.py` falls back to `RPPGPipeline.process_video()` (direct video read; `input_mode` in the result JSON records which path ran).
 - **RandomForest cross-check** is an optional side path; the final verdict comes exclusively from the quantum stage.
 - **rPPG classifier trust:** `output/rppg/` must remain write-protected; `rppg_classifier.pkl` is `pickle.load`-ed by `run_pipeline.py` (arbitrary-code risk if replaced). Never move to shared hosting as-is.
 - **QAOA selection weights:** the selection objective uses supervised discrimination weights (`qaoa._discrimination_weights`: sign-agnostic exact Mann-Whitney AUC strength `2*|AUC-0.5|`, deterministic, no sklearn). `QAOASelectionConfig.target_features` is 3. Keep `_mutual_info_weights` only as a documented alternative — do not reintroduce it into `select()`.

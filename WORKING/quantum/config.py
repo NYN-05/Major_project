@@ -27,7 +27,7 @@ def get_dfdc_dataset_path() -> Path:
         )
     return path
 
-# Feature contract: the raw 23-feature vector produced by the rPPG layer
+# Feature contract: the raw 20-feature vector produced by the rPPG layer
 # (same names/order as RPPGFeatures.feature_names() in RPPG/rppg/features.py).
 RPPG_FEATURE_NAMES = [
     "heart_rate_bpm",
@@ -46,40 +46,11 @@ RPPG_FEATURE_NAMES = [
     "signal_to_motion_ratio",
     "peak_amplitude_variability",
     "pulse_transit_time_proxy",
-    # Probe features (Phase 4 upstream improvement)
+    # Probe features (Phase 4 upstream improvement) - 4 selected
     "spectral_flatness",
     "spectral_centroid",
     "kurtosis",
     "phase_coherence_lr",
-    "phase_coherence_cf",
-    "pulse_cv_interval",
-    "zero_crossing_rate",
-    # Phase 4: Cross-ROI consistency features
-    "cross_corr_lr",
-    "cross_corr_lf",
-    "cross_corr_rf",
-    "freq_agreement_lr",
-    "freq_agreement_lf",
-    "freq_agreement_rf",
-    "spectral_similarity_lr",
-    "spectral_similarity_lf",
-    "spectral_similarity_rf",
-    "cross_roi_corr_mean",
-    "cross_roi_corr_std",
-    "cross_roi_corr_min",
-    "cross_roi_corr_max",
-    "cross_roi_corr_cv",
-    "cross_roi_phase_lag_mean",
-    "cross_roi_phase_lag_std",
-    "cross_roi_phase_lag_min",
-    "cross_roi_phase_lag_max",
-    "cross_roi_coherence_mean",
-    "cross_roi_coherence_std",
-    "cross_roi_coherence_min",
-    "cross_roi_coherence_max",
-    "cross_roi_cross_corr_mean",
-    "cross_roi_freq_agreement_mean",
-    "cross_roi_spectral_similarity_mean",
 ]
 
 # Visual feature names (from visual/features.py)
@@ -107,98 +78,19 @@ VISUAL_FEATURE_NAMES = [
 # Backward compatibility alias
 FEATURE_NAMES = RPPG_FEATURE_NAMES
 
-# Fused feature names (rPPG + Visual)
+# Fused feature names (rPPG + Visual) - ONLY SUPPORTED MODE
 FUSED_FEATURE_NAMES = RPPG_FEATURE_NAMES + VISUAL_FEATURE_NAMES
 
-# Base rPPG features (first 23, without Phase 4 cross-ROI features)
-RPPG_BASE_FEATURE_NAMES = [
-    "heart_rate_bpm",
-    "snr_db",
-    "prv_std_ms",
-    "spectral_entropy",
-    "mad",
-    "signal_quality_index",
-    "cheek_forehead_correlation",
-    "left_right_cheek_correlation",
-    "hr_half_diff",
-    "peak_prominence",
-    "systolic_peak_width",
-    "diastolic_notch_ratio",
-    "forehead_cheek_phase_lag",
-    "signal_to_motion_ratio",
-    "peak_amplitude_variability",
-    "pulse_transit_time_proxy",
-    # Probe features (Phase 4 upstream improvement)
-    "spectral_flatness",
-    "spectral_centroid",
-    "kurtosis",
-    "phase_coherence_lr",
-    "phase_coherence_cf",
-    "pulse_cv_interval",
-    "zero_crossing_rate",
-]
-
-# Phase 4 Cross-ROI features (25 features)
-CROSS_ROI_FEATURE_NAMES = [
-    "cross_corr_lr",
-    "cross_corr_lf",
-    "cross_corr_rf",
-    "freq_agreement_lr",
-    "freq_agreement_lf",
-    "freq_agreement_rf",
-    "spectral_similarity_lr",
-    "spectral_similarity_lf",
-    "spectral_similarity_rf",
-    "cross_roi_corr_mean",
-    "cross_roi_corr_std",
-    "cross_roi_corr_min",
-    "cross_roi_corr_max",
-    "cross_roi_corr_cv",
-    "cross_roi_phase_lag_mean",
-    "cross_roi_phase_lag_std",
-    "cross_roi_phase_lag_min",
-    "cross_roi_phase_lag_max",
-    "cross_roi_coherence_mean",
-    "cross_roi_coherence_std",
-    "cross_roi_coherence_min",
-    "cross_roi_coherence_max",
-    "cross_roi_cross_corr_mean",
-    "cross_roi_freq_agreement_mean",
-    "cross_roi_spectral_similarity_mean",
-]
-
-# Phase 6 feature set definitions
-PHASE6_FEATURE_SETS = {
-    "rppg_base": RPPG_BASE_FEATURE_NAMES,
-    "rppg_cross_roi": RPPG_FEATURE_NAMES,  # base + cross-ROI (48 features)
-    "visual_only": VISUAL_FEATURE_NAMES,
-    "fused": FUSED_FEATURE_NAMES,  # rPPG + Visual (87 features)
+# Only fused mode is supported
+FEATURE_SET_CONFIGS = {
+    "fused": FUSED_FEATURE_NAMES,
 }
 
-# Phase 7 Ablation Study feature sets
-# Based on the roadmap experiments A-I
-PHASE7_ABLATION_SETS = {
-    # Experiment A: rPPG only (all rPPG features = base + cross-ROI = 48 features)
-    "A_rppg_only": RPPG_FEATURE_NAMES,
-    # Experiment B: POS only - base features (POS method features) 
-    # Note: POS/CHROM are signal extraction methods, features are same but from different method
-    # We'll run pipeline with method="POS" and method="CHROM" separately
-    "B_pos_only": RPPG_BASE_FEATURE_NAMES,  # Base features (POS method)
-    # Experiment C: CHROM only - base features (CHROM method)
-    "C_chrom_only": RPPG_BASE_FEATURE_NAMES,  # Base features (CHROM method)
-    # Experiment D: POS + CHROM - both methods' base features
-    "D_pos_chrom": RPPG_BASE_FEATURE_NAMES,  # Base features from both methods
-    # Experiment E: rPPG + Quality - base + quality features (PQS components)
-    "E_rppg_quality": RPPG_BASE_FEATURE_NAMES,  # base + quality features
-    # Experiment F: rPPG + Cross-ROI
-    "F_rppg_cross_roi": RPPG_FEATURE_NAMES,  # base + cross-ROI (48 features)
-    # Experiment G: rPPG + Visual
-    "G_rppg_visual": RPPG_FEATURE_NAMES + VISUAL_FEATURE_NAMES,  # 48 + 39 = 87
-    # Experiment H: rPPG + Visual + Quality
-    "H_rppg_visual_quality": RPPG_FEATURE_NAMES + VISUAL_FEATURE_NAMES,  # 87 + quality
-    # Experiment I: Full proposed representation
-    "I_full": RPPG_FEATURE_NAMES + VISUAL_FEATURE_NAMES,  # 87 + quality
-}
+# Legacy aliases for backward compatibility (deprecated)
+RPPG_BASE_FEATURE_NAMES = RPPG_FEATURE_NAMES  # all 20 features
+CROSS_ROI_FEATURE_NAMES = []  # cross-ROI features removed
+PHASE6_FEATURE_SETS = {}
+PHASE7_ABLATION_SETS = {}
 
 FEATURE_MEANINGS = {
     "heart_rate_bpm": "Dominant pulse frequency (BPM) of the recovered rPPG signal",
@@ -225,32 +117,6 @@ FEATURE_MEANINGS = {
     "phase_coherence_cf": "Phase coherence std between forehead/cheek signals (lower=more coherent)",
     "pulse_cv_interval": "Coefficient of variation of inter-beat intervals (regular=low CV)",
     "zero_crossing_rate": "Zero-crossing rate of pulse waveform (high=noise/artifacts)",
-    # Phase 4: Cross-ROI consistency features
-    "cross_corr_lr": "Cross-correlation between left/right cheek signals",
-    "cross_corr_lf": "Cross-correlation between left cheek/forehead signals",
-    "cross_corr_rf": "Cross-correlation between right cheek/forehead signals",
-    "freq_agreement_lr": "Frequency agreement (1 - normalized HR diff) between left/right cheek",
-    "freq_agreement_lf": "Frequency agreement between left cheek/forehead",
-    "freq_agreement_rf": "Frequency agreement between right cheek/forehead",
-    "spectral_similarity_lr": "Cosine similarity of PSDs between left/right cheek",
-    "spectral_similarity_lf": "Cosine similarity of PSDs between left cheek/forehead",
-    "spectral_similarity_rf": "Cosine similarity of PSDs between right cheek/forehead",
-    "cross_roi_corr_mean": "Mean Pearson correlation across all ROI pairs",
-    "cross_roi_corr_std": "Std of Pearson correlations across ROI pairs",
-    "cross_roi_corr_min": "Min Pearson correlation across ROI pairs",
-    "cross_roi_corr_max": "Max Pearson correlation across ROI pairs",
-    "cross_roi_corr_cv": "CV of Pearson correlations across ROI pairs",
-    "cross_roi_phase_lag_mean": "Mean phase lag (ms) across ROI pairs",
-    "cross_roi_phase_lag_std": "Std of phase lags across ROI pairs",
-    "cross_roi_phase_lag_min": "Min phase lag across ROI pairs",
-    "cross_roi_phase_lag_max": "Max phase lag across ROI pairs",
-    "cross_roi_coherence_mean": "Mean phase coherence across ROI pairs",
-    "cross_roi_coherence_std": "Std of phase coherence across ROI pairs",
-    "cross_roi_coherence_min": "Min phase coherence across ROI pairs",
-    "cross_roi_coherence_max": "Max phase coherence across ROI pairs",
-    "cross_roi_cross_corr_mean": "Mean cross-correlation across ROI pairs",
-    "cross_roi_freq_agreement_mean": "Mean frequency agreement across ROI pairs",
-    "cross_roi_spectral_similarity_mean": "Mean spectral similarity across ROI pairs",
     # Visual features
     "deep_feat_0": "ResNet50 GAP feature 0 (PCA-reduced)",
     "deep_feat_1": "ResNet50 GAP feature 1 (PCA-reduced)",

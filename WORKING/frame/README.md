@@ -1,10 +1,12 @@
 # Frame Sampling & Quality Layer (Stage 1)
 
 **Component 1** of the deepfake-verification system under `WORKING/`:
-`frame/` (this directory, stage 1) → `RPPG/` (stage 2) → `quantum/` (stage 3).
+`frame/` (this directory, stage 1) → `RPPG/` (stage 2) → `visual/` (stage 3) → `quantum/` (stage 4).
 
 Invoked automatically by `WORKING/run_pipeline.py` (stage 1: frame sampling
-+ quality assessment feeding the rPPG and quantum stages at **30 fps**).
++ quality assessment feeding the rPPG and visual stages at **30 fps**).
+
+Quality thresholds **relaxed** for short/low-quality videos.
 
 ## Project Structure
 
@@ -42,7 +44,7 @@ Input video
   → Summary JSON to output/frames/frame_extraction_summary.json
 ```
 
-## Output Contract (for Stage 2 rPPG)
+## Output Contract (for Stage 2 rPPG & Stage 3 Visual)
 
 | Artifact | Path | Description |
 |----------|------|-------------|
@@ -52,16 +54,16 @@ Input video
 | **Summary** | `output/frames/frame_extraction_summary.json` | Aggregate: `sampled_frames`, `accepted_frames`, `rejected_frames`, `rejections` (by category), `rppg_checks` (face resolution, color variation), `rppg_input_ready` boolean |
 | **Docs** | `output/frames/docs/` | Sampling rate comparison, quality checklist, examples report |
 
-## Quality Rejection Categories
+## Quality Rejection Categories (Relaxed Thresholds)
 
-| Category | Condition |
-|----------|-----------|
-| `blur` | Laplacian variance < `--blur-threshold` (default 8.0) |
-| `dark_frame` | Gray mean < `--dark-threshold` (default 45.0) |
-| `overexposed_frame` | Gray mean > `--bright-threshold` (default 220.0) |
-| `no_face` | YOLO detects no face above `--conf` (default 0.35) |
-| `face_too_small` | Largest face area ratio < `--min-face-area-ratio` (default 0.005) |
-| `extreme_pose` | Face touches frame edge or unusual aspect ratio |
+| Category | Condition | Default |
+|----------|-----------|---------|
+| `blur` | Laplacian variance < `--blur-threshold` | `3.0` (was 8.0) |
+| `dark_frame` | Gray mean < `--dark-threshold` | `30.0` (was 45.0) |
+| `overexposed_frame` | Gray mean > `--bright-threshold` | `235.0` (was 220.0) |
+| `no_face` | YOLO detects no face above `--conf` | `0.25` (was 0.35) |
+| `face_too_small` | Largest face area ratio < `--min-face-area-ratio` | `0.002` (was 0.005) |
+| `extreme_pose` | Face touches frame edge or unusual aspect ratio | - |
 
 ## Install
 
@@ -80,7 +82,7 @@ Requires CUDA 12.1 PyTorch wheels (in requirements.txt). Falls back to CPU when 
 python run_pipeline.py --source path/to/video.mp4 --method POS
 ```
 
-This automatically runs Stage 1 (frame sampling + quality) and passes accepted frames to Stage 2.
+This automatically runs Stage 1 (frame sampling + quality at 30 fps) and passes accepted frames to Stage 2 (rPPG) and Stage 3 (visual).
 
 ### Standalone Frame Stage
 
@@ -96,7 +98,7 @@ python app/pipeline.py --source test.mp4 --save-metadata
 | `--source` | Video path, stream URL, or webcam index | `1` |
 | `--model` | YOLO preset: `yolov8n`, `yolov8x`, `yolov9e`, `yolov9t` | `yolov8n` |
 | `--weights` | Custom weights path (overrides `--model`) | - |
-| `--conf` | Minimum face confidence threshold | `0.35` |
+| `--conf` | Minimum face confidence threshold | `0.25` |
 | `--imgsz` | Inference image size | `320` |
 | `--device` | `auto`, `cpu`, `gpu`, `cuda`, or GPU index | `auto` |
 | `--half` | Enable FP16 on CUDA | off |
@@ -112,11 +114,11 @@ python app/pipeline.py --source test.mp4 --save-metadata
 | `--source` | Single video path | required |
 | `--input-dir` | Directory of videos (batch mode) | - |
 | `--sample-fps` | Controlled frame sampling rate | `10.0` |
-| `--min-seq-len` | Minimum accepted frames for temporal modeling | `64` |
-| `--blur-threshold` | Blur rejection threshold | `8.0` |
-| `--dark-threshold` | Dark-frame rejection threshold | `45.0` |
-| `--bright-threshold` | Overexposed-frame rejection threshold | `220.0` |
-| `--min-face-area-ratio` | Minimum face area ratio | `0.005` |
+| `--min-seq-len` | Minimum accepted frames for temporal modeling | `32` (was 64) |
+| `--blur-threshold` | Blur rejection threshold | `3.0` |
+| `--dark-threshold` | Dark-frame rejection threshold | `30.0` |
+| `--bright-threshold` | Overexposed-frame rejection threshold | `235.0` |
+| `--min-face-area-ratio` | Minimum face area ratio | `0.002` |
 | `--compare-rates` | Sampling-rate comparison list for docs | `5,10,15` |
 | `--save-quality-examples` | Save accepted/rejected example frames | off |
 

@@ -193,7 +193,7 @@ def parse_extract_args():
         help="Root folder for extracted sequences",
     )
     parser.add_argument("--sample-fps", type=float, default=10.0, help="Project-standard frame sampling FPS")
-    parser.add_argument("--min-seq-len", type=int, default=64, help="Minimum accepted frames for temporal modeling")
+    parser.add_argument("--min-seq-len", type=int, default=32, help="Minimum accepted frames for temporal modeling (reduced for short videos)")
 
     parser.add_argument(
         "--model",
@@ -202,19 +202,19 @@ def parse_extract_args():
         help="Predefined YOLO face model preset",
     )
     parser.add_argument("--weights", default=None, help="Custom YOLO weights path (overrides --model)")
-    parser.add_argument("--conf", type=float, default=0.35, help="Minimum face confidence threshold")
+    parser.add_argument("--conf", type=float, default=0.25, help="Minimum face confidence threshold (lowered for low-quality)")
     parser.add_argument("--imgsz", type=int, default=320, help="Model inference image size")
     parser.add_argument("--device", default="auto", help="Inference device")
     parser.add_argument("--half", action="store_true", help="Use half precision on CUDA")
 
-    parser.add_argument("--blur-threshold", type=float, default=8.0, help="Blur rejection threshold")
-    parser.add_argument("--dark-threshold", type=float, default=45.0, help="Dark-frame rejection threshold")
-    parser.add_argument("--bright-threshold", type=float, default=220.0, help="Overexposed-frame rejection threshold")
+    parser.add_argument("--blur-threshold", type=float, default=3.0, help="Blur rejection threshold (lowered for compressed video)")
+    parser.add_argument("--dark-threshold", type=float, default=30.0, help="Dark-frame rejection threshold (lowered)")
+    parser.add_argument("--bright-threshold", type=float, default=235.0, help="Overexposed-frame rejection threshold (raised)")
     parser.add_argument(
         "--min-face-area-ratio",
         type=float,
-        default=0.005,
-        help="Reject if largest detected face covers less than this image-area ratio",
+        default=0.002,
+        help="Reject if largest detected face covers less than this image-area ratio (lowered for distant faces)",
     )
 
     parser.add_argument(
@@ -573,7 +573,7 @@ def run_frame_sampling_quality_layer(
     device: str,
     use_half: bool,
     sample_fps: float = 10.0,
-    min_seq_len: int = 64,
+    min_seq_len: int = 32,
     output_root: str = None,
     extraction_log: str = None,
     summary_file: str = None,
@@ -581,10 +581,10 @@ def run_frame_sampling_quality_layer(
     sampling_note_file: str = None,
     quality_checklist_file: str = None,
     quality_report_file: str = None,
-    blur_threshold: float = 8.0,
-    dark_threshold: float = 45.0,
-    bright_threshold: float = 220.0,
-    min_face_area_ratio: float = 0.005,
+    blur_threshold: float = 3.0,
+    dark_threshold: float = 30.0,
+    bright_threshold: float = 235.0,
+    min_face_area_ratio: float = 0.002,
     save_quality_examples: bool = True,
 ) -> dict:
     logger = setup_logger("frame_extractor")

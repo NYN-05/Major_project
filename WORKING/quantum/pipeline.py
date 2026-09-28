@@ -13,10 +13,6 @@ from quantum.config import (
     RPPG_FEATURE_NAMES,
     VISUAL_FEATURE_NAMES,
     FUSED_FEATURE_NAMES,
-    RPPG_BASE_FEATURE_NAMES,
-    CROSS_ROI_FEATURE_NAMES,
-    PHASE6_FEATURE_SETS,
-    PHASE7_ABLATION_SETS,
     OUTPUT_DIR,
     QAOASelectionConfig,
     VQCConfig,
@@ -35,112 +31,17 @@ from quantum.qaoa import (
     verify_hamiltonian,
 )
 from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
-from quantum.ensemble import run_phase8_ensemble_comparison
 from quantum.explain import build_explanation, DecisionExplanation
 
 
-# First 23 features of RPPG_FEATURE_NAMES (matching existing scaler/selection artifacts)
-RPPG_23_FEATURE_NAMES = RPPG_BASE_FEATURE_NAMES
-
+# Only fused mode is supported
 FEATURE_SET_CONFIGS = {
-    "rppg_only": {
-        "feature_names": RPPG_23_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_rppg_only.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_rppg_only.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_rppg_only.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_rppg_only.pt",
-    },
-    "rppg_base": {
-        "feature_names": RPPG_BASE_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_rppg_base.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_rppg_base.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_rppg_base.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_rppg_base.pt",
-    },
-    "rppg_cross_roi": {
-        "feature_names": RPPG_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_rppg_cross_roi.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_rppg_cross_roi.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_rppg_cross_roi.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_rppg_cross_roi.pt",
-    },
-    "visual_only": {
-        "feature_names": VISUAL_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_visual_only.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_visual_only.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_visual_only.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_visual_only.pt",
-    },
     "fused": {
         "feature_names": FUSED_FEATURE_NAMES,
         "data_file": OUTPUT_DIR / "data_fused.npz",
         "scaler_file": OUTPUT_DIR / "feature_scaler_fused.json",
         "selection_file": OUTPUT_DIR / "qaoa_selection_fused.json",
         "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_fused.pt",
-    },
-    # Phase 7 Ablation Study feature sets
-    "A_rppg_only": {
-        "feature_names": RPPG_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_A_rppg_only.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_A_rppg_only.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_A_rppg_only.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_A_rppg_only.pt",
-    },
-    "B_pos_only": {
-        "feature_names": RPPG_BASE_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_B_pos_only.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_B_pos_only.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_B_pos_only.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_B_pos_only.pt",
-    },
-    "C_chrom_only": {
-        "feature_names": RPPG_BASE_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_C_chrom_only.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_C_chrom_only.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_C_chrom_only.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_C_chrom_only.pt",
-    },
-    "D_pos_chrom": {
-        "feature_names": RPPG_BASE_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_D_pos_chrom.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_D_pos_chrom.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_D_pos_chrom.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_D_pos_chrom.pt",
-    },
-    "E_rppg_quality": {
-        "feature_names": RPPG_BASE_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_E_rppg_quality.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_E_rppg_quality.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_E_rppg_quality.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_E_rppg_quality.pt",
-    },
-    "F_rppg_cross_roi": {
-        "feature_names": RPPG_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_F_rppg_cross_roi.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_F_rppg_cross_roi.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_F_rppg_cross_roi.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_F_rppg_cross_roi.pt",
-    },
-    "G_rppg_visual": {
-        "feature_names": FUSED_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_G_rppg_visual.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_G_rppg_visual.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_G_rppg_visual.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_G_rppg_visual.pt",
-    },
-    "H_rppg_visual_quality": {
-        "feature_names": FUSED_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_H_rppg_visual_quality.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_H_rppg_visual_quality.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_H_rppg_visual_quality.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_H_rppg_visual_quality.pt",
-    },
-    "I_full": {
-        "feature_names": FUSED_FEATURE_NAMES,
-        "data_file": OUTPUT_DIR / "data_I_full.npz",
-        "scaler_file": OUTPUT_DIR / "feature_scaler_I_full.json",
-        "selection_file": OUTPUT_DIR / "qaoa_selection_I_full.json",
-        "checkpoint_file": OUTPUT_DIR / "hybrid_vqc_I_full.pt",
     },
 }
 
@@ -451,11 +352,8 @@ def run_pipeline_for_feature_set(
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Quantum decision layer: QAOA feature selection + hybrid VQC classification."
+        description="Quantum decision layer: QAOA feature selection + hybrid VQC classification (fused mode only)."
     )
-    parser.add_argument("--feature-set", default="rppg_only",
-                        choices=["rppg_only", "rppg_base", "rppg_cross_roi", "visual_only", "fused"],
-                        help="Feature set to use (default: rppg_only)")
     parser.add_argument("--build-data", action="store_true", help="Build data.npz from the feature table")
     parser.add_argument("--select", action="store_true", help="Run QAOA feature selection")
     parser.add_argument("--train", action="store_true", help="Train the hybrid VQC")
@@ -469,30 +367,10 @@ def build_parser():
         "Use a normal run (no flag) only to produce the one frozen test-set evaluation.",
     )
     parser.add_argument(
-        "--compare-all",
-        action="store_true",
-        help="Run full pipeline for Phase 1 feature sets (rppg_only, visual_only, fused) and compare",
-    )
-    parser.add_argument(
-        "--phase6-compare",
-        action="store_true",
-        help="Run full pipeline for Phase 6 feature sets (rppg_base, rppg_cross_roi, visual_only, fused) and compare",
-    )
-    parser.add_argument(
-        "--phase7-ablation",
-        action="store_true",
-        help="Run full ablation study (Experiments A-I) as defined in Phase 7 roadmap",
-    )
-    parser.add_argument(
-        "--ensemble",
-        action="store_true",
-        help="Run Phase 8 ensemble comparison across feature sets",
-    )
-    parser.add_argument(
         "--csv-file",
         type=str,
         default=None,
-        help="Path to feature CSV file (for visual_only or fused feature sets)",
+        help="Path to visual features CSV file (for fused feature set)",
     )
     return parser
 
@@ -513,8 +391,6 @@ def main():
             args.evaluate,
             args.baselines,
             args.all,
-            args.compare_all,
-            args.phase6_compare,
         ]
     ):
         parser.print_help()
@@ -530,289 +406,8 @@ def main():
 
     csv_file = Path(args.csv_file) if args.csv_file else None
 
-    if args.compare_all:
-        # Run full pipeline for all three feature sets (Phase 1 comparison)
-        print("\n" + "=" * 72)
-        print("  PHASE 1 COMPARATIVE EXPERIMENT: rPPG vs Visual vs Fused")
-        print("=" * 72)
-        all_results = {}
-        for fs in ["rppg_only", "visual_only", "fused"]:
-            # Use appropriate CSV file for each feature set
-            if fs == "rppg_only":
-                fs_csv = None  # Uses default from DataConfig
-            elif fs == "visual_only":
-                fs_csv = csv_file or (data_cfg.csv_file.parent.parent / "visual" / "visual_features.csv")
-            elif fs == "fused":
-                fs_csv = csv_file or (data_cfg.csv_file.parent.parent / "visual" / "fused_features.csv")
-
-            if fs_csv and not Path(fs_csv).exists():
-                print(f"\n  SKIPPING {fs}: CSV file not found: {fs_csv}")
-                continue
-
-            result = run_pipeline_for_feature_set(
-                feature_set=fs,
-                data_cfg=data_cfg,
-                qaoa_cfg=qaoa_cfg,
-                vqc_cfg=vqc_cfg,
-                decision_cfg=decision_cfg,
-                dev_only=dev_only,
-                csv_file=fs_csv,
-                run_qaoa=args.select or args.all or True,
-                run_train=args.train or args.all or True,
-                run_eval=args.evaluate or args.all or True,
-                run_baselines_flag=args.baselines or args.all or True,
-            )
-            all_results[fs] = result
-
-        # Print comparative summary
-        print("\n" + "=" * 72)
-        print("  PHASE 1 COMPARATIVE RESULTS SUMMARY")
-        print("=" * 72)
-        print(f"{'Feature Set':<15} {'Quantum AUC':<12} {'Quantum Acc':<12} {'Best Baseline AUC':<18} {'Best Baseline':<15}")
-        print("-" * 72)
-        for fs, result in all_results.items():
-            if result["eval_results"]:
-                q_auc = result["eval_results"]["metrics"]["auc_roc"]
-                q_acc = result["eval_results"]["metrics"]["accuracy"]
-            else:
-                q_auc = q_acc = float("nan")
-            if result["baseline_results"]:
-                best_baseline = max(result["baseline_results"].items(), key=lambda x: x[1]["auc_roc"])
-                b_auc = best_baseline[1]["auc_roc"]
-                b_name = best_baseline[0]
-            else:
-                b_auc = float("nan")
-                b_name = "N/A"
-            print(f"{fs:<15} {q_auc:<12.4f} {q_acc:<12.4f} {b_auc:<18.4f} {b_name:<15}")
-
-        # Save comparative results
-        summary_file = OUTPUT_DIR / "phase1_comparison.json"
-        summary_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(summary_file, "w") as fh:
-            json.dump({k: {kk: vv for kk, vv in v.items() if kk != "eval_results" and kk != "baseline_results"}
-                      for k, v in all_results.items()}, fh, indent=2, default=str)
-        print(f"\n  Comparative results saved to: {summary_file}")
-
-        return 0
-
-    if args.phase6_compare:
-        # Run full pipeline for Phase 6 feature sets
-        print("\n" + "=" * 72)
-        print("  PHASE 6 COMPARATIVE EXPERIMENT: Classical vs Quantum on Multiple Feature Sets")
-        print("=" * 72)
-        all_results = {}
-        # Phase 6 feature sets: rppg_base, rppg_cross_roi, visual_only, fused
-        for fs in ["rppg_base", "rppg_cross_roi", "visual_only", "fused"]:
-            if fs == "rppg_base" or fs == "rppg_cross_roi":
-                fs_csv = None  # Uses default from DataConfig (rPPG CSV)
-            elif fs == "visual_only":
-                fs_csv = csv_file or (data_cfg.csv_file.parent.parent / "visual" / "visual_features.csv")
-            elif fs == "fused":
-                fs_csv = csv_file or (data_cfg.csv_file.parent.parent / "visual" / "fused_features.csv")
-
-            if fs_csv and not Path(fs_csv).exists():
-                print(f"\n  SKIPPING {fs}: CSV file not found: {fs_csv}")
-                continue
-
-            result = run_pipeline_for_feature_set(
-                feature_set=fs,
-                data_cfg=data_cfg,
-                qaoa_cfg=qaoa_cfg,
-                vqc_cfg=vqc_cfg,
-                decision_cfg=decision_cfg,
-                dev_only=dev_only,
-                csv_file=fs_csv,
-                run_qaoa=args.select or args.all or True,
-                run_train=args.train or args.all or True,
-                run_eval=args.evaluate or args.all or True,
-                run_baselines_flag=args.baselines or args.all or True,
-            )
-            all_results[fs] = result
-
-        # Print comparative summary
-        print("\n" + "=" * 72)
-        print("  PHASE 6 COMPARATIVE RESULTS SUMMARY")
-        print("=" * 72)
-        print(f"{'Feature Set':<18} {'Quantum AUC':<12} {'Quantum Acc':<12} {'Best Baseline AUC':<18} {'Best Baseline':<15} {'Baseline Acc':<12}")
-        print("-" * 90)
-        for fs, result in all_results.items():
-            if result["eval_results"]:
-                q_auc = result["eval_results"]["metrics"]["auc_roc"]
-                q_acc = result["eval_results"]["metrics"]["accuracy"]
-            else:
-                q_auc = q_acc = float("nan")
-            if result["baseline_results"]:
-                best_baseline = max(result["baseline_results"].items(), key=lambda x: x[1]["auc_roc"])
-                b_auc = best_baseline[1]["auc_roc"]
-                b_acc = best_baseline[1]["accuracy"]
-                b_name = best_baseline[0]
-            else:
-                b_auc = float("nan")
-                b_acc = float("nan")
-                b_name = "N/A"
-            print(f"{fs:<18} {q_auc:<12.4f} {q_acc:<12.4f} {b_auc:<18.4f} {b_name:<15} {b_acc:<12.4f}")
-
-        # Save comparative results
-        summary_file = OUTPUT_DIR / "phase6_comparison.json"
-        summary_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(summary_file, "w") as fh:
-            json.dump({k: {kk: vv for kk, vv in v.items() if kk != "eval_results" and kk != "baseline_results"}
-                      for k, v in all_results.items()}, fh, indent=2, default=str)
-        print(f"\n  Comparative results saved to: {summary_file}")
-
-        return 0
-
-    if args.phase7_ablation:
-        # Run full ablation study (Phase 7)
-        print("\n" + "=" * 72)
-        print("  PHASE 7 ABLATION STUDY: Experiments A-I")
-        print("=" * 72)
-        all_results = {}
-        # Phase 7 ablation experiments A-I
-        # Note: For POS/CHROM experiments, we need to run with different methods
-        ablation_experiments = {
-            "A_rppg_only": {"feature_set": "A_rppg_only", "method": "POS"},
-            "B_pos_only": {"feature_set": "B_pos_only", "method": "POS"},
-            "C_chrom_only": {"feature_set": "C_chrom_only", "method": "CHROM"},
-            "D_pos_chrom": {"feature_set": "D_pos_chrom", "method": "POS"},  # Note: would need both methods
-            "E_rppg_quality": {"feature_set": "E_rppg_quality", "method": "POS"},
-            "F_rppg_cross_roi": {"feature_set": "F_rppg_cross_roi", "method": "POS"},
-            "G_rppg_visual": {"feature_set": "G_rppg_visual", "method": "POS"},
-            "H_rppg_visual_quality": {"feature_set": "H_rppg_visual_quality", "method": "POS"},
-            "I_full": {"feature_set": "I_full", "method": "POS"},
-        }
-        for exp_name, exp_config in ablation_experiments.items():
-            fs = exp_config["feature_set"]
-            method = exp_config["method"]
-            
-            if fs == "A_rppg_only" or fs == "F_rppg_cross_roi" or fs == "E_rppg_quality":
-                fs_csv = None  # Uses default from DataConfig (rPPG CSV)
-            elif fs == "G_rppg_visual" or fs == "H_rppg_visual_quality" or fs == "I_full":
-                fs_csv = csv_file or (data_cfg.csv_file.parent.parent / "visual" / "fused_features.csv")
-            else:
-                fs_csv = None  # Uses default from DataConfig (rPPG CSV)
-
-            if fs_csv and not Path(fs_csv).exists():
-                print(f"\n  SKIPPING {exp_name}: CSV file not found: {fs_csv}")
-                continue
-
-            # For POS/CHROM experiments, we need to run the pipeline with different methods
-            # The current pipeline uses a single method. For POS/CHROM, we'd need to 
-            # either run the pipeline twice or modify the pipeline to handle both.
-            # For now, we'll use the default method (POS) and note this limitation.
-            
-            result = run_pipeline_for_feature_set(
-                feature_set=fs,
-                data_cfg=data_cfg,
-                qaoa_cfg=qaoa_cfg,
-                vqc_cfg=vqc_cfg,
-                decision_cfg=decision_cfg,
-                dev_only=dev_only,
-                csv_file=fs_csv,
-                run_qaoa=args.select or args.all or True,
-                run_train=args.train or args.all or True,
-                run_eval=args.evaluate or args.all or True,
-                run_baselines_flag=args.baselines or args.all or True,
-            )
-            all_results[exp_name] = result
-
-        # Print comparative summary
-        print("\n" + "=" * 72)
-        print("  PHASE 7 ABLATION STUDY RESULTS SUMMARY")
-        print("=" * 72)
-        print(f"{'Experiment':<22} {'Feature Set':<20} {'Quantum AUC':<12} {'Quantum Acc':<12} {'Best Baseline AUC':<18} {'Best Baseline':<15} {'Baseline Acc':<12}")
-        print("-" * 110)
-        for exp_name, result in all_results.items():
-            if result["eval_results"]:
-                q_auc = result["eval_results"]["metrics"]["auc_roc"]
-                q_acc = result["eval_results"]["metrics"]["accuracy"]
-            else:
-                q_auc = q_acc = float("nan")
-            if result["baseline_results"]:
-                best_baseline = max(result["baseline_results"].items(), key=lambda x: x[1]["auc_roc"])
-                b_auc = best_baseline[1]["auc_roc"]
-                b_acc = best_baseline[1]["accuracy"]
-                b_name = best_baseline[0]
-            else:
-                b_auc = float("nan")
-                b_acc = float("nan")
-                b_name = "N/A"
-            # Extract experiment letter and feature set name
-            exp_letter = exp_name.split("_")[0]
-            fs_name = exp_config["feature_set"]
-            print(f"{exp_name:<22} {fs_name:<20} {q_auc:<12.4f} {q_acc:<12.4f} {b_auc:<18.4f} {b_name:<15} {b_acc:<12.4f}")
-
-        # Save comparative results
-        summary_file = OUTPUT_DIR / "phase7_ablation.json"
-        summary_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(summary_file, "w") as fh:
-            json.dump({k: {kk: vv for kk, vv in v.items() if kk != "eval_results" and kk != "baseline_results"}
-                      for k, v in all_results.items()}, fh, indent=2, default=str)
-        print(f"\n  Comparative results saved to: {summary_file}")
-
-        return 0
-
-    return 0
-
-    if args.ensemble:
-        # Run Phase 8 ensemble comparison
-        print("\n" + "=" * 72)
-        print("  PHASE 8 ENSEMBLE CLASSIFICATION: Ensemble Comparison")
-        print("=" * 72)
-        
-        # Feature sets for ensemble comparison
-        feature_sets = {
-            "rppg_only": "rppg_only",
-            "visual_only": "visual_only",
-            "fused": "fused",
-        }
-        
-        ensemble_results = run_phase8_ensemble_comparison(
-            data_cfg=data_cfg,
-            qaoa_cfg=qaoa_cfg,
-            vqc_cfg=vqc_cfg,
-            decision_cfg=decision_cfg,
-            dev_only=dev_only,
-            csv_file=csv_file,
-            run_qaoa=args.select or args.all or True,
-            run_train=args.train or args.all or True,
-            run_eval=args.evaluate or args.all or True,
-            run_baselines_flag=args.baselines or args.all or True,
-        )
-        
-        print("\n" + "=" * 72)
-        print("  PHASE 8 ENSEMBLE COMPARISON SUMMARY")
-        print("=" * 72)
-        print(f"{'Feature Set':<18} {'Quantum AUC':<12} {'Quantum Acc':<12} {'Best Baseline AUC':<18} {'Best Baseline':<15} {'Baseline Acc':<12}")
-        print("-" * 90)
-        for fs, result in ensemble_results.items():
-            if result["eval_results"]:
-                q_auc = result["eval_results"]["metrics"]["auc_roc"]
-                q_acc = result["eval_results"]["metrics"]["accuracy"]
-            else:
-                q_auc = q_acc = float("nan")
-            if result["baseline_results"]:
-                best_baseline = max(result["baseline_results"].items(), key=lambda x: x[1]["auc_roc"])
-                b_auc = best_baseline[1]["auc_roc"]
-                b_acc = best_baseline[1]["accuracy"]
-                b_name = best_baseline[0]
-            else:
-                b_auc = float("nan")
-                b_acc = float("nan")
-                b_name = "N/A"
-            print(f"{fs:<18} {q_auc:<12.4f} {q_acc:<12.4f} {b_auc:<18.4f} {b_name:<15} {b_acc:<12.4f}")
-
-        # Save comparative results
-        summary_file = OUTPUT_DIR / "phase8_ensemble.json"
-        summary_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(summary_file, "w") as fh:
-            json.dump({k: {kk: vv for kk, vv in v.items() if kk != "eval_results" and kk != "baseline_results"}
-                      for k, v in ensemble_results.items()}, fh, indent=2, default=str)
-        print(f"\n  Comparative results saved to: {summary_file}")
-
-        return 0
-
-    feature_set = args.feature_set
+    # Only fused feature set is supported
+    feature_set = "fused"
     run_qaoa = args.select or args.all
     run_train = args.train or args.all
     run_eval = args.evaluate or args.all

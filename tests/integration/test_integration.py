@@ -5,7 +5,10 @@ import numpy as np
 from pathlib import Path
 
 # Add WORKING directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "WORKING"))
+WORKING_DIR = Path(__file__).parent.parent.parent / "WORKING"
+sys.path.insert(0, str(WORKING_DIR))
+sys.path.insert(0, str(WORKING_DIR / "RPPG"))
+sys.path.insert(0, str(WORKING_DIR / "quantum"))
 
 from RPPG.pipeline import RPPGPipeline
 from RPPG.pqs import compute_pqs, PQSResult, PQSComponents

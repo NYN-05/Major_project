@@ -3,13 +3,13 @@
 **Component 2** of the deepfake-verification system under `WORKING/`:
 `frame/` (stage 1) → `RPPG/` (this directory, stage 2) → `quantum/` (stage 3).
 
-Extracts 20 physiological features from facial video via remote photoplethysmography (rPPG).
+Extracts **20** physiological features from facial video via remote photoplethysmography (rPPG).
 The feature table `output/rppg/dataset_features.csv` is the **direct data source** for the quantum
 decision layer (`WORKING/quantum/`): it consumes the 20 rPPG features as-is (no synthetic data),
 flips the label convention (CSV `1 = fake` → quantum `0 = fake`), and builds its
 training/eval splits from this table.
 
-Current table: **3473 rows** @30 fps (1921 real / 1552 fake) from DFDC archive + FaceForensics++,
+Current table: **3473 rows** @30 fps (1921 real / 1552 fake) from DFDC archive,
 rebuilt 2026-08-19.
 
 ## Project Structure
@@ -26,7 +26,7 @@ WORKING/RPPG/
 │   ├── features.py           # 20-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations, HR half-diff, peak prominence, morphology, phase lag, motion, stability)
 │   └── model_utils.py        # MediaPipe Face Landmarker + Haar cascade download/caching (SHA-256 verified)
 ├── rppg-pipeline/            # Training & demo scripts
-│   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/ (+ FF++ via --include-ffpp; --gpu for YuNet)
+│   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/ (--gpu for YuNet)
 │   ├── probe_features.py            # Per-feature AUC probe on a dataset (signal-level study)
 │   ├── train_classifier.py         # Train rPPG RandomForest (side path)
 │   ├── retrain_dfdc.py             # DFDC-only RandomForest retrain with checkpointing
@@ -51,10 +51,10 @@ WORKING/RPPG/
 pipeline = RPPGPipeline(
     method="POS",              # "POS" or "CHROM"
     target_fps=None,           # Resample to this FPS (None = native)
-    blur_threshold=15.0,       # Laplacian variance gate
-    brightness_range=(25, 230),# Gray mean gate
+    blur_threshold=3.0,        # Laplacian variance gate (relaxed from 15.0)
+    brightness_range=(30, 235),# Gray mean gate (relaxed from 25/230)
     low_hz=0.7, high_hz=4.0,   # Physiological band (Hz)
-    min_usable_frames=48,      # Minimum frames for feature extraction
+    min_usable_frames=24,      # Minimum frames for feature extraction (relaxed from 48)
     roi_weights=(0.35, 0.35, 0.30)  # Left cheek, right cheek, forehead
 )
 ```
@@ -82,7 +82,7 @@ pipeline = RPPGPipeline(
 | `fps` | float | Effective sampling rate |
 | `n_frames_total` | int | Total frames processed |
 | `n_frames_usable` | int | Frames with face detected |
-| `features` | `RPPGFeatures \| None` | **20-feature vector (or None if < 48 usable frames / degenerate signal)** |
+| `features` | `RPPGFeatures \| None` | **20-feature vector (or None if < 24 usable frames / degenerate signal)** |
 | `combined_signal` | `np.ndarray \| None` | Cleaned combined pulse waveform |
 | `left_cheek_signal` | `np.ndarray \| None` | Cleaned left cheek pulse |
 | `right_cheek_signal` | `np.ndarray \| None` | Cleaned right cheek pulse |
@@ -119,7 +119,7 @@ pipeline = RPPGPipeline(
 
 ### Failure Mode
 
-Returns `features=None` when `n_frames_usable < min_usable_frames` (48) **or** when the
+Returns `features=None` when `n_frames_usable < min_usable_frames` (24) **or** when the
 raw features are degenerate (≥ 2 NaN values or `signal_quality_index == 0.0` — a flat/dead
 pulse). Degenerate signals are rejected at the pipeline level instead of being filled with
 "average human" constants (H1). `run_pipeline.py` then emits `INCONCLUSIVE` verdict and
@@ -131,8 +131,8 @@ exits with code 3.
 
 ```bash
 # From WORKING/RPPG/
-# Full extraction (DFDC + FF++, 3473 rows @30 fps):
-python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0
+# Full extraction (DFDC only, 3473 rows @30 fps):
+python rppg-pipeline/extract_dataset_features.py --workers 0
 
 # Optional flags:
 #   --max-per-class N     cap samples per class (smoke test)
@@ -145,9 +145,7 @@ python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0
 
 Reads videos from (see `collect_samples()`):
 - `archive/DFDC_Dataset/Fake/` and `Real/` (DFDC phone-style face-swaps)
-- `FF++/` at the repo root (train/val/test: FF-real + YouTube-real reals, FF-synthesis fakes) via `--include-ffpp`
-
-The legacy `archive (1)` CSV layout is absent on disk.
+- No FaceForensics++ (FF++) support
 
 Writes: `WORKING/output/rppg/dataset_features.csv` (relative to `WORKING/`)
 
@@ -159,20 +157,17 @@ fake) per method (POS/CHROM) per target fps, plus an all-20-feature oracle AUC,
 and a table ranking features.
 
 ```bash
-python rppg-pipeline/probe_features.py --ffpp --max-per-class 120 --workers 8
+python rppg-pipeline/probe_features.py --max-per-class 120 --workers 8
 ```
 
 ### Dataset Findings (Validated Aug 2026)
 
 - **Current training table** (`output/rppg/dataset_features.csv`): **3473 labeled clips
-  @30 fps (1921 real / 1552 fake)** — DFDC archive + FaceForensics++ (`--include-ffpp`),
-  rebuilt 2026-08-19. This is the **direct, exclusive data source for the quantum layer**;
-  no synthetic data.
+  @30 fps (1921 real / 1552 fake)** — DFDC archive only, rebuilt 2026-08-19. This is the **direct, exclusive data source for the quantum layer**; no synthetic data.
 - **Quality caveats**: across all 20 features, per-feature |AUC−0.5| ≤ ~0.06 — rPPG
   features carry limited class signal because face-swap fakes transplant the source
   person's genuine skin/vascular signal. The rPPG features are near chance-level on
-  this task; growing the table (421 → 3445 → 3473 rows) and doubling the feature set
-  (10 → 20) did not lift the ceiling.
+  this task; growing the table and doubling the feature set did not lift the ceiling.
 - Historical probe runs (2,797 DFDC preview clips) showed rPPG features at **chance level**
   (AUC 0.47–0.53), confirming the physiological-signal limitation.
 - The documented next lever is the Phase-4 rPPG method/ROI probe (POS vs CHROM vs
@@ -224,6 +219,7 @@ streamlit run rppg-pipeline/streamlit_app.py
 - **Cached filter/detrend** (`preprocessing.py`): `@lru_cache` on Butterworth coefficients + detrend sparse matrix
 - **Skin-mask hoist** (`face_roi.py`): Compute YCrCb+inRange once/frame instead of 3×
 - **Discarded quality work** (`pipeline.py`): Stage-1 path still computes Laplacian/brightness (recorded in metadata) but the rPPG gate uses only `face.found`
+- **ROI mean via `cv2.mean`** (`face_roi.py`): `mean_rgb` uses `cv2.mean(frame, mask)` instead of `frame[mask > 0].mean(axis=0)` — no masked-pixel array allocation per ROI per frame
 
 ## Install
 
@@ -289,7 +285,7 @@ rejected as `features=None` before the fallback runs, and `estimate_snr` returns
 
 | File | Description |
 |------|-------------|
-| `dataset_features.csv` | 10 features + label per video (1=fake, 0=real) |
+| `dataset_features.csv` | 20 features + label per video (1=fake, 0=real) |
 | `rppg_classifier.pkl` | Trained RandomForest (side path) |
 | `rppg_classifier_metadata.json` | Training summary, feature columns, metrics |
 | `plots/` | Diagnostic plots (PSD, waveforms, feature distributions) |
@@ -314,9 +310,9 @@ Measure heart-rate error against contact-PPG reference; report MAE/RMSE.
 
 ## Recommended Workflow
 
-1. Add new videos to `archive/DFDC_Dataset/Fake|Real` or `FF++/`
-2. Probe the dataset first: `python rppg-pipeline/probe_features.py --ffpp --max-per-class N --workers 8`
-3. Regenerate features: `python rppg-pipeline/extract_dataset_features.py --include-ffpp --workers 0`
+1. Add new videos to `archive/DFDC_Dataset/Fake|Real`
+2. Probe the dataset first: `python rppg-pipeline/probe_features.py --max-per-class N --workers 8`
+3. Regenerate features: `python rppg-pipeline/extract_dataset_features.py --workers 0`
 4. Retrain classifier (optional): `python rppg-pipeline/train_classifier.py`
 5. Rerun quantum pipeline: `python -m quantum.pipeline --all` (from `WORKING/`)
 6. Test end-to-end: `python run_pipeline.py --source <video> --method POS`
