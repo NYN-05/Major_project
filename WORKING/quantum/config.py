@@ -234,16 +234,9 @@ class VQCConfig:
 
 @dataclass(frozen=True)
 class DecisionConfig:
-    # Three-state decision thresholds
-    # prob_real >= real_min_prob -> REAL
-    # prob_real <= fake_max_prob -> FAKE
-    # fake_max_prob < prob_real < real_min_prob -> INSUFFICIENT EVIDENCE / REVIEW REQUIRED
-    fake_max_prob: float = 0.3
-    real_min_prob: float = 0.7
-    # Quality threshold: minimum PQS for sufficient evidence
-    # Below this -> INSUFFICIENT EVIDENCE / REVIEW REQUIRED
-    quality_threshold: float = 0.5
-    # Legacy single threshold (kept for backward compatibility)
+    # Binary decision threshold
+    # prob_real >= decision_threshold -> REAL
+    # prob_real < decision_threshold -> FAKE
     decision_threshold: float = 0.5
     metrics_baseline_file: Path = field(default_factory=lambda: OUTPUT_DIR / "metrics_baselines.json")
     roc_plot: Path = field(default_factory=lambda: OUTPUT_DIR / "roc_curve.png")

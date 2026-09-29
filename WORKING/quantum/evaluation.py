@@ -79,61 +79,46 @@ def expected_calibration_error(y_true, prob_real, n_bins=10):
     return float(ece)
 
 
-def classification_metrics(y_true, prob_real, fake_max_prob=0.3, real_min_prob=0.7):
-    """Classification metrics for three-state decision (REAL, FAKE, INSUFFICIENT EVIDENCE).
+def classification_metrics(y_true, prob_real, decision_threshold=0.5):
+    """Binary classification metrics (REAL vs FAKE).
     
     Args:
         y_true: True labels (0=FAKE, 1=REAL)
         prob_real: Predicted probability of REAL
-        fake_max_prob: Threshold below which prediction is FAKE
-        real_min_prob: Threshold above which prediction is REAL
+        decision_threshold: Threshold for REAL (>=) vs FAKE (<)
     """
     sk = _sklearn()
     
-    # Three-state predictions
-    predictions = np.full_like(prob_real, -1, dtype=int)  # -1 = INSUFFICIENT EVIDENCE
-    predictions[prob_real >= real_min_prob] = 1  # REAL
-    predictions[prob_real <= fake_max_prob] = 0  # FAKE
-    # -1 remains for INSUFFICIENT EVIDENCE
+    # Binary predictions
+    predictions = (prob_real >= decision_threshold).astype(int)  # 1=REAL, 0=FAKE
     
-    # Binary metrics for REAL vs FAKE (ignoring INSUFFICIENT EVIDENCE)
-    has_sufficient = predictions != -1
-    if has_sufficient.any():
-        y_sufficient = y_true[has_sufficient]
-        pred_sufficient = predictions[has_sufficient]
-        prob_sufficient = prob_real[has_sufficient]
-        
-        precision, recall, f1, _ = sk["precision_recall_fscore_support"](
-            y_sufficient, pred_sufficient, average="binary", zero_division=0
-        )
-        if len(set(int(v) for v in y_sufficient)) >= 2:
-            auc_roc = float(sk["roc_auc_score"](y_sufficient, prob_sufficient))
-            pr_auc = float(sk["average_precision_score"](y_sufficient, prob_sufficient))
-        else:
-            auc_roc = None
-            pr_auc = None
-        
-        tn, fp, fn, tp = sk["confusion_matrix"](y_sufficient, pred_sufficient).ravel()
-        specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
-        accuracy = float(sk["accuracy_score"](y_sufficient, pred_sufficient))
+    precision, recall, f1, _ = sk["precision_recall_fscore_support"](
+        y_true, predictions, average="binary", zero_division=0
+    )
+    if len(set(int(v) for v in y_true)) >= 2:
+        auc_roc = float(sk["roc_auc_score"](y_true, prob_real))
+        pr_auc = float(sk["average_precision_score"](y_true, prob_real))
     else:
-        precision = recall = f1 = 0.0
-        auc_roc = pr_auc = None
-        specificity = 0.0
-        accuracy = 0.0
+        auc_roc = None
+        pr_auc = None
+    
+    cm = sk["confusion_matrix"](y_true, predictions)
+    if cm.size == 4:
+        tn, fp, fn, tp = cm.ravel()
+    else:
+        # Single class case
         tn = fp = fn = tp = 0
+        if cm.size == 1:
+            if y_true[0] == 0:  # only FAKE
+                tn = cm[0, 0]
+            else:  # only REAL
+                tp = cm[0, 0]
+    specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+    accuracy = float(sk["accuracy_score"](y_true, predictions))
     
-    # Coverage metrics
+    # Coverage (always 1.0 for binary)
     n_total = len(y_true)
-    n_classified = int(has_sufficient.sum()) if has_sufficient.any() else 0
-    coverage = n_classified / n_total if n_total > 0 else 0.0
-    
-    # Three-class confusion matrix (REAL=1, FAKE=0, INSUFFICIENT=-1)
-    y_true_3class = np.full_like(y_true, -1)
-    y_true_3class[y_true == 1] = 1  # REAL
-    y_true_3class[y_true == 0] = 0  # FAKE
-    
-    cm_3class = sk["confusion_matrix"](y_true_3class, predictions, labels=[-1, 0, 1])
+    coverage = 1.0
     
     return {
         "accuracy": float(accuracy),
@@ -144,35 +129,22 @@ def classification_metrics(y_true, prob_real, fake_max_prob=0.3, real_min_prob=0
         "auc_roc": auc_roc,
         "pr_auc": pr_auc,
         "confusion_matrix_binary": [[int(tn), int(fp)], [int(fn), int(tp)]],
-        "confusion_matrix_3class": cm_3class.tolist(),
-        "ece": expected_calibration_error(
-            y_true[has_sufficient] if has_sufficient.any() else y_true, 
-            prob_real[has_sufficient] if has_sufficient.any() else prob_real
-        ),
+        "ece": expected_calibration_error(y_true, prob_real),
         "coverage": float(coverage),
-        "n_classified": int(n_classified),
+        "n_classified": int(n_total),
         "n_total": int(n_total),
-        "n_insufficient": int((~has_sufficient).sum()) if has_sufficient.any() else n_total,
+        "n_insufficient": 0,
     }
 
 
-def balanced_accuracy(y_true, prob_real, fake_max_prob=0.3, real_min_prob=0.7):
-    """Balanced accuracy (mean of per-class recall) from probabilities for three-state."""
+def balanced_accuracy(y_true, prob_real, decision_threshold=0.5):
+    """Balanced accuracy (mean of per-class recall) from probabilities for binary."""
     sk = _sklearn()
     
-    predictions = np.full_like(prob_real, -1, dtype=int)
-    predictions[prob_real >= real_min_prob] = 1
-    predictions[prob_real <= fake_max_prob] = 0
-    
-    has_sufficient = predictions != -1
-    if not has_sufficient.any():
-        return 0.0
-    
-    y_sufficient = y_true[has_sufficient]
-    pred_sufficient = predictions[has_sufficient]
+    predictions = (prob_real >= decision_threshold).astype(int)
     
     _, recall, _, _ = sk["precision_recall_fscore_support"](
-        y_sufficient, pred_sufficient, average=None, zero_division=0
+        y_true, predictions, average=None, zero_division=0
     )
     return float(np.mean(recall)) if len(recall) else 0.0
 
@@ -238,50 +210,28 @@ def _enough_for_cv(y, n_splits=5):
 
 
 def decision_bins(y_true, prob_real, cfg=None, pqs=None):
-    """Three-state decision bins: REAL, FAKE, INSUFFICIENT EVIDENCE / REVIEW REQUIRED.
+    """Binary decision bins: REAL, FAKE.
     
     Decision logic:
-    - prob_real >= real_min_prob -> REAL
-    - prob_real <= fake_max_prob -> FAKE
-    - fake_max_prob < prob_real < real_min_prob -> INSUFFICIENT EVIDENCE
-    - If pqs is provided and pqs < quality_threshold -> INSUFFICIENT EVIDENCE (overrides prob_real)
+    - prob_real >= decision_threshold -> REAL
+    - prob_real < decision_threshold -> FAKE
     """
     cfg = cfg or DecisionConfig()
-    real_min = cfg.real_min_prob
-    fake_max = cfg.fake_max_prob
-    quality_thresh = cfg.quality_threshold
+    threshold = cfg.decision_threshold
     
-    # Start with all samples as INSUFFICIENT EVIDENCE
+    # Binary classification
+    real_mask = prob_real >= threshold
+    fake_mask = prob_real < threshold
+    
     n = len(prob_real)
-    decision = np.full(n, "INSUFFICIENT EVIDENCE", dtype=object)
-    
-    # Apply quality threshold if PQS provided
-    if pqs is not None:
-        sufficient_quality = pqs >= cfg.quality_threshold
-    else:
-        sufficient_quality = np.ones(len(prob_real), dtype=bool)
-    
-    # Classify as REAL
-    real_mask = (prob_real >= real_min) & sufficient_quality
-    decision[real_mask] = "REAL"
-    
-    # Classify as FAKE
-    fake_mask = (prob_real <= fake_max) & sufficient_quality
-    decision[fake_mask] = "FAKE"
-    
-    # Count results
     real_count = int(real_mask.sum())
     fake_count = int(fake_mask.sum())
-    insufficient_count = int((~real_mask & ~fake_mask).sum())
     
     return {
         "real": real_count,
         "fake": fake_count,
-        "insufficient_evidence": insufficient_count,
-        "coverage": float((real_mask | fake_mask).sum()) / len(prob_real) if len(prob_real) > 0 else 0.0,
-        "fake_max_prob": float(fake_max),
-        "real_min_prob": float(real_min),
-        "quality_threshold": float(quality_thresh),
+        "coverage": 1.0,
+        "decision_threshold": float(threshold),
     }
 
 
@@ -312,9 +262,9 @@ def analyze_threshold_behavior(y_true, prob_real, cfg=None):
     """Analyze how thresholds affect predictions.
 
     Returns dict with threshold sweep analysis to diagnose whether
-    100% UNCERTAIN is due to weak discrimination or conservative thresholds.
+    the decision boundary is effective or if discrimination is weak.
 
-    Case A: Scores separate classes but 0.3/0.7 is too conservative
+    Case A: Scores separate classes but threshold is too conservative
     Case B: Scores do not separate classes (discrimination problem)
     """
     cfg = cfg or DecisionConfig()
@@ -338,11 +288,6 @@ def analyze_threshold_behavior(y_true, prob_real, cfg=None):
         precision = np.where((tps + fps) > 0, tps / (tps + fps), 0.0)
         specificity_arr = np.where((tn_s + fps) > 0, tn_s / (tn_s + fps), 0.0)
 
-    # FAKE recall = proportion of FAKE samples with prob_real <= fake_max_prob
-    fake_recall_direct = (
-        float((prob_real <= cfg.fake_max_prob).sum()) / n_neg if n_neg > 0 else 0.0
-    )
-
     # Score ranges per class
     fake_thresholds = sorted_probs[sorted_y == 0]  # scores of FAKE samples
     real_thresholds = sorted_probs[sorted_y == 1]  # scores of REAL samples
@@ -351,39 +296,31 @@ def analyze_threshold_behavior(y_true, prob_real, cfg=None):
         "n_total": int(len(prob_real)),
         "n_real": n_pos,
         "n_fake": n_neg,
-        "n_uncertain_at_03_07": int(
-            ((prob_real > cfg.fake_max_prob) & (prob_real < cfg.real_min_prob)).sum()
-        ),
-        "fake_max_prob": cfg.fake_max_prob,
-        "real_min_prob": cfg.real_min_prob,
+        "decision_threshold": cfg.decision_threshold,
         "score_range": [float(prob_real.min()), float(prob_real.max())],
-        "fake_scores": float(fake_thresholds.min()) if len(fake_thresholds) > 0 else None,
-        "real_scores": float(real_thresholds.max()) if len(real_thresholds) > 0 else None,
-        "proportion_fake_below_03": float((prob_real < cfg.fake_max_prob).sum()) / len(prob_real),
-        "proportion_real_above_07": float((prob_real >= cfg.real_min_prob).sum()) / len(prob_real),
-        "fake_recall_direct": fake_recall_direct,
-        "real_recall": float(recall[-1]) if len(recall) > 0 else 0.0,
-        "specificity": float(specificity_arr[-1]) if len(specificity_arr) > 0 else 0.0,
+        "fake_scores_min": float(fake_thresholds.min()) if len(fake_thresholds) > 0 else None,
+        "real_scores_max": float(real_thresholds.max()) if len(real_thresholds) > 0 else None,
+        "proportion_fake_below_threshold": float((prob_real < cfg.decision_threshold).sum()) / len(prob_real),
+        "proportion_real_above_threshold": float((prob_real >= cfg.decision_threshold).sum()) / len(prob_real),
+        "recall_at_last": float(recall[-1]) if len(recall) > 0 else 0.0,
+        "specificity_at_last": float(specificity_arr[-1]) if len(specificity_arr) > 0 else 0.0,
         "precision_at_last": float(precision[-1]) if len(precision) > 0 else 0.0,
+        "threshold_sweep": [
+            {
+                "threshold": float(sorted_probs[i]),
+                "recall": float(recall[i]),
+                "precision": float(precision[i]),
+                "specificity": float(specificity_arr[i]),
+            }
+            for i in range(0, len(sorted_probs), max(1, len(sorted_probs) // 20))
+        ],
+        "diagnosis": "B" if (fake_thresholds.max() if len(fake_thresholds) > 0 else 0) > (real_thresholds.min() if len(real_thresholds) > 0 else 1) else "A",
+        "diagnosis_text": (
+            "Scores do not separate classes (discrimination problem)"
+            if (fake_thresholds.max() if len(fake_thresholds) > 0 else 0) > (real_thresholds.min() if len(real_thresholds) > 0 else 1)
+            else "Scores separate classes but threshold may be suboptimal"
+        ),
     }
-
-    # Diagnosis: Case A or Case B
-    # Case A: Some samples have prob_real >= 0.7 or <= 0.3, but 0.3/0.7 threshold misses them
-    # Case B: All (or almost all) prob_real are between 0.3 and 0.7
-
-    n_real_above_07 = analysis["proportion_real_above_07"] * analysis["n_total"]
-    n_fake_below_03 = analysis["proportion_fake_below_03"] * analysis["n_total"]
-
-    if n_real_above_07 == 0 and n_fake_below_03 == 0:
-        analysis["diagnosis"] = "Case B: Scores do not separate classes - all probabilities concentrated in uncertain region"
-        analysis["recommendation"] = "Proceed upstream to rPPG and feature improvement (Phase 4-6)"
-    elif analysis["n_uncertain_at_03_07"] < analysis["n_total"]:
-        analysis["diagnosis"] = "Case A: Scores partially separate classes - some confident predictions possible"
-        analysis["recommendation"] = "Threshold adjustment could increase coverage, but discrimination is limited (AUC ~0.53)"
-    else:
-        analysis["diagnosis"] = "Case B: Scores do not separate classes"
-        analysis["recommendation"] = "Proceed upstream to rPPG and feature improvement"
-
     return analysis
 
 

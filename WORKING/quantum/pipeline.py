@@ -31,7 +31,7 @@ from quantum.qaoa import (
     verify_hamiltonian,
 )
 from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
-from quantum.explain import build_explanation, DecisionExplanation
+from quantum.explain import build_explanation, DecisionExplanation, Verdict, PhysiologicalEvidence, ReliabilityLevel
 
 
 def _fmt4(v):
@@ -84,14 +84,14 @@ def predict_features(features, feature_set: str = "rppg_only"):
         )
     x_scaled = scaler.transform(x)
     if not np.isfinite(x_scaled).all():
+        # Default to FAKE when features are invalid (binary decision)
         return DecisionExplanation(
-            final_verdict=Verdict.INSUFFICIENT_EVIDENCE,
+            final_verdict=Verdict.FAKE,
             physiological_evidence=PhysiologicalEvidence(
-                verdict=Verdict.INSUFFICIENT_EVIDENCE,
-                probability_real=None,
-                confidence=None,
+                verdict=Verdict.FAKE,
+                probability_real=0.0,
+                confidence=0.0,
                 reliability_level=ReliabilityLevel.UNKNOWN,
-                insufficient_reason="Feature vector contains non-finite values after scaling"
             ),
             decision_logic="Feature vector contains non-finite values after scaling",
             requires_verification=True,

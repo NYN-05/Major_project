@@ -3,7 +3,7 @@ run_pipeline.py
 ================
 Single endpoint for the full deepfake-verification flow:
 
-    frames  ->  rPPG  ->  visual  ->  quantum (fused)  ->  final verdict (REAL / FAKE / UNCERTAIN)
+    frames  ->  rPPG  ->  visual  ->  quantum (fused)  ->  final verdict (REAL / FAKE)
 
 Stages
 ------
@@ -15,7 +15,7 @@ Stages
              (ResNet50 + handcrafted -> 39-feature vector from face crops).
 4. QUANTUM : train-fitted feature scaling + QAOA-selected subset of the
               fused (rPPG + visual) features -> trained Hybrid VQC checkpoint -> P(real) ->
-              KYC decision bins (real >= 0.7, fake <= 0.3).
+              KYC decision bins (real >= 0.5, fake < 0.5).
 
 The quantum layer consumes fused features directly (same names/order as
 RPPGFeatures.feature_names() + VISUAL_FEATURE_NAMES); no synthetic or transformed data is used.
@@ -233,21 +233,16 @@ def quantum_inference(features: dict) -> dict:
 
     `predict_features` is the quantum layer's own inference entry point: it
     applies the saved training-time QAOA indices to the fused feature vector
-    and returns P(real) plus the KYC verdict (REAL / FAKE / UNCERTAIN).
+    and returns P(real) plus the KYC verdict (REAL / FAKE).
     """
     from quantum.pipeline import predict_features  # deferred: torch+pennylane ~7 s
 
     explanation = predict_features(features, feature_set="fused")
     # Convert DecisionExplanation to legacy dict format
     phys = explanation.physiological_evidence
-    verdict_map = {
-        "REAL": "REAL",
-        "FAKE": "FAKE",
-        "INSUFFICIENT EVIDENCE / REVIEW REQUIRED": "UNCERTAIN",
-    }
     return {
         "prob_real": phys.probability_real,
-        "verdict": verdict_map.get(phys.verdict.value, "UNCERTAIN"),
+        "verdict": phys.verdict.value,
         "confidence": phys.confidence,
         "explanation": explanation.to_dict(),
     }

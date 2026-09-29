@@ -66,13 +66,13 @@ def quantum_to_display_label(label):
     """Convert quantum label to display/verdict label.
 
     Quantum: LABEL_REAL = 1, LABEL_FAKE = 0
-    Display:   REAL, FAKE, or UNCERTAIN based on probability thresholds
+    Display:   REAL, FAKE
 
     Args:
         label: int, quantum convention label (0 = fake, 1 = real)
 
     Returns:
-        str: display label ('REAL', 'FAKE', or 'UNCERTAIN')
+        str: display label ('REAL' or 'FAKE')
     """
     if label == LABEL_REAL:
         return "REAL"

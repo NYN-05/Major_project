@@ -23,6 +23,9 @@ $Pip      = Join-Path $RepoRoot 'venv\Scripts\pip.exe'
 $Working  = Join-Path $RepoRoot 'WORKING'
 $Frontend = Join-Path $RepoRoot 'frontend'
 
+# Disable torch.compile (inductor/triton not available on Windows)
+$env:TORCH_COMPILE_DISABLE = '1'
+
 # Load .env file if present
 $EnvFile = Join-Path $RepoRoot '.env'
 if (Test-Path -LiteralPath $EnvFile) {

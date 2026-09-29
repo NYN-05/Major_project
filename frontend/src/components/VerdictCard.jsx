@@ -55,8 +55,8 @@ function ConfidenceRing({ value, tone }) {
 }
 
 export default function VerdictCard({ result, onTryAgain }) {
-  const label = result?.verdict?.label ?? "UNCERTAIN";
-  const p = PLAIN[label] ?? PLAIN.UNCERTAIN;
+  const label = result?.verdict?.label ?? "FAKE";
+  const p = PLAIN[label] ?? PLAIN.FAKE;
   const Icon = TONE_ICON[p.tone];
   const confidence = result?.verdict?.confidence;
   const probReal = result?.stages?.quantum?.prob_real;

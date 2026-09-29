@@ -9,8 +9,8 @@ const HEAD_ICON = {
 };
 
 export default function VerdictHeader({ result, videoMeta, resultElapsed }) {
-  const label = result?.verdict?.label ?? "UNCERTAIN";
-  const p = PLAIN[label] ?? PLAIN.UNCERTAIN;
+  const label = result?.verdict?.label ?? "FAKE";
+  const p = PLAIN[label] ?? PLAIN.FAKE;
   const HeadIcon = HEAD_ICON[p.tone];
   const name = result?.video ?? "—";
   const ts = fmtTimestamp(result?.timestamp);

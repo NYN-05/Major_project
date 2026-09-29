@@ -26,13 +26,6 @@ export const PLAIN = {
     headline: "Synthetic or manipulated footage",
     note: "This video does not show the natural pulse of a live person. The physiological signal is inconsistent with a genuine recording — consistent with AI-generated or manipulated footage.",
   },
-  UNCERTAIN: {
-    word: "Needs Human Review",
-    tone: "warn",
-    verdictLabel: "NEEDS HUMAN REVIEW",
-    headline: "Signal too weak for an automated decision",
-    note: "The extracted physiological signal did not reach the confidence required for an automated verdict. This video should be passed to a manual KYC reviewer before use.",
-  },
 };
 
 export const PIPELINE = [
@@ -170,5 +163,4 @@ export const TONE_ICON = {
 export const VERDICT_ICON = {
   REAL: UserCheck,
   FAKE: ShieldAlert,
-  UNCERTAIN: ShieldAlert,
 };

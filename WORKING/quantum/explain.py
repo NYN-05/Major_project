@@ -28,7 +28,6 @@ class Verdict(Enum):
     """Classification verdict."""
     REAL = "REAL"
     FAKE = "FAKE"
-    INSUFFICIENT_EVIDENCE = "INSUFFICIENT EVIDENCE / REVIEW REQUIRED"
 
 
 class ReliabilityLevel(Enum):
@@ -192,28 +191,11 @@ def build_explanation(
     cfg = decision_cfg
     
     # --- Physiological Evidence ---
-    phys_verdict = Verdict.INSUFFICIENT_EVIDENCE
+    phys_verdict = Verdict.REAL if prob_real >= cfg.decision_threshold else Verdict.FAKE
     insufficient_reason = None
     
-    if prob_real >= decision_cfg.real_min_prob:
-        phys_verdict = Verdict.REAL
-    elif prob_real <= decision_cfg.fake_max_prob:
-        phys_verdict = Verdict.FAKE
-    else:
-        phys_verdict = Verdict.INSUFFICIENT_EVIDENCE
-        insufficient_reason = "Probability in uncertain range"
-    
-    # Check PQS quality threshold
-    insufficient_reason_pqs = None
-    if pqs_result and pqs_result.pqs < decision_cfg.quality_threshold:
-        phys_verdict = Verdict.INSUFFICIENT_EVIDENCE
-        insufficient_reason_pqs = f"PQS ({pqs_result.pqs:.3f}) below threshold ({decision_cfg.quality_threshold})"
-        if insufficient_reason:
-            insufficient_reason += f"; {insufficient_reason_pqs}"
-        else:
-            insufficient_reason = insufficient_reason_pqs
-    
-    # Determine reliability level
+    # Check PQS quality threshold (for reliability info only, doesn't change verdict)
+    reliability = ReliabilityLevel.UNKNOWN
     if pqs_result:
         pqs_score = pqs_result.pqs
         if pqs_score >= 0.7:
@@ -236,7 +218,7 @@ def build_explanation(
         cross_roi_consistency=0.0,
         temporal_consistency=0.0,
         reliability_level=reliability,
-        insufficient_reason=insufficient_reason or insufficient_reason_pqs,
+        insufficient_reason=None,
     )
     
     if pqs_result:
@@ -261,42 +243,32 @@ def build_explanation(
     
     # --- Decision Logic ---
     decision_parts = []
-    if prob_real >= decision_cfg.real_min_prob:
-        decision_parts.append(f"P(Real)={prob_real:.3f} >= {decision_cfg.real_min_prob} → REAL")
-    elif prob_real <= decision_cfg.fake_max_prob:
-        decision_parts.append(f"P(Real)={prob_real:.3f} <= {decision_cfg.fake_max_prob} → FAKE")
+    if prob_real >= cfg.decision_threshold:
+        decision_parts.append(f"P(Real)={prob_real:.3f} >= {cfg.decision_threshold} → REAL")
     else:
-        decision_parts.append(f"P(Real)={prob_real:.3f} in uncertain range ({decision_cfg.fake_max_prob}-{decision_cfg.real_min_prob}) → INSUFFICIENT")
-    
-    if pqs_result and pqs_result.pqs < decision_cfg.quality_threshold:
-        decision_parts.append(f"PQS={pqs_result.pqs:.3f} < {decision_cfg.quality_threshold} → INSUFFICIENT EVIDENCE (overrides)")
+        decision_parts.append(f"P(Real)={prob_real:.3f} < {cfg.decision_threshold} → FAKE")
     
     decision_logic = "; ".join(decision_parts)
     
     # Final verdict
     final_verdict = phys_verdict
-    if visual_result:
-        # Could combine with visual evidence - for now just use physiological
-        pass
     
-    # Coverage calculation
+    # Coverage calculation (always 1.0 for binary)
     coverage = 1.0
-    if pqs_result and pqs_result.pqs < decision_cfg.quality_threshold:
-        coverage = 0.5  # reduced coverage
     
     # Overall confidence
     overall_confidence = abs(prob_real - 0.5) * 2
     if pqs_result:
         overall_confidence = (overall_confidence + pqs_result.pqs) / 2
     
-    # Requires verification
-    requires_verification = phys_verdict == Verdict.INSUFFICIENT_EVIDENCE
+    # Requires verification based on low confidence
+    requires_verification = overall_confidence < 0.3
     
     return DecisionExplanation(
         final_verdict=final_verdict,
         physiological_evidence=phys_evidence,
         visual_evidence=visual_evidence,
-        decision_logic="; ".join(decision_parts),
+        decision_logic=decision_logic,
         requires_verification=requires_verification,
         coverage=coverage,
         overall_confidence=overall_confidence,
