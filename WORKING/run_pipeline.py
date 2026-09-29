@@ -43,6 +43,18 @@ WORKING = Path(__file__).resolve().parent
 FRAME_ROOT = WORKING / "frame"
 RPPG_ROOT = WORKING / "RPPG"
 
+# Load .env file so MAJ_OUTPUT_ROOT is available
+_env_file = WORKING.parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            _k = _k.strip()
+            _v = _v.strip().strip('"')
+            if _k not in os.environ:
+                os.environ[_k] = _v
+
 _OUTPUT_BASE = Path(os.environ.get("MAJ_OUTPUT_ROOT", WORKING.parent / "Scrape" / "output"))
 OUTPUT_ROOT = _OUTPUT_BASE / "pipeline"
 FRAMES_OUTPUT = _OUTPUT_BASE / "frames"

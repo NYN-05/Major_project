@@ -286,12 +286,7 @@ def run_pipeline_for_feature_set(
             f"[4/6] Evaluating quantum model on {'VAL' if dev_only else 'TEST'} split..."
         )
         
-        # Compute PQS for evaluation data if quality_threshold is enabled
         eval_pqs = None
-        if decision_cfg.quality_threshold > 0:
-            # In a full implementation, we'd compute PQS for each eval sample
-            # For now, we'll rely on the prob_real thresholds
-            eval_pqs = None
         
         eval_results = evaluate_quantum_model(
             eval_X,
