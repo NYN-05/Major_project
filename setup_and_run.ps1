@@ -22,15 +22,39 @@ $Venv     = Join-Path $RepoRoot 'venv\Scripts\python.exe'
 $Pip      = Join-Path $RepoRoot 'venv\Scripts\pip.exe'
 $Working  = Join-Path $RepoRoot 'WORKING'
 $Frontend = Join-Path $RepoRoot 'frontend'
-$OutRoot  = Join-Path $RepoRoot 'Scrape\output'
+
+# Load .env file if present
+$EnvFile = Join-Path $RepoRoot '.env'
+if (Test-Path -LiteralPath $EnvFile) {
+    Write-Host "  Loading .env from $EnvFile" -ForegroundColor Cyan
+    Get-Content $EnvFile | ForEach-Object {
+        if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
+            $name = $matches[1]
+            $value = $matches[2].Trim(' "')
+            $existing = Get-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+            if ($existing -and -not [string]::IsNullOrEmpty($existing.Value)) {
+                Write-Host "    $name already set in environment, skipping" -ForegroundColor DarkGray
+            } else {
+                Set-Item -Path "Env:$name" -Value $value
+                Write-Host "    Set $name=$value" -ForegroundColor DarkGray
+            }
+        }
+    }
+}
 
 if (-not $env:DFDC_DATASET_PATH) {
     $env:DFDC_DATASET_PATH = Join-Path $RepoRoot 'DFDC_Dataset'
+}
+$OutRoot = $env:MAJ_OUTPUT_ROOT
+if (-not $OutRoot) {
+    $OutRoot = Join-Path $RepoRoot 'Scrape\output'
+    $env:MAJ_OUTPUT_ROOT = $OutRoot
 }
 
 # ---------- output paths (check these to decide what to skip) ----------
 $RppgCsv      = Join-Path $OutRoot 'rppg\dataset_features.csv'
 $RppgPkl      = Join-Path $OutRoot 'rppg\rppg_classifier.pkl'
+$FusedCsv     = Join-Path $OutRoot 'visual\fused_features.csv'
 $QuantumData  = Join-Path $OutRoot 'quantum\data_fused.npz'
 $QuantumVqc   = Join-Path $OutRoot 'quantum\hybrid_vqc_fused.pt'
 $QuantumSel   = Join-Path $OutRoot 'quantum\qaoa_selection_fused.json'
@@ -51,7 +75,7 @@ function Step($num, $total, $label) {
 }
 
 # =====================================================================
-$TotalSteps = 4   # venv, extract, train, quantum
+$TotalSteps = 5   # venv, extract, train, visual fuse, quantum
 if (-not $SkipFrontend) { $TotalSteps += 2 }   # npm install + build
 if ($Video -ne "")       { $TotalSteps += 1 }   # sample inference
 
@@ -149,7 +173,35 @@ if (Test-Artifact $RppgPkl) {
     Write-Host "  Classifier trained: $RppgPkl" -ForegroundColor Green
 }
 
-# ----- Step 5: Quantum pipeline (build data + QAOA select + train VQC + evaluate + baselines) -----
+# ----- Step 5: Visual extraction + fusion -----
+$step++
+Step $step $TotalSteps "Visual extraction + fusion (ResNet50 + handcrafted -> fused CSV)"
+if (Test-Artifact $FusedCsv) {
+    Write-Host "  Fused features already present" -ForegroundColor Green
+} elseif (-not (Test-Path -LiteralPath $RppgCsv)) {
+    Write-Host "FAILED: $RppgCsv not found (run extraction first)" -ForegroundColor Red
+    exit 1
+} else {
+    $visualDir = Join-Path $OutRoot 'visual'
+    $null = New-Item -ItemType Directory -Force -Path $visualDir
+    Write-Host "  Extracting visual features for rPPG-CSV videos, fusing, creating splits..."
+    & $Venv (Join-Path $Working 'visual\pipeline.py') `
+        --video-root $env:DFDC_DATASET_PATH `
+        --rppg-csv $RppgCsv `
+        --output-dir $visualDir `
+        --fuse --create-splits
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAILED: visual extraction/fusion (exit $LASTEXITCODE)" -ForegroundColor Red
+        exit 1
+    }
+    if (-not (Test-Path -LiteralPath $FusedCsv)) {
+        Write-Host "FAILED: $FusedCsv not found" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  Fused features: $FusedCsv" -ForegroundColor Green
+}
+
+# ----- Step 6: Quantum pipeline (build data + QAOA select + train VQC + evaluate + baselines) -----
 $step++
 Step $step $TotalSteps "Quantum pipeline (--all: data + QAOA select + VQC train + eval + baselines)"
 $quantumArtifacts = @($QuantumData, $QuantumVqc, $QuantumSel, $QuantumScaler)
@@ -170,7 +222,7 @@ if ($allQuantumExist) {
     Write-Host "  Quantum pipeline complete" -ForegroundColor Green
 }
 
-# ----- Step 6: Frontend build -----
+# ----- Step 7: Frontend build -----
 if (-not $SkipFrontend) {
     $step++
     Step $step $TotalSteps "Frontend build"
@@ -186,7 +238,7 @@ if (-not $SkipFrontend) {
     }
 }
 
-# ----- Step 7 (optional): sample inference -----
+# ----- Step 8 (optional): sample inference -----
 if ($Video -ne "") {
     $step++
     Step $step $TotalSteps "Sample inference: $Video"

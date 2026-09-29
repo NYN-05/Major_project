@@ -124,12 +124,19 @@ def extract_visual_features_from_videos(
         print(f"No videos found in {video_root}")
         return
 
-    # Load labels if provided
+    # Load labels if provided; restrict the scan to videos that have rPPG
+    # rows (fuse inner-joins on them anyway) — otherwise a capped extraction
+    # (e.g. setup_and_run.ps1 -Quick) still grinds the whole video root.
     labels = {}
     if labels_csv and labels_csv.exists():
         labels_df = pd.read_csv(labels_csv)
         for _, row in labels_df.iterrows():
             labels[str(row["video_path"])] = row.get("label", -1)
+        wanted = {Path(p).stem.lower() for p in labels}
+        video_files = [p for p in video_files if p.stem.lower() in wanted]
+    if not video_files:
+        print("No videos matched the rPPG CSV under the given video root — check paths.")
+        return
 
     features_list = []
     stats = {"processed": 0, "failed": 0}
