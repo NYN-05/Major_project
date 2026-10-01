@@ -23,6 +23,12 @@ from visual.extractor import (
     load_face_crops_from_frames,
 )
 from visual.features import VisualFeatures, VISUAL_FEATURE_NAMES
+from quantum.operations import (
+    OPERATIONS_VERSION,
+    cache_key,
+    dataset_fingerprint,
+    stable_hash,
+)
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
@@ -151,6 +157,25 @@ def extract_visual_features_dataset(
 
     out_df = pd.DataFrame(features_list)
     out_df.to_csv(output_csv, index=False)
+    cache_metadata = {
+        "cache_key": cache_key(
+            dataset_hash=dataset_fingerprint(frames_root),
+            preprocessing_version="visual-pca-resnet50-v2",
+            model_version=backbone,
+            feature_version="visual-39-v1",
+            config_hash=stable_hash({
+                "deep_feature_dim": deep_feature_dim,
+                "max_frames_per_video": max_frames_per_video,
+                "device": str(extractor.device),
+            }),
+        ),
+        "operations_version": OPERATIONS_VERSION,
+        "source": str(frames_root),
+        "output": str(output_csv),
+    }
+    output_csv.with_suffix(".metadata.json").write_text(
+        json.dumps(cache_metadata, indent=2, sort_keys=True), encoding="utf-8"
+    )
     print(f"Visual features saved to {output_csv} ({stats['processed']} videos)")
     print(f"Failed: {stats['failed']}, No frames: {stats['no_frames']}")
 

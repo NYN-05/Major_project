@@ -15,6 +15,7 @@ from typing import List, Optional, Tuple
 from pathlib import Path
 
 from .features import VisualFeatures, VISUAL_FEATURE_NAMES
+from quantum.operations import memory_snapshot, resolve_torch_device
 
 RESNET_FEATURE_DIM = 2048
 PCA_PREPROCESSING_VERSION = "resnet50_imagenet_v1_bgr_to_rgb_224_normalized"
@@ -34,16 +35,20 @@ class VisualFeatureExtractor:
         use_pca: bool = True,
         pca_path: Optional[str] = None,
         allow_pca_fit: bool = False,
+        batch_size: int = 32,
     ):
         self.backbone_name = backbone
         self.deep_feature_dim = deep_feature_dim
         self.use_pca = use_pca
         self.allow_pca_fit = allow_pca_fit
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        self.batch_size = batch_size
 
         if device == "auto":
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.device = resolve_torch_device("auto")
         else:
-            self.device = torch.device(device)
+            self.device = resolve_torch_device(device)
 
         # Initialize backbone
         if backbone == "resnet50":
@@ -74,7 +79,6 @@ class VisualFeatureExtractor:
         if self.use_pca and pca_path is not None:
             self.load_pca(pca_path)
 
-    @torch.no_grad()
     def extract_deep_features(self, face_crops: List[np.ndarray]) -> np.ndarray:
         """
         Extract deep CNN features from a list of face crops.
@@ -88,16 +92,20 @@ class VisualFeatureExtractor:
         if not face_crops:
             return np.empty((0, 2048), dtype=np.float32)
 
-        batch = []
-        for crop in face_crops:
-            # Convert BGR to RGB
-            rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-            tensor = self.transform(rgb)
-            batch.append(tensor)
-
-        batch_tensor = torch.stack(batch).to(self.device)
-        features = self.model(batch_tensor)  # (N, 2048, 1, 1)
-        features = features.squeeze(-1).squeeze(-1).cpu().numpy()  # (N, 2048)
+        chunks = []
+        with torch.inference_mode():
+            for start in range(0, len(face_crops), self.batch_size):
+                batch = [
+                    self.transform(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+                    for crop in face_crops[start:start + self.batch_size]
+                ]
+                batch_tensor = torch.stack(batch).to(self.device, non_blocking=True)
+                output = self.model(batch_tensor).flatten(1).cpu().numpy()
+                chunks.append(output)
+                del batch_tensor, output
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
+        features = np.concatenate(chunks, axis=0)
         if features.shape[1] != RESNET_FEATURE_DIM:
             raise ValueError(
                 f"Expected ResNet50 GAP dimension {RESNET_FEATURE_DIM}, "

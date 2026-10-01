@@ -29,6 +29,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from quantum.config import VQCConfig
+from quantum.operations import resolve_torch_device
 
 # Suppress torch.compile errors (e.g., missing Triton on Windows) and fall back to eager
 if hasattr(torch, '_dynamo'):
@@ -39,7 +40,7 @@ def resolve_device():
     """CUDA when available, else CPU. The torch-side tensors (head,
     loss, optimizer) run on this device; the quantum layer executes on
     its own backend (see qnode_backend_name)."""
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return resolve_torch_device("auto")
 
 
 def qnode_backend_name(cfg=None):

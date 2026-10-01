@@ -294,6 +294,7 @@ def _write_features_csv(features_list: List[dict], out_csv_path: Path) -> None:
     """
     out_df = pd.DataFrame(features_list)
     out_df = out_df.sort_values("video_path").reset_index(drop=True)
+    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
     out_df.to_csv(out_csv_path, index=False)
 
 

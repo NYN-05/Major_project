@@ -30,6 +30,7 @@ from .preprocessing import clean_signal
 from .signal_extraction import extract_pulse_signal, combine_roi_signals
 from .features import compute_features, RPPGFeatures
 from .pqs import compute_pqs, PQSResult
+from quantum.validation import PipelineStatus
 
 _FRAME_RE = re.compile(r"frame_(\d+)_t(\d+)\.jpg")
 
@@ -94,6 +95,8 @@ class RPPGResult:
     window_feature_stats: dict = field(default_factory=dict)
     # Phase 5: Physiological Quality Score
     pqs: Optional[PQSResult] = None
+    status: str = PipelineStatus.VALID.value
+    diagnostics: dict = field(default_factory=dict)
 
     def to_feature_vector(self) -> Optional[np.ndarray]:
         return self.features.to_vector() if self.features is not None else None
@@ -865,6 +868,15 @@ class RPPGPipeline:
                 f"avg_quality_weight={avg_quality:.3f}, effective_frames={effective_frames:.1f}"
             )
 
+        n_face = sum(1 for q in quality_log if q.face_found)
+        if n_face == 0:
+            warnings.append("No face detected in any sampled frame.")
+            return RPPGResult(
+                fps=fps, n_frames_total=n_total, n_frames_usable=n_usable,
+                features=None, combined_signal=None, quality_log=quality_log,
+                warnings=warnings, status=PipelineStatus.NO_FACE.value,
+                diagnostics={"n_frames_total": n_total, "n_frames_usable": n_usable, "face_frames": 0},
+            )
         if n_usable < self.min_usable_frames:
             warnings.append(
                 f"Only {n_usable}/{n_total} usable frames "
@@ -878,6 +890,8 @@ class RPPGPipeline:
                 combined_signal=None,
                 quality_log=quality_log,
                 warnings=warnings,
+                status=PipelineStatus.INSUFFICIENT_FRAMES.value,
+                diagnostics={"n_frames_total": n_total, "n_frames_usable": n_usable},
             )
 
         # Phase 2: use weighted trace array conversion
@@ -913,6 +927,8 @@ class RPPGPipeline:
                 combined_signal=None,
                 quality_log=quality_log,
                 warnings=warnings,
+                status=PipelineStatus.RPPG_INVALID.value,
+                diagnostics={"reason": "no_valid_roi_signals"},
             )
         combined_clean = clean_signal(combined_raw, fs=fps, low_hz=self.low_hz, high_hz=self.high_hz)
 
@@ -973,6 +989,8 @@ class RPPGPipeline:
                 forehead_signal=forehead_clean,
                 quality_log=quality_log,
                 warnings=warnings,
+                status=PipelineStatus.RPPG_INVALID.value,
+                diagnostics={"reason": "non_finite_or_low_sqi"},
             )
 
         raw_nan_count = getattr(feats, "_raw_nan_count", 0)

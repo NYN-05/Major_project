@@ -22,6 +22,7 @@ from quantum.plots import (
     plot_roc_curve,
 )
 from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
+from quantum.validation import choose_validation_threshold, repeated_seed_summary
 
 
 def _sklearn():
@@ -66,6 +67,12 @@ def _sklearn():
 
 
 def expected_calibration_error(y_true, prob_real, n_bins=10):
+    y_true = np.asarray(y_true, dtype=int)
+    prob_real = np.asarray(prob_real, dtype=float)
+    if len(y_true) != len(prob_real) or len(y_true) == 0:
+        raise ValueError("Calibration requires non-empty paired labels and probabilities")
+    if not np.isfinite(prob_real).all() or ((prob_real < 0) | (prob_real > 1)).any():
+        raise ValueError("Calibration probabilities must be finite and in [0, 1]")
     bins = np.linspace(0.0, 1.0, n_bins + 1)
     ece = 0.0
     for lo, hi in zip(bins[:-1], bins[1:]):
@@ -88,6 +95,12 @@ def classification_metrics(y_true, prob_real, decision_threshold=0.5):
         decision_threshold: Threshold for REAL (>=) vs FAKE (<)
     """
     sk = _sklearn()
+    y_true = np.asarray(y_true, dtype=int)
+    prob_real = np.asarray(prob_real, dtype=float)
+    if len(y_true) != len(prob_real) or len(y_true) == 0:
+        raise ValueError("Metrics require non-empty paired labels and probabilities")
+    if not np.isfinite(prob_real).all() or ((prob_real < 0) | (prob_real > 1)).any():
+        raise ValueError("Probabilities must be finite and in [0, 1]")
     
     # Binary predictions
     predictions = (prob_real >= decision_threshold).astype(int)  # 1=REAL, 0=FAKE
@@ -251,22 +264,12 @@ def optimal_threshold_youden(y_true, prob_real):
     
     Returns the threshold that maximizes J = sensitivity + specificity - 1.
     """
-    thresholds = np.unique(prob_real)
-    best_j = -1.0
-    best_t = 0.5
-    for t in thresholds:
-        pred = (prob_real >= t).astype(int)
-        tp = int(((pred == 1) & (y_true == 1)).sum())
-        tn = int(((pred == 0) & (y_true == 0)).sum())
-        fp = int(((pred == 1) & (y_true == 0)).sum())
-        fn = int(((pred == 0) & (y_true == 1)).sum())
-        sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
-        j = sensitivity + specificity - 1
-        if j > best_j:
-            best_j = j
-            best_t = float(t)
-    return best_t
+    return choose_validation_threshold(y_true, prob_real, method="youden")
+
+
+def repeated_seed_evaluation(run_fn, seeds=(42, 123, 456, 789, 999)):
+    """Evaluate a fixed experiment over the required deterministic seeds."""
+    return repeated_seed_summary(run_fn, seeds=seeds)
 
 
 def analyze_threshold_behavior(y_true, prob_real, cfg=None):

@@ -1,10 +1,12 @@
 ﻿import json
 import os
+from dataclasses import replace
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pennylane as qml
 from scipy.optimize import minimize
+from quantum.validation import selection_stability
 
 from quantum.config import FEATURE_NAMES, QAOASelectionConfig
 
@@ -425,8 +427,22 @@ class QAOASelector:
                 "n_restarts": n_restarts,
                 "chosen_seed": best["seed"],
                 "all_costs": [r["cost"] for r in restarts],
+                "selection_stability": selection_stability(
+                    [[FEATURE_NAMES[i] for i in order[: cfg.target_features]]]
+                ),
             },
         }
+
+
+def evaluate_selection_stability(X, y, cfg=None, seeds=(42, 123, 456, 789, 999)):
+    """Run QAOA selection over fixed seeds and report feature frequencies."""
+    cfg = cfg or QAOASelectionConfig()
+    selections = []
+    for seed in seeds:
+        seeded = replace(cfg, seed=int(seed), n_jobs=1)
+        result = QAOASelector(seeded).select(X, y)
+        selections.append(result["selected_features"])
+    return selection_stability(selections) | {"seeds": list(map(int, seeds))}
 
 
 def select_classical(X, y, cfg=None, feature_names=None):

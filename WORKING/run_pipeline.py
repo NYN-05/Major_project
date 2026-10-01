@@ -32,6 +32,7 @@ If missing, run once from this folder:
 
 import argparse
 import json
+import time
 import os
 import sys
 from datetime import datetime
@@ -313,7 +314,14 @@ def main() -> int:
         return 2
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-    result = {"video": str(video_path), "timestamp": datetime.now().isoformat(), "stages": {}}
+    started = time.perf_counter()
+    result = {
+        "video": str(video_path),
+        "timestamp": datetime.now().isoformat(),
+        "pipeline_version": "p2-1",
+        "_started": started,
+        "stages": {},
+    }
 
     print(f"[1/4] FRAMES stage  : {video_path.name}")
     frames_stage, frame_stats, frame_handoff = run_frames_stage(video_path)
@@ -374,6 +382,16 @@ def main() -> int:
 
 
 def _finish(result: dict, out_path: str | None, exit_code: int) -> None:
+    result["diagnostics"] = {
+        "processing_time_seconds": round(
+            time.perf_counter() - result.pop("_started", time.perf_counter()), 3
+        ),
+        "frame_count": result.get("stages", {}).get("frames", {}).get("stats", {}).get("sampled_frames", 0),
+        "valid_frame_count": result.get("stages", {}).get("frames", {}).get("stats", {}).get("accepted_frames", 0),
+        "rppg_quality": result.get("stages", {}).get("rppg", {}).get("features", {}).get("signal_quality_index"),
+        "final_score": result.get("stages", {}).get("quantum", {}).get("prob_real"),
+        "decision": result.get("verdict", {}).get("label"),
+    }
     out = Path(out_path) if out_path else OUTPUT_ROOT / "pipeline_result.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2), encoding="utf-8")
