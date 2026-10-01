@@ -382,14 +382,16 @@ def main() -> int:
 
 
 def _finish(result: dict, out_path: str | None, exit_code: int) -> None:
+    rppg_features = result.get("stages", {}).get("rppg", {}).get("features") or {}
+    quantum_stage = result.get("stages", {}).get("quantum", {})
     result["diagnostics"] = {
         "processing_time_seconds": round(
             time.perf_counter() - result.pop("_started", time.perf_counter()), 3
         ),
         "frame_count": result.get("stages", {}).get("frames", {}).get("stats", {}).get("sampled_frames", 0),
         "valid_frame_count": result.get("stages", {}).get("frames", {}).get("stats", {}).get("accepted_frames", 0),
-        "rppg_quality": result.get("stages", {}).get("rppg", {}).get("features", {}).get("signal_quality_index"),
-        "final_score": result.get("stages", {}).get("quantum", {}).get("prob_real"),
+        "rppg_quality": rppg_features.get("signal_quality_index"),
+        "final_score": quantum_stage.get("prob_real"),
         "decision": result.get("verdict", {}).get("label"),
     }
     out = Path(out_path) if out_path else OUTPUT_ROOT / "pipeline_result.json"
