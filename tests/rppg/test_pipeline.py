@@ -110,14 +110,30 @@ class TestRPPGFeatures(unittest.TestCase):
 class TestRPPGPipelineEdgeCases(unittest.TestCase):
     """Test RPPG pipeline edge cases."""
 
+    def setUp(self):
+        self.pipeline = RPPGPipeline(method="POS")
+
     def test_short_video(self):
         """Test pipeline with very short video."""
-        # This test would need a video file, skip for now
-        pass
+        from RPPG.pipeline import FrameQuality
+        result = self.pipeline._finalize(
+            [], [], [], 30.0,
+            [],
+            [FrameQuality(i, False, 0.0, 0.0, False) for i in range(3)],
+        )
+        self.assertIsNone(result.features)
+        self.assertEqual(result.status, "NO_FACE")
+        self.assertEqual(result.n_frames_usable, 0)
 
     def test_no_face_detected(self):
         """Test handling of no face detected."""
-        pass
+        from RPPG.pipeline import FrameQuality
+        result = self.pipeline._finalize(
+            [], [], [], 30.0, [],
+            [FrameQuality(i, False, 10.0, 100.0, False) for i in range(30)],
+        )
+        self.assertEqual(result.status, "NO_FACE")
+        self.assertIsNone(result.to_feature_vector())
 
 
 if __name__ == '__main__':

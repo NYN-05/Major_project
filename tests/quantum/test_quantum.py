@@ -232,9 +232,46 @@ def test_no_group_leakage():
     try:
         _assert_no_group_leakage(bad)
     except AssertionError:
-        pass
+        assert bad["groups_train"][0] == bad["groups_test"][0]
     else:
         raise AssertionError("_assert_no_group_leakage did not fire on a straddling group")
+
+
+def test_metadata_grouping_prevents_correlated_clip_split():
+    """Explicit source/identity metadata must override per-clip fallback."""
+    from quantum.data import _infer_subject_key
+
+    assert _infer_subject_key({
+        "video_path": "fake/a.mp4",
+        "source_video_id": "SOURCE-17",
+    }) == "source_video_id:source-17"
+    assert _infer_subject_key({
+        "video_path": "fake/b.mp4",
+        "subject_id": "Person-2",
+        "source_video_id": "SOURCE-18",
+    }) == "subject_id:person-2"
+    assert _infer_subject_key({
+        "video_path": "fake/c.mp4",
+        "video_sha256": "ABC123",
+    }) == "video_sha256:abc123"
+
+
+def test_split_manifest_integrity_rejects_group_overlap(tmp_path):
+    from quantum.data import verify_split_integrity
+    import json
+
+    manifest = tmp_path / "split_manifest.json"
+    manifest.write_text(json.dumps({
+        "rows": {
+            "a.mp4": {"split": "train", "group": "subject:a"},
+            "b.mp4": {"split": "test", "group": "subject:a"},
+        }
+    }), encoding="utf-8")
+    try:
+        verify_split_integrity(manifest)
+    except AssertionError:
+        return
+    raise AssertionError("verify_split_integrity accepted overlapping groups")
 
 
 def test_qaoa_sim_matches_pennylane():

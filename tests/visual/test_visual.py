@@ -14,6 +14,7 @@ from visual.extractor import (
     RESNET_FEATURE_DIM,
     VisualFeatureExtractor,
 )
+from visual.pipeline import _fit_shared_pca
 
 
 class TestVisualFeatures(unittest.TestCase):
@@ -130,6 +131,25 @@ class TestVisualFeatureExtractor(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             extractor._apply_pca(np.zeros((1, RESNET_FEATURE_DIM), dtype=np.float32))
 
+    def test_training_pipeline_fits_shared_pca_once(self):
+        """Batch fitting pools training videos and invokes fit exactly once."""
+        class FitSpy:
+            def __init__(self):
+                self.calls = []
+
+            def fit_pca(self, features, artifact_path):
+                self.calls.append((features.shape, artifact_path))
+
+        spy = FitSpy()
+        raw = {
+            "train_a": np.zeros((3, RESNET_FEATURE_DIM), dtype=np.float32),
+            "train_b": np.zeros((4, RESNET_FEATURE_DIM), dtype=np.float32),
+            "test_a": np.zeros((9, RESNET_FEATURE_DIM), dtype=np.float32),
+        }
+        _fit_shared_pca(raw, {"train_a", "train_b"}, spy, Path("visual_pca.npz"))
+        self.assertEqual(len(spy.calls), 1)
+        self.assertEqual(spy.calls[0][0], (7, RESNET_FEATURE_DIM))
+
 
 class TestVisualFeatureExtractionEdgeCases(unittest.TestCase):
     """Test edge cases in visual feature extraction."""
@@ -150,8 +170,8 @@ class TestVisualFeatureExtractionEdgeCases(unittest.TestCase):
             crop = np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8)
             features = extractor.extract_from_crops([crop])
             self.assertEqual(features.to_vector().shape[0], 39)
-        except Exception:
-            pass
+        except (ImportError, RuntimeError) as exc:
+            self.skipTest(f"visual backend unavailable: {exc}")
 
 
 if __name__ == '__main__':

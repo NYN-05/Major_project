@@ -51,3 +51,4 @@ graphify-out/
 Thumbs.db
 .opencode/
 .pytest_cache/
+.github/

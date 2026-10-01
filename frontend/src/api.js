@@ -11,7 +11,11 @@ async function detect(videoFile) {
     throw new Error(err.message || `upload rejected (${res.status})`);
   }
   if (!res.ok) throw new Error(`upload failed (${res.status})`);
-  return res.json();
+  const payload = await res.json();
+  if (!payload.job || typeof payload.job !== "string") {
+    throw new Error("invalid detect response");
+  }
+  return payload;
 }
 
 function stream(jobId, handlers) {

@@ -213,7 +213,7 @@ class GPUFaceDetector:
         except ImportError as exc:
             raise ImportError(
                 "onnxruntime-gpu is required for GPU face detection.\n"
-                "Install with:  pip install onnxruntime-gpu>=1.18.1,<1.27.0"
+                "Install with:  pip install onnxruntime-gpu==1.20.2"
             ) from exc
 
         model_path = _ensure_model()

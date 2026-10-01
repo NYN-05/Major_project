@@ -15,20 +15,23 @@ torchaudio==2.5.1+cu121
 ultralytics==8.3.0
 
 # ---------- Stage 2: rPPG (MediaPipe, POS/CHROM, features) ----------
-mediapipe>=0.10.9
-streamlit>=1.30.0
-pandas>=2.0.0
+mediapipe==1.0.1
+streamlit==1.63.0
+pandas==3.0.5
 
 # ---------- Stage 3: quantum (PennyLane VQC + QAOA) ----------
-pennylane>=0.36.0
+pennylane==0.44.1
 # SIMD statevector backend: ~20x faster QAOA cost evaluations than default.qubit
-pennylane-lightning>=0.36.0
+pennylane-lightning==0.44.1
 
 # ---------- Shared numeric / ML / vision ----------
 numpy==1.26.4
-scipy>=1.11.0
-scikit-learn>=1.2.0
-matplotlib>=3.7.0
+scipy==1.17.1
+scikit-learn==1.9.0
+matplotlib==3.11.1
 opencv-python>=4.8.0,<5.0.0
+# ORT 1.18 cannot load the cuDNN 9 runtime bundled with PyTorch 2.5.1.
+# Keep this aligned with the CUDA 12.x/cuDNN 9 GPU environment.
+onnxruntime-gpu==1.20.2
 # Optional classical baseline (guarded import in quantum/evaluation.py)
-xgboost>=2.0.0
+xgboost==3.2.0

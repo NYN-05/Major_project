@@ -31,9 +31,15 @@ import sys
 import threading
 import time
 import uuid
+import logging
+from collections import defaultdict, deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+try:
+    from contract import API_VERSION, PIPELINE_VERSION, validate_result_payload
+except ImportError:
+    from frontend.contract import API_VERSION, PIPELINE_VERSION, validate_result_payload
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -81,6 +87,11 @@ STAGE_TAGS = ("[1/3]", "[2/3]", "[3/3]")
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 JOB_SLOTS = threading.Semaphore(MAX_CONCURRENT_JOBS)
+LOGGER = logging.getLogger("frontend.server")
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
+REQUESTS_BY_IP: dict[str, deque[float]] = defaultdict(deque)
+RATE_LIMIT_WINDOW_SECONDS = 60
+RATE_LIMIT_REQUESTS = 10
 
 
 def _looks_like_video(body: bytes) -> bool:
@@ -222,7 +233,9 @@ def _run_job(job: dict, video_path: Path) -> None:
             raise RuntimeError(f"pipeline exited with code {proc.returncode}")
         if not out_json.exists():
             raise RuntimeError("pipeline produced no result JSON")
-        result = json.loads(out_json.read_text(encoding="utf-8"))
+        result = validate_result_payload(json.loads(out_json.read_text(encoding="utf-8")))
+        result["api_version"] = API_VERSION
+        result["pipeline_version"] = PIPELINE_VERSION
         result["video"] = Path(result.get("video", video_path.name)).name
         # The waveform is emitted by run_pipeline itself (stage-2 signal,
         # same fps as the verdict), so it is ready at result time — no
@@ -235,11 +248,18 @@ def _run_job(job: dict, video_path: Path) -> None:
         job["done"] = True
         job["queue"].put(("result", result))
         _write_canonical(result)
-    except Exception as exc:  # noqa: BLE001 - surface to the UI
-        job["error"] = str(exc)
+    except Exception as exc:  # noqa: BLE001 - surface a safe error to the UI
+        LOGGER.exception("job %s failed", job["id"])
+        job["error"] = "analysis failed; inspect server logs for details"
         job["done"] = True
         job["queue"].put(("error", str(exc)))
     finally:
+        if job.get("error"):
+            for artifact in (out_json, sig_file):
+                try:
+                    artifact.unlink(missing_ok=True)
+                except OSError:
+                    LOGGER.warning("unable to remove failed job artifact %s", artifact)
         try:
             video_path.unlink(missing_ok=True)
         except OSError:
@@ -318,7 +338,20 @@ class Handler(BaseHTTPRequestHandler):
         if origin and "*" not in ALLOWED_ORIGINS and origin not in ALLOWED_ORIGINS:
             self._json({"error": "forbidden origin"}, 403)
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self._json({"error": "invalid content length"}, 400)
+            return
+        client = self.client_address[0]
+        now = time.time()
+        requests = REQUESTS_BY_IP[client]
+        while requests and now - requests[0] > RATE_LIMIT_WINDOW_SECONDS:
+            requests.popleft()
+        if len(requests) >= RATE_LIMIT_REQUESTS:
+            self._json({"error": "rate limit exceeded"}, 429)
+            return
+        requests.append(now)
         if length <= 0:
             self._json({"error": "empty upload"}, 400)
             return
@@ -445,6 +478,7 @@ class Handler(BaseHTTPRequestHandler):
                 "signal": job.get("signal"),
                 "lines": job["lines"][-400:],
                 "result": job["result"],
+                "api_version": API_VERSION,
             }
         )
 

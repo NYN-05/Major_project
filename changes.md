@@ -26,6 +26,14 @@
 | 2026-10-01 16:29 IST | Repository guidance | Added a root-agent rule requiring every code change to be recorded in this file with its date, time, affected area, and short description. | Complete |
 | 2026-10-01 16:31 IST | Repository guidance | Reorganized `AGENTS.md` into a concise source-of-truth guide and removed stale implementation history, benchmark notes, and duplicated details. | Complete |
 | 2026-10-01 16:32 IST | Copilot guidance | Added `.github/copilot-instructions.md` with repository architecture, commands, contracts, API behavior, and validation workflow for future Copilot sessions. | Complete |
+| 2026-10-01 16:45 IST | Visual pipeline security | Replaced per-video PCA with a validated training-only `visual_pca.npz` artifact reused for batch extraction and inference; removed truncation/implicit-fit fallbacks and added regression coverage. | Complete |
+| 2026-10-01 17:10 IST | Dataset split security | Replaced the visual random split with the canonical metadata-aware grouped splitter, added duplicate-path and group-overlap validation, persisted grouping provenance in split manifests, and added hash/source grouping support. | Complete |
+| 2026-10-01 18:00 IST | P1 evaluation and failure handling | Added explicit rPPG outcome states, no-face/insufficient-frame diagnostics, finite-probability validation, validation-only threshold selection, repeated-seed summaries, QAOA selection-stability utilities, reproducibility metadata checksums, and replaced placeholder edge-case tests with assertions. | In progress |
+| 2026-10-01 17:35 IST | P0 remediation | Removed physiological fallback constants, rejected non-finite rPPG vectors, added shared preprocessing/schema validation, expanded evaluation metrics, and added checksum/schema safeguards for serialized artifacts. | In progress |
+| 2026-10-01 18:15 IST | rPPG | Fixed FileNotFoundError in extract_dataset_features.py by creating output directory before writing CSV; parent directory was missing on first run. | Complete |
+| 2026-10-01 18:30 IST | P2 hardening | Added bounded visual inference batches with explicit tensor cleanup and centralized device resolution; added cache/provenance metadata, versioned API payload validation, rate limiting, safe job errors, failure cleanup, pipeline diagnostics, and exact dependency pins. | Complete |
+| 2026-10-01 18:45 IST | rPPG/Environment | Worked around Windows Defender Controlled Folder Access blocking writes to Desktop by moving dataset output to `C:\Users\JHASHANK\Maj_Proj_output`; added robust `os.makedirs` with `exist_ok=True` in extract_dataset_features.py. | Complete |
+| 2026-10-01 19:35 IST | GPU environment | Upgraded ONNX Runtime GPU support to `1.20.2` for PyTorch CUDA 12.1/cuDNN 9 compatibility, added real YuNet CUDA preflight validation, and made GPU dataset runs fail explicitly instead of silently falling back to CPU. | Complete |
 
 ## Historical Entries
 

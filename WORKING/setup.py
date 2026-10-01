@@ -26,7 +26,8 @@ setup(
         "streamlit>=1.30.0",
     ],
     extras_require={
-        "gpu": ["onnxruntime-gpu>=1.18.1,<1.27.0"],
+        # ORT 1.20.2 supports the cuDNN 9 runtime bundled with PyTorch 2.5.1.
+        "gpu": ["onnxruntime-gpu==1.20.2"],
         "dev": ["pytest", "pytest-cov", "black", "flake8"],
     },
     classifiers=[

@@ -33,6 +33,7 @@ If missing, run once from this folder:
 import argparse
 import json
 import time
+import uuid
 import os
 import sys
 from datetime import datetime
@@ -382,11 +383,12 @@ def main() -> int:
 
 
 def _finish(result: dict, out_path: str | None, exit_code: int) -> None:
+    started = result.pop("_started", time.perf_counter())
     rppg_features = result.get("stages", {}).get("rppg", {}).get("features") or {}
     quantum_stage = result.get("stages", {}).get("quantum", {})
     result["diagnostics"] = {
         "processing_time_seconds": round(
-            time.perf_counter() - result.pop("_started", time.perf_counter()), 3
+            time.perf_counter() - started, 3
         ),
         "frame_count": result.get("stages", {}).get("frames", {}).get("stats", {}).get("sampled_frames", 0),
         "valid_frame_count": result.get("stages", {}).get("frames", {}).get("stats", {}).get("accepted_frames", 0),
@@ -394,6 +396,34 @@ def _finish(result: dict, out_path: str | None, exit_code: int) -> None:
         "final_score": quantum_stage.get("prob_real"),
         "decision": result.get("verdict", {}).get("label"),
     }
+    result["diagnostics"]["memory"] = {
+        "rss_mb": None,
+        "cuda_allocated_mb": None,
+        "cuda_reserved_mb": None,
+    }
+    try:
+        from quantum.operations import append_jsonl, experiment_record, memory_snapshot
+        device = "cuda" if _cuda_available() else "cpu"
+        result["diagnostics"]["memory"] = memory_snapshot()
+        append_jsonl(
+            OUTPUT_ROOT / "pipeline_experiments.jsonl",
+            experiment_record(
+                experiment_id=uuid.uuid4().hex,
+                dataset="inference",
+                split="held-out-video",
+                seed=0,
+                features=sorted(set(rppg_features) | set(
+                    result.get("stages", {}).get("visual", {}).get("features", {}) or {}
+                )),
+                model="fused-quantum-inference",
+                hyperparameters={"pipeline_version": result["pipeline_version"]},
+                metrics={"exit_code": exit_code, **result["diagnostics"]},
+                device=device,
+                started=started,
+            ),
+        )
+    except (OSError, ValueError, ImportError) as exc:
+        print(f"[warning] diagnostics logging failed: {exc}")
     out = Path(out_path) if out_path else OUTPUT_ROOT / "pipeline_result.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -406,6 +436,14 @@ def _finish(result: dict, out_path: str | None, exit_code: int) -> None:
         print(f"REASON       : {verdict['reason']}")
     print(f"RESULT JSON  : {out}")
     print("=" * 60)
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+        return bool(torch.cuda.is_available())
+    except (ImportError, RuntimeError):
+        return False
 
 
 if __name__ == "__main__":

@@ -294,8 +294,8 @@ def _write_features_csv(features_list: List[dict], out_csv_path: Path) -> None:
     """
     out_df = pd.DataFrame(features_list)
     out_df = out_df.sort_values("video_path").reset_index(drop=True)
-    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
-    out_df.to_csv(out_csv_path, index=False)
+    os.makedirs(out_csv_path.parent, exist_ok=True)
+    out_df.to_csv(str(out_csv_path), index=False)
 
 
 def _repo_root() -> Path:
@@ -403,23 +403,35 @@ def main() -> None:
 
     root = _repo_root()
     out_csv_path = Path(args.output) if args.output else _output_dir() / "dataset_features.csv"
-    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(out_csv_path.parent, exist_ok=True)
     if out_csv_path.exists():
         out_csv_path.unlink()
         print(f"Fresh extraction: removed existing {out_csv_path}")
 
     use_gpu = args.gpu
     if use_gpu:
-        # Validate GPU availability before spawning workers
+        # Validate the actual YuNet session before spawning workers. Merely
+        # listing CUDAExecutionProvider is insufficient: missing CUDA/cuDNN
+        # DLLs otherwise make every worker fail after extraction starts.
         try:
-            import onnxruntime as _ort
-            if "CUDAExecutionProvider" not in _ort.get_available_providers():
-                print("WARNING: CUDA provider not available in onnxruntime. Falling back to CPU.")
-                use_gpu = False
-        except ImportError:
-            print("WARNING: onnxruntime-gpu not installed. Falling back to CPU.\n"
-                  "  Install with: pip install onnxruntime-gpu>=1.18.1,<1.27.0")
-            use_gpu = False
+            from RPPG.gpu_face_detector import GPUFaceDetector
+            with GPUFaceDetector() as _gpu_detector:
+                if not _gpu_detector.gpu_active:
+                    raise RuntimeError(
+                        "ONNX Runtime created the YuNet session without "
+                        "CUDAExecutionProvider."
+                    )
+                print(
+                    "[gpu] Preflight passed: YuNet providers="
+                    f"{_gpu_detector._session.get_providers()}"
+                )
+        except Exception as exc:
+            raise RuntimeError(
+                "GPU mode was requested, but the real YuNet ONNX session "
+                "could not use CUDA. Install requirements.txt in this "
+                "virtual environment and retry. Original error: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
     roi_weights = tuple(args.roi_weights) if args.roi_weights else (0.35, 0.35, 0.30)
 
