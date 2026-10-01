@@ -29,6 +29,7 @@ from sklearn.pipeline import Pipeline
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from quantum.artifacts import write_sha256
 from WORKING.RPPG.features import RPPGFeatures
 
 
@@ -136,6 +137,7 @@ def main() -> None:
 
     with open(model_path, "wb") as handle:
         pickle.dump(model, handle)
+    write_sha256(model_path)
     print(f"\nModel saved to {model_path}")
 
     metadata = {

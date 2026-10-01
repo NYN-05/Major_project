@@ -679,7 +679,7 @@ class RPPGPipeline:
         
         # Check feature quality
         raw_nan_count = getattr(feats, "_raw_nan_count", 0)
-        if raw_nan_count >= 2 or feats.signal_quality_index < self.min_sqi:
+        if raw_nan_count > 0 or not np.isfinite(feats.to_vector()).all() or feats.signal_quality_index < self.min_sqi:
             return WindowResult(
                 window_index=window_index,
                 start_frame=start_idx,

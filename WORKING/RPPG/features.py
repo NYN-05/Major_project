@@ -768,42 +768,4 @@ def compute_features(
         if not np.isfinite(getattr(features, name))
     )
     features._raw_nan_count = raw_nan_count  # transient; excluded from asdict()/to_vector()
-    _fill_nan_with_median(features)
     return features
-
-
-def _fill_nan_with_median(features: RPPGFeatures) -> None:
-    """Replace any remaining NaN feature values with hardcoded neutral
-    fallbacks so the feature vector is always finite and classifier-ready.
-
-    Note: these are fixed "average human" constants, NOT per-feature medians.
-    Degenerate signals (several NaNs or zero SQI) are rejected earlier by the
-    RPPGPipeline gate, so this fill only ever fires for a rare single-NaN case.
-    """
-    fallbacks = {
-        "heart_rate_bpm": 72.0,
-        "snr_db": 0.0,
-        "prv_std_ms": 0.0,
-        "spectral_entropy": 0.5,
-        "mad": 0.0,
-        "signal_quality_index": 0.0,
-        "cheek_forehead_correlation": 0.5,
-        "left_right_cheek_correlation": 0.5,
-        "hr_half_diff": 0.0,
-        "peak_prominence": 1.0,
-        "systolic_peak_width": 350.0,
-        "diastolic_notch_ratio": 0.0,
-        "forehead_cheek_phase_lag": 0.0,
-        "signal_to_motion_ratio": 0.0,
-        "peak_amplitude_variability": 0.0,
-        "pulse_transit_time_proxy": 0.0,
-        # Probe features (Phase 4) - 4 selected
-        "spectral_flatness": 1.0,
-        "spectral_centroid": 1.5,
-        "kurtosis": 0.0,
-        "phase_coherence_lr": 1.0,
-    }
-    for name in fallbacks:
-        value = getattr(features, name)
-        if np.isnan(value):
-            setattr(features, name, fallbacks[name])

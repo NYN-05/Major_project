@@ -20,6 +20,7 @@ import json
 import numpy as np
 
 from quantum.config import FEATURE_NAMES, OUTPUT_DIR
+from quantum.artifacts import schema_digest
 
 SCALER_FILE = OUTPUT_DIR / "feature_scaler.json"
 
@@ -55,6 +56,7 @@ class FeatureScaler:
             json.dump(
                 {
                     "feature_names": self.feature_names,
+                    "feature_schema_sha256": schema_digest(self.feature_names),
                     "mean": [float(m) for m in self.mean_],
                     "scale": [float(s) for s in self.scale_],
                 },
@@ -74,6 +76,9 @@ class FeatureScaler:
         with open(path) as fh:
             payload = json.load(fh)
         scaler = cls(payload["feature_names"])
+        expected = schema_digest(scaler.feature_names)
+        if payload.get("feature_schema_sha256", expected) != expected:
+            raise ValueError("Feature scaler schema checksum does not match feature_names")
         scaler.mean_ = np.asarray(payload["mean"], dtype=np.float64)
         scaler.scale_ = np.asarray(payload["scale"], dtype=np.float64)
         return scaler

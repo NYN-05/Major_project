@@ -82,14 +82,43 @@ def quantum_to_display_label(label):
         raise ValueError(f"Invalid quantum label: {label}")
 
 
-def _infer_subject_key(row):
-    """Derive a subject group key from the video path.
+GROUP_COLUMNS = (
+    "subject_id",
+    "identity_id",
+    "original_video_id",
+    "source_video_id",
+    "source_id",
+    "group_id",
+    "video_sha256",
+    "content_sha256",
+    "file_sha256",
+    "sha256",
+)
 
-    Only DFDC dataset is supported. Each clip is treated as its own group
-    since DFDC clip names carry no subject information on disk.
+
+def _normalise_group_value(value):
+    """Return a stable, non-empty group identifier or None."""
+    if value is None:
+        return None
+    value = str(value).replace("\\", "/").strip().lower()
+    return value or None
+
+
+def _infer_subject_key(row):
+    """Derive the strongest available correlation group from a feature row.
+
+    Dataset extractors may provide subject/source/original identifiers. Those
+    identifiers are authoritative. For DFDC rows without such metadata, the
+    clip path is the only recoverable key and is explicitly marked as a
+    clip-level fallback in the persisted manifest.
     """
-    path = row["video_path"].replace("\\", "/").strip().lower()
-    # DFDC clips - each clip is its own group (documented limitation)
+    for column in GROUP_COLUMNS:
+        value = _normalise_group_value(row.get(column))
+        if value is not None:
+            return f"{column}:{value}"
+    path = _normalise_group_value(row.get("video_path"))
+    if path is None:
+        raise ValueError("Each feature row must provide video_path or a group identifier")
     return "clip:" + path
 
 
@@ -163,6 +192,25 @@ def _load_feature_rows(csv_file, feature_names, cfg=None):
     filter_stats["kept"] = len(kept_rows)
     if not kept_rows:
         raise ValueError(f"No labelled samples survived filtering in {csv_file}")
+    paths_seen = set()
+    hashes_seen = {}
+    for row in kept_rows:
+        path = _normalise_group_value(row.get("video_path"))
+        if path is None:
+            raise ValueError("Every feature row must provide video_path")
+        if path in paths_seen:
+            raise ValueError(f"Duplicate video_path found: {path}")
+        paths_seen.add(path)
+        group = _infer_subject_key(row)
+        for column in ("video_sha256", "content_sha256", "file_sha256", "sha256"):
+            digest = _normalise_group_value(row.get(column))
+            if digest is not None:
+                previous = hashes_seen.setdefault(digest, group)
+                if previous != group:
+                    raise ValueError(
+                        f"Content hash {digest} maps to multiple groups: "
+                        f"{previous} and {group}"
+                    )
 
     X = np.asarray(
         [[float(row[name]) if name in row else float("nan") for name in feature_names] for row in kept_rows], dtype=np.float32
@@ -269,6 +317,29 @@ def _assert_no_group_leakage(split):
             seen[g] = s
 
 
+def verify_split_integrity(manifest_path):
+    """Validate persisted split disjointness and duplicate provenance."""
+    with open(manifest_path, encoding="utf-8") as fh:
+        manifest = json.load(fh)
+    rows = manifest.get("rows", {})
+    by_split = {s: set() for s in SPLITS}
+    for path, item in rows.items():
+        split = item.get("split")
+        group = item.get("group")
+        if split not in SPLITS or not group:
+            raise ValueError(f"Invalid split manifest row for {path}")
+        by_split[split].add(str(group))
+    for left in SPLITS:
+        for right in SPLITS:
+            if left < right:
+                overlap = by_split[left] & by_split[right]
+                if overlap:
+                    raise AssertionError(
+                        f"Group leakage between {left} and {right}: {sorted(overlap)}"
+                    )
+    return True
+
+
 def _write_split_manifest(split, cfg):
     """Record path -> (split, group) so any future split can be reproduced.
 
@@ -330,6 +401,9 @@ def build_dataset(cfg=None, feature_set: str = "fused", csv_file=None):
     # Always use grouped random split for DFDC (no official splits)
     split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
     _assert_no_group_leakage(split)
+    normalised_paths = [_normalise_group_value(path) for path in paths.tolist()]
+    if len(set(normalised_paths)) != len(normalised_paths):
+        raise ValueError("Duplicate video_path values found; refusing to build a split")
 
     # Save manifest with feature set info
     manifest = {
@@ -339,6 +413,11 @@ def build_dataset(cfg=None, feature_set: str = "fused", csv_file=None):
         "filter_implausible": cfg.filter_implausible,
         "feature_set": feature_set,
         "feature_names": feature_names,
+        "grouping": {
+            "strategy": "metadata-first-grouped-split",
+            "columns": list(GROUP_COLUMNS),
+            "fallback": "clip:path when no correlation metadata is available",
+        },
         "rows": {},
     }
     for s in SPLITS:

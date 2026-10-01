@@ -20,8 +20,6 @@ sys.path.insert(0, str(WORKING_ROOT))
 
 from visual.extractor import (
     VisualFeatureExtractor,
-    compute_visual_features,
-    compute_visual_features_from_video,
     load_face_crops_from_frames,
 )
 from visual.features import VisualFeatures, VISUAL_FEATURE_NAMES
@@ -347,62 +345,89 @@ def create_experiment_splits(
         val_ratio: Validation split ratio
         seed: Random seed
     """
-    from sklearn.model_selection import train_test_split
+    from quantum.config import DataConfig
+    from quantum.data import (
+        _assert_no_group_leakage,
+        _grouped_train_val_test_split,
+        _infer_subject_key,
+    )
 
     df = pd.read_csv(fused_csv)
     if "label" not in df.columns:
         raise ValueError("Fused CSV must have 'label' column")
 
-    # Create subject groups for grouped splitting
-    # Use video_id as group if available, otherwise video_path
-    if "video_id" in df.columns:
-        groups = df["video_id"].astype(str)
-    else:
-        groups = df["video_path"].astype(str)
-
-    y = df["label"].values
-
-    # Simple random split with stratification (for now)
-    # First split: train+val vs test
-    train_val_idx, test_idx = train_test_split(
-        np.arange(len(df)), test_size=test_ratio, stratify=y, random_state=seed
-    )
-
-    # Second split: train vs val
-    y_train_val = y[train_val_idx]
-    train_idx, val_idx = train_test_split(
-        train_val_idx, test_size=val_ratio / (1 - test_ratio), stratify=y_train_val, random_state=seed
-    )
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Only fused feature set
-    feature_cols = [c for c in df.columns if c not in ["label", "video_path", "video_id", "source", "video_stem"]]
-    
+    if df["video_path"].astype(str).str.strip().duplicated().any():
+        raise ValueError("Duplicate video_path values found; refusing to create experiment splits")
+    feature_cols = [
+        c for c in df.columns
+        if c not in ["label", "video_path", "video_id", "source", "video_stem"]
+    ]
     if not feature_cols:
         print("  No features available for fused set")
         return
+    groups = np.asarray(
+        [_infer_subject_key(row.to_dict()) for _, row in df.iterrows()],
+        dtype=object,
+    )
+    y = df["label"].astype(int).values
+    paths = df["video_path"].astype(str).values
+    split = _grouped_train_val_test_split(
+        df[feature_cols].to_numpy(),
+        y,
+        groups,
+        paths,
+        DataConfig(seed=seed, val_ratio=val_ratio, test_ratio=test_ratio),
+    )
+    _assert_no_group_leakage(split)
 
-    X = df[feature_cols].values
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     # Save splits
     np.savez_compressed(
         output_dir / "fused_split.npz",
-        X_train=X[train_idx], y_train=y[train_idx],
-        X_val=X[val_idx], y_val=y[val_idx],
-        X_test=X[test_idx], y_test=y[test_idx],
+        X_train=split["X_train"], y_train=split["y_train"],
+        X_val=split["X_val"], y_val=split["y_val"],
+        X_test=split["X_test"], y_test=split["y_test"],
         feature_names=np.array(feature_cols),
+        groups_train=np.asarray(split["groups_train"], dtype=str),
+        groups_val=np.asarray(split["groups_val"], dtype=str),
+        groups_test=np.asarray(split["groups_test"], dtype=str),
     )
 
     # Save split indices for reproducibility
     np.savez_compressed(
         output_dir / "split_indices.npz",
-        train_idx=train_idx, val_idx=val_idx, test_idx=test_idx,
+        train_idx=np.asarray(
+            [df.index[df["video_path"].astype(str) == p][0] for p in split["paths_train"]]
+        ),
+        val_idx=np.asarray(
+            [df.index[df["video_path"].astype(str) == p][0] for p in split["paths_val"]]
+        ),
+        test_idx=np.asarray(
+            [df.index[df["video_path"].astype(str) == p][0] for p in split["paths_test"]]
+        ),
     )
+    manifest = {
+        "seed": seed,
+        "val_ratio": val_ratio,
+        "test_ratio": test_ratio,
+        "grouping": "metadata-first-grouped-split",
+        "rows": {
+            str(path): {"split": split_name, "group": str(group)}
+            for split_name in ("train", "val", "test")
+            for path, group in zip(
+                split[f"paths_{split_name}"], split[f"groups_{split_name}"]
+            )
+        },
+    }
+    with open(output_dir / "split_manifest.json", "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2)
     print(f"Experiment splits saved to {output_dir}")
 
 
 if __name__ == "__main__":
     import argparse
+    import json
 
     parser = argparse.ArgumentParser(description="Visual feature extraction and fusion pipeline")
     parser.add_argument("--frames-root", type=str, default=None, help="Root of stage-1 frame sequences")

@@ -386,7 +386,7 @@ def section_live_recompute(report):
 
     # Load optimal threshold from checkpoint metadata
     import torch
-    ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=False)
+    ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=True)
     opt_threshold = ckpt.get("metadata", {}).get("decision_threshold", dec_cfg.decision_threshold)
     # Create a temporary decision config with the optimal threshold
     from dataclasses import replace

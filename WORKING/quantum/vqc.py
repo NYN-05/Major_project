@@ -20,6 +20,7 @@ import json
 import math
 import sys
 from pathlib import Path
+from quantum.artifacts import verify_sha256, write_sha256
 
 import numpy as np
 import pennylane as qml
@@ -364,6 +365,7 @@ def load_vqc_model(n_features, cfg=None):
     """
     cfg = cfg or VQCConfig()
     stat = cfg.checkpoint_file.stat()
+    verify_sha256(cfg.checkpoint_file)
     key = (n_features, str(cfg.checkpoint_file), stat.st_mtime_ns, stat.st_size)
     cached = _MODEL_CACHE.get(key)
     if cached is not None:
@@ -565,6 +567,7 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
                 },
                 periodic_ckpt,
             )
+            write_sha256(periodic_ckpt)
 
         if monitor_val and best_state is not None and (epoch + 1 - best_epoch) > cfg.patience:
             break
@@ -587,6 +590,7 @@ def train_vqc(features, labels, cfg=None, X_val=None, y_val=None, metadata=None)
             },
             cfg.checkpoint_file,
         )
+        write_sha256(cfg.checkpoint_file)
         with open(cfg.log_file, "w") as fh:
             for row in log:
                 fh.write(json.dumps(row) + "\n")

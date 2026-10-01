@@ -40,6 +40,7 @@ from sklearn.pipeline import Pipeline
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from quantum.artifacts import write_sha256  # noqa: E402
 from quantum.config import get_dfdc_dataset_path  # noqa: E402
 from WORKING.RPPG import RPPGPipeline  # noqa: E402
 from WORKING.RPPG.features import RPPGFeatures  # noqa: E402
@@ -113,6 +114,7 @@ def train_and_save(rows: list[dict]) -> tuple[int, int]:
 
     with open(MODEL_PATH, "wb") as handle:
         pickle.dump(model, handle)
+    write_sha256(MODEL_PATH)
 
     metadata = {
         "features_csv": str(FEATURES_CSV),

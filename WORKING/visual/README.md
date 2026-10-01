@@ -48,12 +48,24 @@ WORKING/visual/
 ```
 Stage-1 frames (JPEGs) + cropped_faces/
   → VisualFeatureExtractor (ResNet50 + handcrafted)
-  → Per-frame features → averaged across frames
+  → Shared training PCA (fit once on training videos) → averaged across frames
   → VisualFeatures dataclass (39-dim vector)
   → CSV: output/visual/visual_features.csv
   → fuse_features() with rPPG CSV → fused_features.csv (63 features)
-  → create_experiment_splits() → train/val/test splits for quantum layer
+  → create_experiment_splits() → metadata-aware grouped train/val/test splits
 ```
+
+### Split integrity
+
+All experiment splits use the canonical grouped splitter from
+`quantum.data`; ordinary row/video-level random splitting is not permitted.
+Rows are grouped by the first available `subject_id`, `identity_id`,
+`original_video_id`, `source_video_id`, `source_id`, `group_id`, or content
+hash. When none is present, the normalized clip path is used and the
+manifest records that clip-level fallback explicitly. The split manifest
+stores every path and group and is written before training artifacts are
+consumed. Duplicate paths fail the build, and group overlap across train,
+validation, and test is a hard error.
 
 ## Install
 
@@ -100,6 +112,7 @@ python visual/pipeline.py \
 | File | Description |
 |------|-------------|
 | `visual_features.csv` | 39 features + label per video |
+| `visual_pca.npz` | Training-only 2048→16 PCA parameters and schema metadata |
 | `fused_features.csv` | 63 features (24 rPPG + 39 visual) + label |
 | `experiments/fused_split.npz` | Train/val/test arrays for quantum layer |
 | `experiments/split_indices.npz` | Split indices for reproducibility |
@@ -114,13 +127,19 @@ python visual/pipeline.py \
 - `frames_dir`: `output/frames/frame_sequences/<video>/frames/`
 - Uses face crops from `output/frames/frame_sequences/<video>/cropped_faces/`
 - Falls back to full frames + center crop if crops unavailable
+- Loads `output/visual/visual_pca.npz`; inference never fits PCA or falls back to
+  raw-dimension truncation. Generate this artifact with the batch extraction command
+  before serving inference.
 
 ## VisualFeatureExtractor Details
 
 ### Deep Features
 - Backbone: ResNet50 (ImageNet-1K V2 weights)
 - Layer: Global Average Pooling (2048-dim)
-- Reduction: PCA to 16 components (fitted on first batch, random_state=42)
+- Reduction: PCA to 16 components, fitted exactly once on pooled training-partition
+  ResNet50 frame features and reused for validation, test, and inference
+- PCA input contract: exactly 2048 ResNet50 GAP features; missing, incompatible, or
+  corrupted artifacts fail explicitly
 - Device: CUDA when available, else CPU
 
 ### Handcrafted Features

@@ -22,6 +22,8 @@ _vqc_cfg = VQCConfig()
 from quantum.data import build_dataset, load_dataset, FEATURE_SETS
 from quantum.evaluation import evaluate_quantum_model, run_baselines
 from quantum.scaling import FeatureScaler, SCALER_FILE
+from quantum.artifacts import schema_digest
+from quantum.preprocessing import transform_features
 from quantum.qaoa import (
     QAOASelector,
     compare_selections,
@@ -57,7 +59,7 @@ def get_feature_set_config(feature_set: str):
     return FEATURE_SET_CONFIGS[feature_set]
 
 
-def predict_features(features, feature_set: str = "rppg_only"):
+def predict_features(features, feature_set: str = "fused"):
     """Inference entry point for the quantum decision layer.
 
     Reuses the saved training-time artifacts so inference sees exactly
@@ -71,6 +73,12 @@ def predict_features(features, feature_set: str = "rppg_only"):
     """
     cfg = get_feature_set_config(feature_set)
     feature_names = cfg["feature_names"]
+    incoming_names = list(features.keys())
+    if incoming_names != list(feature_names):
+        raise ValueError(
+            "Inference feature schema mismatch: expected the canonical ordered "
+            f"schema for {feature_set}, got {incoming_names}"
+        )
     scaler_file = cfg["scaler_file"]
     selection_file = cfg["selection_file"]
     checkpoint_file = cfg["checkpoint_file"]
@@ -82,22 +90,7 @@ def predict_features(features, feature_set: str = "rppg_only"):
             f"feature_scaler.json is out of sync: expected {len(feature_names)} features, "
             f"found {scaler.mean_.shape[0]}. Rerun training for feature_set={feature_set}."
         )
-    x_scaled = scaler.transform(x)
-    if not np.isfinite(x_scaled).all():
-        # Default to FAKE when features are invalid (binary decision)
-        return DecisionExplanation(
-            final_verdict=Verdict.FAKE,
-            physiological_evidence=PhysiologicalEvidence(
-                verdict=Verdict.FAKE,
-                probability_real=0.0,
-                confidence=0.0,
-                reliability_level=ReliabilityLevel.UNKNOWN,
-            ),
-            decision_logic="Feature vector contains non-finite values after scaling",
-            requires_verification=True,
-            coverage=0.0,
-            overall_confidence=0.0,
-        ).to_dict()
+    x_scaled = transform_features(x, feature_names, scaler)
     selection = load_selection(selection_file)
     indices = [int(i) for i in selection["selected_indices"]]
     if not indices or any(i < 0 or i >= len(feature_names) for i in indices):
@@ -115,7 +108,10 @@ def predict_features(features, feature_set: str = "rppg_only"):
         ) from exc
 
     # Load optimal threshold from checkpoint metadata
-    ckpt = torch.load(checkpoint_file, map_location="cpu", weights_only=False)
+    ckpt = torch.load(checkpoint_file, map_location="cpu", weights_only=True)
+    expected_schema = ckpt.get("metadata", {}).get("feature_schema_sha256")
+    if expected_schema and expected_schema != schema_digest(feature_names):
+        raise RuntimeError("Checkpoint feature schema does not match the configured schema")
     opt_threshold = ckpt.get("metadata", {}).get("decision_threshold", DecisionConfig().decision_threshold)
     prob_real = float(predict_vqc(model, x_scaled[:, indices])[0])
     
@@ -166,9 +162,9 @@ def run_pipeline_for_feature_set(
     # Fit scaler
     scaler = FeatureScaler(feature_names).fit(data["X_train"])
     scaler.save(fc["scaler_file"])
-    X_train = scaler.transform(data["X_train"])
-    X_val = scaler.transform(data["X_val"])
-    X_test = scaler.transform(data["X_test"])
+    X_train = transform_features(data["X_train"], feature_names, scaler)
+    X_val = transform_features(data["X_val"], feature_names, scaler)
+    X_test = transform_features(data["X_test"], feature_names, scaler)
     print(f"  Scaler fitted on train only (z-score), saved: {fc['scaler_file']}")
 
     # QAOA feature selection
@@ -259,6 +255,7 @@ def run_pipeline_for_feature_set(
                 "decision_config": asdict(decision_cfg),
                 "qaoa_selection": selection,
                 "feature_set": feature_set,
+                "feature_schema_sha256": schema_digest(feature_names),
             },
         )
         print(f"  Checkpoint (with metadata): {vqc_cfg.checkpoint_file}")
@@ -271,7 +268,7 @@ def run_pipeline_for_feature_set(
         opt_threshold = optimal_threshold_youden(data["y_val"].astype(int), val_probs)
         print(f"    Optimal threshold: {opt_threshold:.6f}")
         # Update checkpoint metadata with optimal threshold
-        ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=False)
+        ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=True)
         if isinstance(ckpt, dict) and "metadata" in ckpt:
             ckpt["metadata"]["decision_threshold"] = float(opt_threshold)
             torch.save(ckpt, vqc_cfg.checkpoint_file)

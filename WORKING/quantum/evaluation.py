@@ -115,6 +115,12 @@ def classification_metrics(y_true, prob_real, decision_threshold=0.5):
                 tp = cm[0, 0]
     specificity = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
     accuracy = float(sk["accuracy_score"](y_true, predictions))
+    sensitivity = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+    fake_recall = float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
+    false_acceptance_rate = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+    false_rejection_rate = float(fn / (fn + tp)) if (fn + tp) > 0 else 0.0
+    balanced_acc = (sensitivity + specificity) / 2.0
+    brier = float(np.mean((prob_real - np.asarray(y_true, dtype=float)) ** 2))
     
     # Coverage (always 1.0 for binary)
     n_total = len(y_true)
@@ -125,6 +131,11 @@ def classification_metrics(y_true, prob_real, decision_threshold=0.5):
         "precision": float(precision),
         "recall": float(recall),
         "specificity": specificity,
+        "balanced_accuracy": float(balanced_acc),
+        "fake_recall": fake_recall,
+        "false_acceptance_rate": false_acceptance_rate,
+        "false_rejection_rate": false_rejection_rate,
+        "brier_score": brier,
         "f1": float(f1),
         "auc_roc": auc_roc,
         "pr_auc": pr_auc,
@@ -344,7 +355,7 @@ def evaluate_quantum_model(
 
     # Load optimal threshold from checkpoint metadata
     import torch
-    ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=False)
+    ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=True)
     opt_threshold = ckpt.get("metadata", {}).get("decision_threshold", decision_cfg.decision_threshold)
     from dataclasses import replace
     decision_cfg_opt = replace(decision_cfg, decision_threshold=opt_threshold)

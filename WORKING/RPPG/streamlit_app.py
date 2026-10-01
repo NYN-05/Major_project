@@ -1,6 +1,7 @@
 import streamlit as st
 import tempfile
 import os
+from pathlib import Path
 import cv2
 import numpy as np
 import matplotlib
@@ -131,6 +132,8 @@ if run:
                 st.subheader("Deepfake Detection Result")
                 try:
                     import pickle
+                    from quantum.artifacts import verify_sha256
+                    verify_sha256(Path(model_path))
                     with open(model_path, 'rb') as f:
                         clf = pickle.load(f)
                     
