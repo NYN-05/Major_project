@@ -16,6 +16,9 @@ from pathlib import Path
 
 from .features import VisualFeatures, VISUAL_FEATURE_NAMES
 
+RESNET_FEATURE_DIM = 2048
+PCA_PREPROCESSING_VERSION = "resnet50_imagenet_v1_bgr_to_rgb_224_normalized"
+
 
 class VisualFeatureExtractor:
     """
@@ -29,10 +32,13 @@ class VisualFeatureExtractor:
         device: str = "auto",
         deep_feature_dim: int = 16,
         use_pca: bool = True,
+        pca_path: Optional[str] = None,
+        allow_pca_fit: bool = False,
     ):
         self.backbone_name = backbone
         self.deep_feature_dim = deep_feature_dim
         self.use_pca = use_pca
+        self.allow_pca_fit = allow_pca_fit
 
         if device == "auto":
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -59,10 +65,14 @@ class VisualFeatureExtractor:
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
-        # PCA projection for deep features (fitted on first batch)
-        self.pca_components = None
-        self.pca_mean = None
+        # PCA is always loaded from, or explicitly fitted into, one artifact.
+        # It must never be fitted implicitly while processing a video.
+        self.pca = None
         self.pca_fitted = False
+        self.actual_pca_dim = None
+        self.pca_artifact_path = None
+        if self.use_pca and pca_path is not None:
+            self.load_pca(pca_path)
 
     @torch.no_grad()
     def extract_deep_features(self, face_crops: List[np.ndarray]) -> np.ndarray:
@@ -88,28 +98,131 @@ class VisualFeatureExtractor:
         batch_tensor = torch.stack(batch).to(self.device)
         features = self.model(batch_tensor)  # (N, 2048, 1, 1)
         features = features.squeeze(-1).squeeze(-1).cpu().numpy()  # (N, 2048)
+        if features.shape[1] != RESNET_FEATURE_DIM:
+            raise ValueError(
+                f"Expected ResNet50 GAP dimension {RESNET_FEATURE_DIM}, "
+                f"got {features.shape[1]}"
+            )
         return features
 
-    def _fit_pca(self, features: np.ndarray) -> None:
-        """Fit PCA on deep features to reduce to target dimension."""
+    def fit_pca(self, features: np.ndarray, artifact_path: Optional[str] = None) -> None:
+        """Fit the training PCA once and optionally persist it.
+
+        This method is intentionally explicit. Production extraction must pass
+        a fitted artifact and must not call this method per video.
+        """
         from sklearn.decomposition import PCA
-        n_samples = features.shape[0]
-        n_components = min(self.deep_feature_dim, n_samples - 1, features.shape[1])
+
+        features = np.asarray(features, dtype=np.float32)
+        if features.ndim != 2 or features.shape[1] != RESNET_FEATURE_DIM:
+            raise ValueError(
+                f"PCA training data must have shape (n, {RESNET_FEATURE_DIM}), "
+                f"got {features.shape}"
+            )
+        if features.shape[0] < self.deep_feature_dim + 1:
+            raise ValueError(
+                f"At least {self.deep_feature_dim + 1} training frame features are "
+                f"required to fit {self.deep_feature_dim}-component PCA; "
+                f"got {features.shape[0]}"
+            )
+        n_components = self.deep_feature_dim
         self.pca = PCA(n_components=n_components, random_state=42)
         self.pca.fit(features)
         self.pca_fitted = True
         self.actual_pca_dim = n_components
+        if artifact_path is not None:
+            self.save_pca(artifact_path)
 
     def _apply_pca(self, features: np.ndarray) -> np.ndarray:
         """Apply fitted PCA to reduce deep features."""
         if not self.pca_fitted:
-            self._fit_pca(features)
+            raise RuntimeError(
+                "A training-fitted visual PCA artifact is required. "
+                "Fit PCA on the training partition and pass pca_path."
+            )
+        features = np.asarray(features, dtype=np.float32)
+        if features.ndim != 2 or features.shape[1] != RESNET_FEATURE_DIM:
+            raise ValueError(
+                f"PCA input must have shape (n, {RESNET_FEATURE_DIM}), got {features.shape}"
+            )
         reduced = self.pca.transform(features)
-        # Pad with zeros if actual PCA dim < target dim
-        if reduced.shape[1] < self.deep_feature_dim:
-            padding = np.zeros((reduced.shape[0], self.deep_feature_dim - reduced.shape[1]), dtype=reduced.dtype)
-            reduced = np.hstack([reduced, padding])
+        if reduced.shape[1] != self.deep_feature_dim:
+            raise ValueError(
+                f"PCA artifact produced {reduced.shape[1]} components; "
+                f"expected {self.deep_feature_dim}"
+            )
         return reduced
+
+    def save_pca(self, artifact_path: str) -> None:
+        """Persist PCA parameters in a non-pickle, validated NumPy artifact."""
+        if not self.pca_fitted or self.pca is None:
+            raise RuntimeError("Cannot save PCA before fitting it")
+        path = Path(artifact_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            path,
+            components=np.asarray(self.pca.components_, dtype=np.float64),
+            mean=np.asarray(self.pca.mean_, dtype=np.float64),
+            explained_variance=np.asarray(self.pca.explained_variance_, dtype=np.float64),
+            explained_variance_ratio=np.asarray(self.pca.explained_variance_ratio_, dtype=np.float64),
+            singular_values=np.asarray(self.pca.singular_values_, dtype=np.float64),
+            n_features_in=np.asarray(self.pca.n_features_in_, dtype=np.int64),
+            n_components=np.asarray(self.pca.n_components_, dtype=np.int64),
+            deep_feature_dim=np.asarray(self.deep_feature_dim, dtype=np.int64),
+            preprocessing_version=np.asarray(PCA_PREPROCESSING_VERSION),
+            backbone=np.asarray(self.backbone_name),
+        )
+        self.pca_artifact_path = path
+
+    def load_pca(self, artifact_path: str) -> None:
+        """Load and validate a trusted training PCA artifact."""
+        path = Path(artifact_path)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Training-fitted visual PCA artifact not found: {path}. "
+                "Run the visual training extraction first."
+            )
+        with np.load(path, allow_pickle=False) as artifact:
+            required = {
+                "components", "mean", "explained_variance",
+                "explained_variance_ratio", "singular_values",
+                "n_features_in", "n_components", "deep_feature_dim",
+                "preprocessing_version", "backbone",
+            }
+            missing = required.difference(artifact.files)
+            if missing:
+                raise ValueError(f"Visual PCA artifact is missing fields: {sorted(missing)}")
+            if int(artifact["n_features_in"]) != RESNET_FEATURE_DIM:
+                raise ValueError(
+                    f"Visual PCA expects {int(artifact['n_features_in'])} input features; "
+                    f"expected {RESNET_FEATURE_DIM}"
+                )
+            if int(artifact["n_components"]) != self.deep_feature_dim:
+                raise ValueError(
+                    f"Visual PCA has {int(artifact['n_components'])} components; "
+                    f"requested {self.deep_feature_dim}"
+                )
+            if str(artifact["preprocessing_version"]) != PCA_PREPROCESSING_VERSION:
+                raise ValueError("Visual PCA preprocessing version does not match the extractor")
+            if str(artifact["backbone"]) != self.backbone_name:
+                raise ValueError("Visual PCA backbone does not match the extractor")
+
+            from sklearn.decomposition import PCA
+            pca = PCA(n_components=self.deep_feature_dim)
+            pca.components_ = np.asarray(artifact["components"], dtype=np.float64)
+            pca.mean_ = np.asarray(artifact["mean"], dtype=np.float64)
+            pca.explained_variance_ = np.asarray(artifact["explained_variance"], dtype=np.float64)
+            pca.explained_variance_ratio_ = np.asarray(
+                artifact["explained_variance_ratio"], dtype=np.float64
+            )
+            pca.singular_values_ = np.asarray(artifact["singular_values"], dtype=np.float64)
+            pca.n_features_in_ = RESNET_FEATURE_DIM
+            pca.n_samples_ = 2
+            pca.n_components_ = self.deep_feature_dim
+            self.pca = pca
+        self.pca_fitted = True
+        self.actual_pca_dim = self.deep_feature_dim
+        self.pca_artifact_path = path
 
     def compute_lbp_histogram(self, gray: np.ndarray, radius: int = 1, n_points: int = 8) -> np.ndarray:
         """Compute uniform LBP histogram (10 bins for uniform patterns)."""
@@ -163,7 +276,11 @@ class VisualFeatureExtractor:
         total = low_energy + mid_energy + high_energy + 1e-12
         return low_energy / total, mid_energy / total, high_energy / total
 
-    def extract_from_crops(self, face_crops: List[np.ndarray]) -> VisualFeatures:
+    def extract_from_crops(
+        self,
+        face_crops: List[np.ndarray],
+        deep_features: Optional[np.ndarray] = None,
+    ) -> VisualFeatures:
         """
         Extract full visual feature vector from a sequence of face crops.
 
@@ -172,16 +289,19 @@ class VisualFeatureExtractor:
         if not face_crops:
             return VisualFeatures()
 
-        # Deep features - fit PCA on per-frame features, then transform aggregated
-        deep_feats = self.extract_deep_features(face_crops)  # (N, 2048)
-        if not self.pca_fitted and len(deep_feats) >= 2:
-            self._fit_pca(deep_feats)
+        # Transform each frame with the shared training PCA, then aggregate.
+        deep_feats = (
+            self.extract_deep_features(face_crops)
+            if deep_features is None
+            else np.asarray(deep_features, dtype=np.float32)
+        )
+        if deep_feats.shape != (len(face_crops), RESNET_FEATURE_DIM):
+            raise ValueError(
+                f"Expected deep features with shape ({len(face_crops)}, "
+                f"{RESNET_FEATURE_DIM}), got {deep_feats.shape}"
+            )
         deep_agg = deep_feats.mean(axis=0)  # (2048,)
-        if self.pca_fitted:
-            deep_reduced = self._apply_pca(deep_agg.reshape(1, -1)).flatten()  # (16,)
-        else:
-            # Fallback: just take first 16 components if not enough samples for PCA
-            deep_reduced = deep_agg[:16]
+        deep_reduced = self._apply_pca(deep_agg.reshape(1, -1)).flatten()
 
         # Handcrafted features - compute on each frame and average
         lbp_hists = []
@@ -249,6 +369,7 @@ def compute_visual_features(
     backbone: str = "resnet50",
     device: str = "auto",
     deep_feature_dim: int = 16,
+    pca_path: Optional[str] = None,
 ) -> VisualFeatures:
     """
     Convenience function to extract visual features from stage-1 frames.
@@ -261,12 +382,27 @@ def compute_visual_features(
     if not frame_paths:
         raise IOError(f"No frames found in: {frames_dir}")
 
-    # Load face crops from stage 1's cropped_faces directory
-    # Stage 1 saves crops at: output/frames/frame_sequences/<video>/cropped_faces/
-    video_name = frames_root.parent.name
+    face_crops = load_face_crops_from_frames(frames_dir, max_frames=max_frames)
+    extractor = VisualFeatureExtractor(
+        backbone=backbone,
+        device=device,
+        deep_feature_dim=deep_feature_dim,
+        pca_path=pca_path or _default_pca_path(),
+    )
+    return extractor.extract_from_crops(face_crops)
+
+
+def load_face_crops_from_frames(
+    frames_dir: str,
+    max_frames: Optional[int] = None,
+) -> List[np.ndarray]:
+    """Load the accepted stage-1 face crop for each frame."""
+    frames_root = Path(frames_dir)
+    frame_paths = sorted(frames_root.glob("*.jpg"))
+    if not frame_paths:
+        raise IOError(f"No frames found in: {frames_dir}")
     crops_dir = frames_root.parent / "cropped_faces"
     if not crops_dir.exists():
-        # Fallback: use full frames and detect faces again
         crops_dir = frames_root
 
     face_crops = []
@@ -283,7 +419,6 @@ def compute_visual_features(
             break
 
     if not face_crops:
-        # Fallback: read full frames and use center crop as face region
         for frame_path in frame_paths[:max_frames] if max_frames else frame_paths:
             frame = cv2.imread(str(frame_path))
             if frame is not None:
@@ -293,12 +428,7 @@ def compute_visual_features(
                 if crop.size > 0:
                     face_crops.append(crop)
 
-    extractor = VisualFeatureExtractor(
-        backbone=backbone,
-        device=device,
-        deep_feature_dim=deep_feature_dim,
-    )
-    return extractor.extract_from_crops(face_crops)
+    return face_crops
 
 
 def compute_visual_features_from_video(
@@ -308,6 +438,7 @@ def compute_visual_features_from_video(
     backbone: str = "resnet50",
     device: str = "auto",
     deep_feature_dim: int = 16,
+    pca_path: Optional[str] = None,
 ) -> VisualFeatures:
     """
     Extract visual features directly from a video file (fallback when
@@ -323,26 +454,18 @@ def compute_visual_features_from_video(
 
     face_crops = []
     frame_idx = 0
-
-    # Use a simple face detector for cropping (could use MediaPipe/YuNet)
-    # For now, use center crop as fallback
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        if frame_idx % sample_stride != 0:
-            frame_idx += 1
-            continue
-
-        h, w = frame.shape[:2]
-        crop = frame[h//4:3*h//4, w//4:3*w//4]
-        if crop.size > 0:
-            face_crops.append(crop)
-
-        if max_frames and len(face_crops) >= max_frames:
-            break
+        if frame_idx % sample_stride == 0:
+            h, w = frame.shape[:2]
+            crop = frame[h//4:3*h//4, w//4:3*w//4]
+            if crop.size > 0:
+                face_crops.append(crop)
+            if max_frames and len(face_crops) >= max_frames:
+                break
         frame_idx += 1
-
     cap.release()
 
     if not face_crops:
@@ -352,5 +475,11 @@ def compute_visual_features_from_video(
         backbone=backbone,
         device=device,
         deep_feature_dim=deep_feature_dim,
+        pca_path=pca_path or _default_pca_path(),
     )
     return extractor.extract_from_crops(face_crops)
+
+
+def _default_pca_path() -> str:
+    output_root = Path(os.environ.get("MAJ_OUTPUT_ROOT", Path(__file__).resolve().parents[2] / "Scrape" / "output"))
+    return str(output_root / "visual" / "visual_pca.npz")

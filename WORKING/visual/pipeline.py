@@ -18,7 +18,12 @@ import pandas as pd
 WORKING_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKING_ROOT))
 
-from visual.extractor import compute_visual_features, compute_visual_features_from_video
+from visual.extractor import (
+    VisualFeatureExtractor,
+    compute_visual_features,
+    compute_visual_features_from_video,
+    load_face_crops_from_frames,
+)
 from visual.features import VisualFeatures, VISUAL_FEATURE_NAMES
 
 
@@ -27,6 +32,35 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 def _iter_video_files(folder: Path) -> List[Path]:
     return sorted([p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS])
+
+
+def _training_video_stems(labels_csv: Path) -> set[str]:
+    """Return the deterministic training partition used by quantum training."""
+    from quantum.config import DataConfig, RPPG_FEATURE_NAMES
+    from quantum.data import _grouped_train_val_test_split, _load_feature_rows
+
+    cfg = DataConfig(csv_file=labels_csv)
+    X, y, groups, paths, _, _ = _load_feature_rows(labels_csv, RPPG_FEATURE_NAMES, cfg)
+    split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
+    return {Path(str(path)).stem.lower() for path in split["paths_train"]}
+
+
+def _fit_shared_pca(
+    raw_features: dict[str, np.ndarray],
+    training_stems: set[str],
+    extractor: VisualFeatureExtractor,
+    artifact_path: Path,
+) -> None:
+    training = [
+        features
+        for video_id, features in raw_features.items()
+        if Path(video_id).stem.lower() in training_stems
+    ]
+    if not training:
+        raise ValueError("No extracted visual videos matched the training partition")
+    pooled = np.concatenate(training, axis=0)
+    extractor.fit_pca(pooled, str(artifact_path))
+    print(f"Training PCA fitted once on {pooled.shape[0]} frame features: {artifact_path}")
 
 
 def extract_visual_features_dataset(
@@ -62,7 +96,14 @@ def extract_visual_features_dataset(
         for _, row in meta_df.iterrows():
             metadata_labels[row["video_path"]] = row.get("label", -1)
 
-    features_list = []
+    if not metadata_csv or not metadata_csv.exists():
+        raise ValueError("A labelled rPPG CSV is required to fit training-only visual PCA")
+    training_stems = _training_video_stems(metadata_csv)
+    extractor = VisualFeatureExtractor(
+        backbone=backbone, device=device, deep_feature_dim=deep_feature_dim
+    )
+    video_crops: dict[str, list[np.ndarray]] = {}
+    raw_features: dict[str, np.ndarray] = {}
     stats = {"processed": 0, "failed": 0, "no_frames": 0}
 
     for video_dir in video_dirs:
@@ -73,12 +114,22 @@ def extract_visual_features_dataset(
             continue
 
         try:
-            visual_features = compute_visual_features(
-                frames_dir=str(frames_dir),
-                max_frames=max_frames_per_video,
-                backbone=backbone,
-                device=device,
-                deep_feature_dim=deep_feature_dim,
+            crops = load_face_crops_from_frames(str(frames_dir), max_frames=max_frames_per_video)
+            if not crops:
+                raise ValueError("No face crops found")
+            video_crops[video_name] = crops
+            raw_features[video_name] = extractor.extract_deep_features(crops)
+        except Exception as e:
+            print(f"  Failed to process {video_name}: {e}")
+            stats["failed"] += 1
+
+    pca_path = output_csv.parent / "visual_pca.npz"
+    _fit_shared_pca(raw_features, training_stems, extractor, pca_path)
+    features_list = []
+    for video_name, crops in video_crops.items():
+        try:
+            visual_features = extractor.extract_from_crops(
+                crops, deep_features=raw_features[video_name]
             )
 
             feat_dict = visual_features.to_dict()
@@ -138,18 +189,59 @@ def extract_visual_features_from_videos(
         print("No videos matched the rPPG CSV under the given video root — check paths.")
         return
 
-    features_list = []
+    if not labels_csv or not labels_csv.exists():
+        raise ValueError("A labelled rPPG CSV is required to fit training-only visual PCA")
+    training_stems = _training_video_stems(labels_csv)
+    extractor = VisualFeatureExtractor(
+        backbone=backbone, device=device, deep_feature_dim=deep_feature_dim
+    )
+    video_crops: dict[str, list[np.ndarray]] = {}
+    raw_features: dict[str, np.ndarray] = {}
     stats = {"processed": 0, "failed": 0}
 
     for video_path in video_files:
         try:
-            visual_features = compute_visual_features_from_video(
-                video_path=str(video_path),
-                max_frames=max_frames_per_video,
-                sample_fps=sample_fps,
-                backbone=backbone,
-                device=device,
-                deep_feature_dim=deep_feature_dim,
+            # Use the existing video helper once for crops, then reuse raw
+            # features after the shared PCA is fitted.
+            import cv2
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                raise IOError(f"Could not open video: {video_path}")
+            native_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            stride = max(1, round(native_fps / sample_fps))
+            crops = []
+            frame_idx = 0
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                if frame_idx % stride == 0:
+                    h, w = frame.shape[:2]
+                    crop = frame[h // 4:3 * h // 4, w // 4:3 * w // 4]
+                    if crop.size > 0:
+                        crops.append(crop)
+                    if max_frames_per_video and len(crops) >= max_frames_per_video:
+                        break
+                frame_idx += 1
+            cap.release()
+            if not crops:
+                raise ValueError("No usable frames found")
+            video_crops[video_path.stem] = crops
+            raw_features[video_path.stem] = extractor.extract_deep_features(crops)
+        except Exception as e:
+            print(f"  Failed to process {video_path.name}: {e}")
+            stats["failed"] += 1
+
+    pca_path = output_csv.parent / "visual_pca.npz"
+    _fit_shared_pca(raw_features, training_stems, extractor, pca_path)
+    features_list = []
+    for video_path in video_files:
+        if video_path.stem not in video_crops:
+            continue
+        try:
+            visual_features = extractor.extract_from_crops(
+                video_crops[video_path.stem],
+                deep_features=raw_features[video_path.stem],
             )
 
             feat_dict = visual_features.to_dict()

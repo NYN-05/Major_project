@@ -1,5 +1,6 @@
 """Tests for visual feature extraction module."""
 import sys
+import tempfile
 import unittest
 import numpy as np
 from pathlib import Path
@@ -8,7 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "WORKING"))
 
 from visual.features import VisualFeatures, VISUAL_FEATURE_NAMES
-from visual.extractor import VisualFeatureExtractor
+from visual.extractor import (
+    PCA_PREPROCESSING_VERSION,
+    RESNET_FEATURE_DIM,
+    VisualFeatureExtractor,
+)
 
 
 class TestVisualFeatures(unittest.TestCase):
@@ -77,6 +82,53 @@ class TestVisualFeatureExtractor(unittest.TestCase):
             self.skipTest("VisualFeatureExtractor not available")
         # This would need a test video file
         self.skipTest("Requires test video file")
+
+    def test_pca_artifact_round_trip_and_fixed_shape(self):
+        """A persisted training PCA can transform the expected ResNet space."""
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "visual_pca.npz"
+            source = object.__new__(VisualFeatureExtractor)
+            source.deep_feature_dim = 16
+            source.backbone_name = "resnet50"
+            source.use_pca = True
+            source.pca_fitted = False
+            source.actual_pca_dim = None
+            source.pca_artifact_path = None
+            source.fit_pca(
+                np.random.RandomState(7).normal(size=(24, RESNET_FEATURE_DIM)),
+                str(artifact),
+            )
+
+            loaded = object.__new__(VisualFeatureExtractor)
+            loaded.deep_feature_dim = 16
+            loaded.backbone_name = "resnet50"
+            loaded.use_pca = True
+            loaded.pca_fitted = False
+            loaded.actual_pca_dim = None
+            loaded.pca_artifact_path = None
+            loaded.load_pca(str(artifact))
+            transformed = loaded._apply_pca(
+                np.zeros((3, RESNET_FEATURE_DIM), dtype=np.float32)
+            )
+            self.assertEqual(transformed.shape, (3, 16))
+            self.assertEqual(PCA_PREPROCESSING_VERSION, str(
+                np.load(artifact, allow_pickle=False)["preprocessing_version"]
+            ))
+
+    def test_pca_rejects_insufficient_training_data(self):
+        """PCA must not silently truncate or zero-pad an undersized fit."""
+        extractor = object.__new__(VisualFeatureExtractor)
+        extractor.deep_feature_dim = 16
+        with self.assertRaises(ValueError):
+            extractor.fit_pca(np.zeros((16, RESNET_FEATURE_DIM), dtype=np.float32))
+
+    def test_pca_transform_never_fits_implicitly(self):
+        """Inference without the shared artifact must fail explicitly."""
+        extractor = object.__new__(VisualFeatureExtractor)
+        extractor.deep_feature_dim = 16
+        extractor.pca_fitted = False
+        with self.assertRaises(RuntimeError):
+            extractor._apply_pca(np.zeros((1, RESNET_FEATURE_DIM), dtype=np.float32))
 
 
 class TestVisualFeatureExtractionEdgeCases(unittest.TestCase):
