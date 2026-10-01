@@ -388,7 +388,8 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=1, help="Number of parallel worker processes (0 = all CPU cores)")
     parser.add_argument("--min-sqi", type=float, default=0.05, help="Drop clips whose signal_quality_index is below this (0 disables)")
     parser.add_argument("--max-nan-features", type=int, default=2, help="Drop clips with more than this many median-filled (raw-NaN) features")
-    parser.add_argument("--gpu", action="store_true", help="Use GPU-accelerated face detection (YuNet via ONNX Runtime CUDA) instead of MediaPipe")
+    parser.add_argument("--gpu", action="store_true", default=True, help="Use GPU-accelerated face detection (YuNet via ONNX Runtime CUDA) instead of MediaPipe (default: on)")
+    parser.add_argument("--no-gpu", action="store_false", dest="gpu", help="Disable GPU face detection, use CPU (MediaPipe)")
     parser.add_argument("--gpu-workers", type=int, default=None, help="Number of GPU worker processes (default: 8 when --gpu is set)")
     parser.add_argument("--roi-weights", type=float, nargs=3, default=None, metavar=("LEFT", "RIGHT", "FOREHEAD"), help="ROI weights for left cheek, right cheek, forehead (default: 0.35 0.35 0.30)")
     # Phase 2: Quality-weighted rPPG
@@ -417,21 +418,23 @@ def main() -> None:
             from RPPG.gpu_face_detector import GPUFaceDetector
             with GPUFaceDetector() as _gpu_detector:
                 if not _gpu_detector.gpu_active:
-                    raise RuntimeError(
-                        "ONNX Runtime created the YuNet session without "
-                        "CUDAExecutionProvider."
+                    print(
+                        "[gpu] WARNING: CUDA provider unavailable; "
+                        "falling back to CPU (slow). GPU requested but not "
+                        "available."
                     )
-                print(
-                    "[gpu] Preflight passed: YuNet providers="
-                    f"{_gpu_detector._session.get_providers()}"
-                )
+                    use_gpu = False
+                else:
+                    print(
+                        "[gpu] Preflight passed: YuNet providers="
+                        f"{_gpu_detector._session.get_providers()}"
+                    )
         except Exception as exc:
-            raise RuntimeError(
-                "GPU mode was requested, but the real YuNet ONNX session "
-                "could not use CUDA. Install requirements.txt in this "
-                "virtual environment and retry. Original error: "
-                f"{type(exc).__name__}: {exc}"
-            ) from exc
+            print(
+                f"[gpu] WARNING: GPU preflight failed ({type(exc).__name__}: {exc}); "
+                "falling back to CPU."
+            )
+            use_gpu = False
 
     roi_weights = tuple(args.roi_weights) if args.roi_weights else (0.35, 0.35, 0.30)
 
