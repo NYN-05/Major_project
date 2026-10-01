@@ -10,7 +10,7 @@ Extracts **39** visual features from face crops saved by Stage 1:
 - 6 color statistics (mean/std per RGB channel)
 - 3 DCT frequency domain features (low/mid/high energy bands)
 
-Fuses with rPPG features (20) to create the **fused feature set (59 features)** used for training.
+Fuses with rPPG features (24) to create the **fused feature set (63 features)** used for training.
 
 ## Project Structure
 
@@ -51,7 +51,7 @@ Stage-1 frames (JPEGs) + cropped_faces/
   → Per-frame features → averaged across frames
   → VisualFeatures dataclass (39-dim vector)
   → CSV: output/visual/visual_features.csv
-  → fuse_features() with rPPG CSV → fused_features.csv (59 features)
+  → fuse_features() with rPPG CSV → fused_features.csv (63 features)
   → create_experiment_splits() → train/val/test splits for quantum layer
 ```
 
@@ -100,7 +100,7 @@ python visual/pipeline.py \
 | File | Description |
 |------|-------------|
 | `visual_features.csv` | 39 features + label per video |
-| `fused_features.csv` | 59 features (20 rPPG + 39 visual) + label |
+| `fused_features.csv` | 63 features (24 rPPG + 39 visual) + label |
 | `experiments/fused_split.npz` | Train/val/test arrays for quantum layer |
 | `experiments/split_indices.npz` | Split indices for reproducibility |
 

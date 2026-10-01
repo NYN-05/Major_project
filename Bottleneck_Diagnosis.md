@@ -92,6 +92,6 @@
 
 The rPPG stage is purely mathematical algorithms — no training involved:
 Signal extraction (signal_extraction.py:45-138): POS (Wang et al. 2017) and CHROM (de Haan & Jeanne 2013) are classical fixed-formula algorithms that project normalized RGB traces onto chrominance/orthogonal planes to recover pulse.
-Feature computation (features.py): All 20+ features are deterministic mathematical functions — Welch PSD, peak detection, spectral entropy, inter-ROI correlation, phase lag, SNR, etc. Zero learned parameters.
+Feature computation (features.py): All 24 features are deterministic mathematical functions — Welch PSD, peak detection, spectral entropy, inter-ROI correlation, phase lag, SNR, etc. Zero learned parameters.
 The only "model" in rPPG is an optional RandomForest cross-check (rppg-pipeline/train_classifier.py, model_utils.py) which the AGENTS.md notes is currently skipped — the final verdict comes exclusively from the quantum VQC stage.
 The trained model is only in Stage 3 (quantum/): the hybrid VQC (hybrid_vqc.pt) trained via python -m quantum.pipeline --all.

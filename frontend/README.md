@@ -100,10 +100,10 @@ idle
 
 1. **Upload** - Video received, validated (magic-byte check, 200 MB limit)
 2. **Frames** - Frame sampling at 30 fps + YOLO face detection + quality gates
-3. **rPPG** - MediaPipe ROIs → POS/CHROM pulse → 20 physiological features
+3. **rPPG** - MediaPipe ROIs → POS/CHROM pulse → 24 physiological features
 4. **Visual** - ResNet50 + handcrafted features from face crops → 39 visual features
-5. **Fusion** - 59 fused features (20 rPPG + 39 visual)
-6. **Quantum** - QAOA feature selection (59 → 3) → Hybrid VQC → P(real)
+5. **Fusion** - 63 fused features (24 rPPG + 39 visual)
+6. **Quantum** - QAOA feature selection (63 → 3) → Hybrid VQC → P(real)
 7. **Verdict** - Decision bins: REAL (≥0.7), FAKE (≤0.3), UNCERTAIN
 8. **Artifacts** - Result JSON, signal waveform, frame thumbnails, plots
 
