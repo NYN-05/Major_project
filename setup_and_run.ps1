@@ -2,18 +2,28 @@
 # ==================
 # One-shot setup + full pipeline runner for the Deepfake-rPPG KYC project.
 # Skips steps whose outputs already exist (idempotent).
+# Supports GPU-accelerated rPPG feature extraction via YuNet (ONNX Runtime CUDA).
 #
 # Usage:
-#   .\setup_and_run.ps1                  full run (all missing stages)
-#   .\setup_and_run.ps1 -Quick           smoke test (max 20 videos for extraction)
-#   .\setup_and_run.ps1 -SkipExtract     skip rPPG feature extraction
-#   .\setup_and_run.ps1 -SkipFrontend    skip npm install + frontend build
-#   .\setup_and_run.ps1 -Video path.mp4  run inference on a sample video at the end
+#   .\setup_and_run.ps1                          # full run (all missing stages)
+#   .\setup_and_run.ps1 -Quick                   # smoke test (max 20 videos per class)
+#   .\setup_and_run.ps1 -SkipExtract             # skip rPPG feature extraction
+#   .\setup_and_run.ps1 -SkipFrontend            # skip npm install + frontend build
+#   .\setup_and_run.ps1 -Video path.mp4          # run inference on a sample video at the end
+#   .\setup_and_run.ps1 -CpuOnly                 # force CPU extraction (disable GPU)
+#   .\setup_and_run.ps1 -Resume                  # resume rPPG extraction from checkpoint
+#   .\setup_and_run.ps1 -GpuWorkers 4            # set GPU worker count (default: 8)
+#   .\setup_and_run.ps1 -Start 100 -End 200      # process a specific index range
 param(
     [switch]$Quick,
     [switch]$SkipExtract,
     [switch]$SkipFrontend,
-    [string]$Video = ""
+    [switch]$CpuOnly,
+    [switch]$Resume,
+    [string]$Video = "",
+    [int]$GpuWorkers = 0,      # 0 = auto (min(8, CPU cores))
+    [int]$Start = -1,
+    [int]$End = -1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,10 +40,11 @@ $env:TORCH_COMPILE_DISABLE = '1'
 $EnvFile = Join-Path $RepoRoot '.env'
 if (Test-Path -LiteralPath $EnvFile) {
     Write-Host "  Loading .env from $EnvFile" -ForegroundColor Cyan
+    $trimChars = " `t`r`n`"'"
     Get-Content $EnvFile | ForEach-Object {
         if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
             $name = $matches[1]
-            $value = $matches[2].Trim(' "')
+            $value = $matches[2].Trim($trimChars)
             $existing = Get-Item -Path "Env:$name" -ErrorAction SilentlyContinue
             if ($existing -and -not [string]::IsNullOrEmpty($existing.Value)) {
                 Write-Host "    $name already set in environment, skipping" -ForegroundColor DarkGray
@@ -45,24 +56,29 @@ if (Test-Path -LiteralPath $EnvFile) {
     }
 }
 
+# Default DFDC dataset path
 if (-not $env:DFDC_DATASET_PATH) {
     $env:DFDC_DATASET_PATH = Join-Path $RepoRoot 'DFDC_Dataset'
 }
+Write-Host "  DFDC_DATASET_PATH = $env:DFDC_DATASET_PATH" -ForegroundColor DarkGray
+
+# Output root (MAJ_OUTPUT_ROOT env or Scrape/output)
 $OutRoot = $env:MAJ_OUTPUT_ROOT
 if (-not $OutRoot) {
     $OutRoot = Join-Path $RepoRoot 'Scrape\output'
     $env:MAJ_OUTPUT_ROOT = $OutRoot
 }
+Write-Host "  MAJ_OUTPUT_ROOT   = $OutRoot" -ForegroundColor DarkGray
 
 # ---------- output paths (check these to decide what to skip) ----------
-$RppgCsv      = Join-Path $OutRoot 'rppg\dataset_features.csv'
-$RppgPkl      = Join-Path $OutRoot 'rppg\rppg_classifier.pkl'
-$FusedCsv     = Join-Path $OutRoot 'visual\fused_features.csv'
-$QuantumData  = Join-Path $OutRoot 'quantum\data_fused.npz'
-$QuantumVqc   = Join-Path $OutRoot 'quantum\hybrid_vqc_fused.pt'
-$QuantumSel   = Join-Path $OutRoot 'quantum\qaoa_selection_fused.json'
-$QuantumScaler= Join-Path $OutRoot 'quantum\feature_scaler_fused.json'
-$FrontendDist = Join-Path $Frontend 'dist'
+$RppgCsv       = Join-Path $OutRoot 'rppg\dataset_features.csv'
+$RppgPkl       = Join-Path $OutRoot 'rppg\rppg_classifier.pkl'
+$FusedCsv      = Join-Path $OutRoot 'visual\fused_features.csv'
+$QuantumData   = Join-Path $OutRoot 'quantum\data_fused.npz'
+$QuantumVqc    = Join-Path $OutRoot 'quantum\hybrid_vqc_fused.pt'
+$QuantumSel    = Join-Path $OutRoot 'quantum\qaoa_selection_fused.json'
+$QuantumScaler = Join-Path $OutRoot 'quantum\feature_scaler_fused.json'
+$FrontendDist  = Join-Path $Frontend 'dist'
 
 function Test-Artifact($path) {
     if (Test-Path -LiteralPath $path) {
@@ -78,8 +94,9 @@ function Step($num, $total, $label) {
 }
 
 # =====================================================================
-$TotalSteps = 5   # venv, extract, train, visual fuse, quantum
-if (-not $SkipFrontend) { $TotalSteps += 2 }   # npm install + build
+# Calculate total steps up front for progress display
+$TotalSteps = 7   # venv, extract, train, visual fuse, quantum, frontend build, summary
+if (-not $SkipFrontend) { $TotalSteps += 1 }   # npm install
 if ($Video -ne "")       { $TotalSteps += 1 }   # sample inference
 
 $step = 0
@@ -112,6 +129,19 @@ if ($pkgsInstalled -eq 'ok') {
     Write-Host "  Packages installed" -ForegroundColor Green
 }
 
+# Verify GPU stack (CUDA, cuDNN, ORT GPU)
+Write-Host "  Verifying CUDA/ORT GPU stack..."
+$gpuCheck = & $Venv -c "
+import torch
+import onnxruntime as ort
+print(f'Torch CUDA: {torch.cuda.is_available()}')
+if torch.cuda.is_available():
+    print(f'  GPU: {torch.cuda.get_device_name(0)}')
+    print(f'  cuDNN: {torch.backends.cudnn.version()}')
+print(f'ORT providers: {ort.get_available_providers()}')
+" 2>&1
+Write-Host "  $gpuCheck" -ForegroundColor DarkGray
+
 # ----- Step 2: npm install (frontend) -----
 if (-not $SkipFrontend) {
     $step++
@@ -128,25 +158,91 @@ if (-not $SkipFrontend) {
     }
 }
 
-# ----- Step 3: rPPG feature extraction -----
+# ----- Step 3: rPPG feature extraction (GPU-accelerated) -----
 $step++
-Step $step $TotalSteps "rPPG feature extraction (POS, DFDC)"
+Step $step $TotalSteps "rPPG feature extraction (POS, DFDC, GPU-accelerated)"
 if ($SkipExtract) {
     Write-Host "  [skip] -SkipExtract flag" -ForegroundColor DarkGray
 } elseif (Test-Artifact $RppgCsv) {
     Write-Host "  Dataset already extracted" -ForegroundColor Green
 } else {
     $extractArgs = @('--method', 'POS', '--output', $RppgCsv)
+
+    # GPU settings (default: enabled, 8 workers)
+    $useGpu = -not $CpuOnly
+    if ($useGpu) {
+        # Validate GPU stack: onnxruntime-gpu 1.20.2 requires CUDA 12.x
+        # Check if CUDA 12.x is available (CUDA 13.0 is not compatible)
+        $cuda12Bin = & $Venv -c "
+import os
+for p in [r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin',
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.0\bin',
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.2\bin',
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3\bin',
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin',
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.5\bin',
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin']:
+    if os.path.isdir(p):
+        print(p)
+        break
+" 2>$null
+        if (-not $cuda12Bin -or [string]::IsNullOrEmpty($cuda12Bin)) {
+            Write-Host "  WARNING: CUDA 12.x not found (onnxruntime-gpu 1.20.2 requires CUDA 12.x)" -ForegroundColor Yellow
+            Write-Host "  Falling back to CPU mode (MediaPipe). Use -CpuOnly to suppress this warning." -ForegroundColor Yellow
+            $useGpu = $false
+        }
+    }
+
+    if ($useGpu) {
+        $extractArgs += @('--gpu')
+        if ($GpuWorkers -gt 0) {
+            $extractArgs += @('--gpu-workers', $GpuWorkers.ToString())
+        }
+        Write-Host "  GPU mode: YuNet ONNX Runtime CUDA" -ForegroundColor Green
+
+        # Ensure PyTorch's cuDNN DLLs are on PATH for ONNX Runtime CUDA provider
+        $torchLib = & $Venv -c "import torch, os; lib = os.path.join(os.path.dirname(torch.__file__), 'lib'); print(lib) if os.path.isdir(lib) else print('')" 2>$null
+        if ($torchLib -and -not [string]::IsNullOrEmpty($torchLib)) {
+            $env:PATH = $torchLib + ";" + $env:PATH
+            Write-Host "  Added torch lib to PATH: $torchLib" -ForegroundColor DarkGray
+        }
+        # Also ensure CUDA 12.x bin is on PATH (for cudart, cublas, etc.)
+        if ($cuda12Bin -and -not [string]::IsNullOrEmpty($cuda12Bin)) {
+            $env:PATH = $cuda12Bin + ";" + $env:PATH
+            Write-Host "  Added CUDA 12.x bin to PATH: $cuda12Bin" -ForegroundColor DarkGray
+        }
+    } else {
+        $extractArgs += @('--no-gpu')
+        $extractArgs += @('--workers', '0')  # 0 = all CPU cores
+        Write-Host "  CPU-only mode (MediaPipe)" -ForegroundColor Yellow
+    }
+
+    # Quality gates
+    $extractArgs += @('--min-sqi', '0.05')
+    $extractArgs += @('--max-nan-features', '2')
+
+    # Quick mode
     if ($Quick) {
         $extractArgs += @('--max-per-class', '20')
         Write-Host "  Quick mode: max 20 per class" -ForegroundColor Yellow
     }
-    $extractArgs += @('--workers', '0')
+
+    # Resume support
+    if ($Resume) {
+        $extractArgs += @('--resume')
+        Write-Host "  Resume mode: will continue from checkpoint" -ForegroundColor Yellow
+    }
+    if ($Start -ge 0) {
+        $extractArgs += @('--start', $Start.ToString())
+    }
+    if ($End -ge 0) {
+        $extractArgs += @('--end', $End.ToString())
+    }
 
     $stderr_log = Join-Path $OutRoot 'rppg\extract_stderr.log'
     $null = New-Item -ItemType Directory -Force -Path (Join-Path $OutRoot 'rppg')
 
-    Write-Host "  Extracting features (workers=0=all cores)..."
+    Write-Host "  Extracting features..."
     Write-Host "  stderr log: $stderr_log"
     & $Venv (Join-Path $Working 'RPPG\extract_dataset_features.py') @extractArgs 2> $stderr_log
     if ($LASTEXITCODE -ne 0) {
@@ -186,13 +282,27 @@ if (Test-Artifact $FusedCsv) {
     exit 1
 } else {
     $visualDir = Join-Path $OutRoot 'visual'
+    $framesRoot = Join-Path $OutRoot 'frames\frame_sequences'
     $null = New-Item -ItemType Directory -Force -Path $visualDir
-    Write-Host "  Extracting visual features for rPPG-CSV videos, fusing, creating splits..."
-    & $Venv (Join-Path $Working 'visual\pipeline.py') `
-        --video-root $env:DFDC_DATASET_PATH `
-        --rppg-csv $RppgCsv `
-        --output-dir $visualDir `
-        --fuse --create-splits
+
+    # Check if stage-1 frames exist
+    if (Test-Path $framesRoot) {
+        Write-Host "  Using stage-1 frames from $framesRoot" -ForegroundColor Green
+        Write-Host "  Extracting visual features for rPPG-CSV videos, fusing, creating splits..."
+        & $Venv (Join-Path $Working 'visual\pipeline.py') `
+            --frames-root $framesRoot `
+            --rppg-csv $RppgCsv `
+            --output-dir $visualDir `
+            --fuse --create-splits
+    } else {
+        Write-Host "  Stage-1 frames not found; extracting visual features directly from videos" -ForegroundColor Yellow
+        Write-Host "  Extracting visual features from videos, fusing, creating splits..."
+        & $Venv (Join-Path $Working 'visual\pipeline.py') `
+            --video-root $env:DFDC_DATASET_PATH `
+            --rppg-csv $RppgCsv `
+            --output-dir $visualDir `
+            --fuse --create-splits
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "FAILED: visual extraction/fusion (exit $LASTEXITCODE)" -ForegroundColor Red
         exit 1
@@ -281,11 +391,16 @@ Write-Host ""
 Write-Host "Project structure:"
 Write-Host "  WORKING/"
 Write-Host "    frame/           Stage 1: YOLO face detection + quality gating (30 fps)"
-Write-Host "    RPPG/            Stage 2: MediaPipe -> POS/CHROM -> 20 features"
+Write-Host "    RPPG/            Stage 2: MediaPipe/YuNet -> POS/CHROM -> 24 features"
 Write-Host "    visual/          Stage 3: ResNet50 + handcrafted -> 39 visual features"
-Write-Host "    quantum/         Stage 4: QAOA(59->3) -> Hybrid VQC -> P(real)"
+Write-Host "    quantum/         Stage 4: QAOA(63->3) -> Hybrid VQC -> P(real)"
 Write-Host "    run_pipeline.py  End-to-end orchestrator"
 Write-Host "  frontend/          React + Vite UI (server.py API on :8000)"
+Write-Host ""
+Write-Host "GPU-accelerated rPPG extraction:"
+Write-Host "  Default: YuNet ONNX Runtime CUDA (8 workers)"
+Write-Host "  Override: -CpuOnly for MediaPipe CPU, -GpuWorkers N to set parallelism"
+Write-Host "  Checkpoint/resume: -Resume, -Start N, -End N"
 Write-Host ""
 Write-Host "To run the web UI:"
 Write-Host "  Terminal 1:  cd frontend; python server.py"
@@ -294,3 +409,7 @@ Write-Host ""
 Write-Host "To run inference on any video:"
 Write-Host "  cd WORKING"
 Write-Host "  python run_pipeline.py --source VIDEO.mp4 --method POS"
+Write-Host ""
+Write-Host "To re-run full rPPG extraction with GPU:"
+Write-Host "  cd WORKING"
+Write-Host "  python RPPG/extract_dataset_features.py --method POS --gpu --gpu-workers 8"

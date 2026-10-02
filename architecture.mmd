@@ -1,0 +1,239 @@
+flowchart TB
+    %% ========================================================================
+    %% DEEPFAKE VIDEO DETECTION FOR KYC -- SYSTEM ARCHITECTURE
+    %% ========================================================================
+
+    %% PRESENTATION / CLIENT LAYER
+    subgraph Client["Presentation / Client Layer"]
+        Browser["Web Browser\n(React 18 + Vite)"]
+        UploadZone["UploadZone\nDrag-drop / file picker\n(video, max 200 MB)"]
+        ProcessingView["ProcessingView\n7-stage timeline + progress\nSSE live updates"]
+        VerdictCard["VerdictCard\nREAL / FAKE verdict\nConfidence ring (P(live))"]
+        SignalPanel["SignalPanel\nrPPG waveform chart\n(decimated max 600 pts)"]
+        
+        Browser --> UploadZone
+        Browser --> ProcessingView
+        Browser --> VerdictCard
+        Browser --> SignalPanel
+    end
+
+    %% API / COMMUNICATION LAYER
+    subgraph API["API / Communication Layer\n(Stdlib ThreadingHTTPServer :8000)"]
+        POSTDetect["POST /api/detect\nUpload video -> spawn job\nReturns {job_id}"]
+        GETJob["GET /api/jobs/<id>\nJob status, lines, result"]
+        GETEvents["GET /api/jobs/<id>/events\nSSE stream: line / stage / result / error"]
+        GETPrevious["GET /api/previous\nLast canonical result"]
+        GETHealth["GET /api/health\nServer + artifact status"]
+        GETArtifacts["GET /api/artifacts?dir=\nList output files"]
+        GETFiles["GET /api/files?rel=\nServe artifact file"]
+        
+        JobQueue["Job Queue\nMax 2 concurrent\nSemaphore-protected"]
+        JobTTL["Job TTL: 1 hour\nAuto-prune"]
+        RateLimit["Rate Limit\n10 req/min/IP"]
+        UploadValidation["Upload Validation\nFile signature (MP4/AVI/WEBM)\nPath traversal protection"]
+    end
+
+    %% APPLICATION / BUSINESS LOGIC
+    subgraph AppLogic["Application / Business Logic Layer"]
+        PipelineEntry["run_pipeline.py\n--source video.mp4\n--method POS|CHROM\n--out result.json"]
+        Stage1["Stage 1: Frame Sampling & Quality\nWORKING/frame/pipeline.py"]
+        Stage2["Stage 2: rPPG Feature Extraction\nWORKING/RPPG/pipeline.py"]
+        Stage3["Stage 3: Visual Feature Extraction\nWORKING/visual/extractor.py"]
+        Stage4["Stage 4: Quantum Decision (Fused)\nWORKING/quantum/pipeline.py"]
+        FuseFeatures["Fuse rPPG + Visual\n63 features -> QAOA -> 3 features"]
+        EmitSignal["Emit Signal JSON\nDecimated waveform for UI"]
+        
+        PipelineEntry --> Stage1
+        Stage1 --> Stage2
+        Stage1 --> Stage3
+        Stage2 --> FuseFeatures
+        Stage3 --> FuseFeatures
+        FuseFeatures --> Stage4
+        Stage2 -.-> EmitSignal
+        Stage4 --> PipelineEntry
+    end
+
+    %% PROCESSING / AI/ML LAYER
+    subgraph ML["Processing / AI/ML Layer"]
+        FrameIngestor["FrameIngestor\nSample @ 30 FPS (configurable)"]
+        YOLOFace["YOLOv8n-face (lindevs)\nFace detection @ 320px"]
+        QualityAssessor["FrameQualityAssessor\nBlur (Laplacian var >= 3)\nDark (<30) / Bright (>235)\nFace area ratio >= 0.002\nExtreme pose rejection"]
+        FrameOutput["Outputs:\n- Accepted frames (jpg)\n- Face crops (cropped_faces/)\n- Metadata JSONL\n- Summary JSON"]
+        
+        MediaPipeLM["MediaPipe Face Landmarker\n478 landmarks -> ROI masks"]
+        ROIExtract["ROI Extraction\nLeft cheek / Right cheek / Forehead"]
+        POSCHROM["Pulse Reconstruction\nPOS (plane-orthogonal-to-skin)\nCHROM (chrominance-based)"]
+        SignalClean["Signal Cleaning\nDetrend -> Bandpass (0.7-4 Hz)\nZ-normalize"]
+        FeatureComp["Feature Computation\n20 base + 4 probe = 24 features\nHR, SNR, PRV, Entropy, MAD, SQI,\nCross-ROI corr, Phase lag, PTT proxy..."]
+        PQS["Physiological Quality Score (PQS)\n7-component quality tier"]
+        RPPGOutput["RPPGResult:\n- Feature vector (24-d)\n- Combined pulse signal\n- Quality log + warnings\n- PQS score + tier"]
+        
+        ResNet50["ResNet50 Backbone\nGlobal Avg Pool -> 2048-d\nPCA -> 16 deep features"]
+        Handcrafted["Handcrafted Descriptors\n- LBP uniform histogram (10)\n- GLCM texture: contrast, energy,\n  homogeneity, correlation (4)\n- Color stats: mean/std R/G/B (6)\n- DCT frequency energy: low/mid/high (3)\n= 39 visual features"]
+        VisualExtractor["VisualFeatureExtractor\nBatch extract from face crops\nShared PCA (train-only fit)"]
+        VisualOutput["VisualFeatures (39-d)\nPer-video aggregated vector"]
+        
+        FeatureScaler["FeatureScaler (z-score)\nTrain-fitted, saved as JSON"]
+        QAOA["QAOA Feature Selection\np=3 layers, 8 restarts\nSelect 3/63 features\nState-vector simulator (torch)"]
+        VQC["Hybrid VQC (Variational Quantum Circuit)\n3 QML layers, 8 hidden units\nPennyLane + PyTorch\nComplex128 differentiable torch layer"]
+        Decision["Decision Layer\nP(real) >= 0.5 -> REAL\nP(real) < 0.5 -> FAKE\nConfidence = |P(real)-0.5|*2"]
+        Explain["Explainable Output\nDecisionExplanation\n- PhysiologicalEvidence (PQS, verdict)\n- VisualEvidence (optional)\n- Decision logic + coverage\n- Requires verification flag"]
+    end
+
+    %% DATA / STORAGE LAYER
+    subgraph Storage["Data / Storage Layer\n(Scrape/output/ -- gitignored)"]
+        FrameSeq["frames/frame_sequences/video/\n  frames/ (accepted jpg)\n  cropped_faces/ (face crops)\n  frame_metadata.jsonl\n  quality_examples/"]
+        FrameLogs["frames/\n  frame_extraction_log.jsonl\n  frame_extraction_summary.json\n  docs/ (sampling note, checklist, report)"]
+        
+        RPPGCsv["rppg/dataset_features.csv\n24 features + label (1=fake, 0=real)"]
+        RPPGModel["rppg/rppg_classifier.pkl\nRandomForest cross-check\n(untrusted pickle)"]
+        RPPGPlot["rppg/rppg_output.png\nDiagnostic plots"]
+        
+        VisualCsv["visual/visual_features.csv\n39 features + label"]
+        VisualPCA["visual/visual_pca.npz\nShared PCA (train-only fit)"]
+        FusedCsv["visual/fused_features.csv\n63 fused features + label"]
+        ExpSplits["visual/experiments/\n  fused_split.npz (train/val/test)\n  split_indices.npz\n  split_manifest.json"]
+        
+        QAOASelect["quantum/qaoa_selection_fused.json\nSelected 3 feature indices + names"]
+        VQCCkpt["quantum/hybrid_vqc_fused.pt\nTrained VQC weights + metadata\n(feature schema SHA256, threshold)"]
+        Scaler["quantum/feature_scaler_fused.json\nTrain-fitted mean/scale per feature"]
+        QPlots["quantum/*.png\nROC, confusion, calibration,\nfeature importance"]
+        
+        PipelineResult["pipeline/pipeline_result_<job>.json\nFull stage outputs + verdict + diagnostics"]
+        PipelineSignal["pipeline/signal_<job>.json\nDecimated rPPG waveform for UI"]
+        CanonicalResult["pipeline/pipeline_result.json\nCanonical last result for /api/previous"]
+        PipelineExp["pipeline/pipeline_experiments.jsonl\nExperiment log (UUID, metrics, device)"]
+    end
+
+    %% EXTERNAL / INFRASTRUCTURE
+    subgraph External["External / Infrastructure"]
+        DFDC["DFDC Dataset\narchive/DFDC_Dataset/\n(DFDC_DATASET_PATH env)"]
+        EnvConfig[".env / Environment\nMAJ_OUTPUT_ROOT\nDFDC_DATASET_PATH\nALLOWED_ORIGINS\nFRONTEND_PORT"]
+        PythonDeps["Python Runtime 3.11+\nPyTorch, PennyLane, OpenCV\nMediaPipe, NumPy, Pandas\nscikit-learn (RandomForest)"]
+        NodeDeps["Node.js Runtime\nVite, React 18, Motion\nLucide-React"]
+    end
+
+    %% CONNECTIONS -- DATA & CONTROL FLOW
+
+    %% Client -> API
+    UploadZone --> POSTDetect
+    ProcessingView --> GETEvents
+    ProcessingView --> GETJob
+    VerdictCard --> GETPrevious
+    SignalPanel --> GETFiles
+    Browser --> GETHealth
+
+    %% API -> Job Management
+    POSTDetect --> UploadValidation
+    UploadValidation --> JobQueue
+    JobQueue --> JobTTL
+    JobTTL --> RateLimit
+
+    %% Job -> Pipeline (subprocess)
+    JobQueue --> PipelineEntry
+
+    %% Pipeline Stage 1 -> Frame Storage
+    Stage1 --> FrameIngestor
+    FrameIngestor --> YOLOFace
+    YOLOFace --> QualityAssessor
+    QualityAssessor --> FrameOutput
+    FrameOutput --> FrameSeq
+    FrameOutput --> FrameLogs
+
+    %% Pipeline Stage 1 -> Stage 2 & 3 (handoff)
+    Stage1 --> Stage2
+    Stage1 --> Stage3
+
+    %% Pipeline Stage 2 -> RPPG Storage + Features
+    Stage2 --> MediaPipeLM
+    MediaPipeLM --> ROIExtract
+    ROIExtract --> POSCHROM
+    POSCHROM --> SignalClean
+    SignalClean --> FeatureComp
+    FeatureComp --> PQS
+    PQS --> RPPGOutput
+    RPPGOutput --> FuseFeatures
+    RPPGOutput --> RPPGCsv
+    RPPGOutput --> RPPGModel
+    RPPGOutput --> EmitSignal
+
+    %% Pipeline Stage 3 -> Visual Storage + Features
+    Stage3 --> VisualExtractor
+    VisualExtractor --> ResNet50
+    VisualExtractor --> Handcrafted
+    ResNet50 --> VisualOutput
+    Handcrafted --> VisualOutput
+    VisualOutput --> FuseFeatures
+    VisualOutput --> VisualCsv
+    VisualOutput --> VisualPCA
+
+    %% Fusion -> Quantum
+    FuseFeatures --> Stage4
+    Stage4 --> FeatureScaler
+    FeatureScaler --> QAOA
+    QAOA --> VQC
+    VQC --> Decision
+    Decision --> Explain
+    Explain --> Stage4
+
+    %% Stage 4 -> Storage (inference: load)
+    Stage4 --> QAOASelect
+    Stage4 --> VQCCkpt
+    Stage4 --> Scaler
+    %% Stage 4 -> Storage (training: save)
+    Stage4 --> QAOASelect
+    Stage4 --> VQCCkpt
+    Stage4 --> Scaler
+    Stage4 --> QPlots
+
+    %% Pipeline Results -> Storage
+    PipelineEntry --> PipelineResult
+    PipelineEntry --> PipelineSignal
+    PipelineEntry --> CanonicalResult
+    PipelineEntry --> PipelineExp
+
+    %% API -> Storage (artifact serving)
+    GETArtifacts --> FrameSeq
+    GETArtifacts --> RPPGCsv
+    GETArtifacts --> VisualCsv
+    GETArtifacts --> QAOASelect
+    GETArtifacts --> VQCCkpt
+    GETArtifacts --> Scaler
+    GETArtifacts --> QPlots
+    GETFiles --> PipelineSignal
+    GETFiles --> FrameSeq
+    GETFiles --> RPPGPlot
+    GETFiles --> QPlots
+
+    %% Training data flow
+    DFDC --> FrameIngestor
+    DFDC --> MediaPipeLM
+    RPPGCsv --> VisualExtractor
+    RPPGCsv --> FeatureScaler
+    VisualCsv --> FusedCsv
+    FusedCsv --> ExpSplits
+    ExpSplits --> FeatureScaler
+
+    %% Environment & Dependencies (config links)
+    EnvConfig --> API
+    EnvConfig --> Storage
+    EnvConfig --> DFDC
+    PythonDeps --> AppLogic
+    PythonDeps --> API
+    PythonDeps --> ML
+    NodeDeps --> Client
+
+    %% STYLING
+    classDef clientLayer fill:#e3f2fd,stroke:#1565c0,stroke-width:2px;
+    classDef apiLayer fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
+    classDef appLayer fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef mlLayer fill:#fff3e0,stroke:#ef6c00,stroke-width:2px;
+    classDef storageLayer fill:#fce4ec,stroke:#c2185b,stroke-width:2px;
+    classDef externalLayer fill:#eceff1,stroke:#455a64,stroke-width:2px,stroke-dasharray: 5 5;
+
+    class Client,Browser,UploadZone,ProcessingView,VerdictCard,SignalPanel clientLayer;
+    class API,POSTDetect,GETJob,GETEvents,GETPrevious,GETHealth,GETArtifacts,GETFiles,JobQueue,JobTTL,RateLimit,UploadValidation apiLayer;
+    class AppLogic,PipelineEntry,Stage1,Stage2,Stage3,Stage4,FuseFeatures,EmitSignal appLayer;
+    class ML,FrameIngestor,YOLOFace,QualityAssessor,FrameOutput,MediaPipeLM,ROIExtract,POSCHROM,SignalClean,FeatureComp,PQS,RPPGOutput,ResNet50,Handcrafted,VisualExtractor,VisualOutput,FeatureScaler,QAOA,VQC,Decision,Explain mlLayer;
+    class Storage,FrameSeq,FrameLogs,RPPGCsv,RPPGModel,RPPGPlot,VisualCsv,VisualPCA,FusedCsv,ExpSplits,QAOASelect,VQCCkpt,Scaler,QPlots,PipelineResult,PipelineSignal,CanonicalResult,PipelineExp storageLayer;
+    class External,DFDC,EnvConfig,PythonDeps,NodeDeps externalLayer;
