@@ -1,16 +1,29 @@
+# ==============================================================================
+# Deepfake-rPPG KYC — .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------
 # Datasets (large external downloads)
+# ------------------------------------------------------------
 DFDC_Dataset/
 FF++/
 
-# Dev scratch — tests, temp scripts, screenshots, logs (see AGENTS.md)
+# ------------------------------------------------------------
+# Dev scratch — tests, temp scripts, screenshots, logs
+# (see AGENTS.md: Scrape/ is the designated location for all dev artifacts)
+# ------------------------------------------------------------
 Scrape/
 
-# Secrets — keep .env.example tracked
+# ------------------------------------------------------------
+# Secrets — keep .env.example tracked, ignore all others
+# ------------------------------------------------------------
 .env
 .env.*
 !.env.example
 
-# Python caches / virtualenv / build artifacts
+# ------------------------------------------------------------
+# Python caches, virtualenvs, build artifacts
+# ------------------------------------------------------------
 __pycache__/
 *.pyc
 venv/
@@ -19,32 +32,48 @@ venv/
 build/
 *.egg-info/
 
+# ------------------------------------------------------------
 # Node deps, frontend build output, Playwright MCP captures
+# ------------------------------------------------------------
 node_modules/
 dist/
 .playwright-mcp/
 
-# OpenCode tooling deps (commands/*.md stay tracked; .opencode/.gitignore covers its package files)
+# ------------------------------------------------------------
+# OpenCode tooling deps (commands/*.md stay tracked;
+# .opencode/.gitignore covers its package files)
+# ------------------------------------------------------------
 .opencode/node_modules/
 
+# ------------------------------------------------------------
 # Model weights & pickled models (large / regenerated per run)
-# exception: small face detector used by stage 1 stays tracked
+# Exception: small face detector used by stage 1 stays tracked
+# ------------------------------------------------------------
 *.pkl
 *.pt
 !WORKING/frame/weights/yolov8n-face-lindevs.pt
 
-# Generated pipeline datasets/features/results (all output/ dirs are regenerated)
+# ------------------------------------------------------------
+# Generated pipeline datasets / features / results
+# (all output/ dirs are regenerated)
+# ------------------------------------------------------------
 *.csv
 output/
 
+# ------------------------------------------------------------
 # Logs, temp test media
+# ------------------------------------------------------------
 *.log
 WORKING/frame/test*.mp4
 
+# ------------------------------------------------------------
 # Tool-generated output dirs
+# ------------------------------------------------------------
 graphify-out/
 
+# ------------------------------------------------------------
 # IDE / OS noise
+# ------------------------------------------------------------
 .vscode/
 .idea/
 .DS_Store
