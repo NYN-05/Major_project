@@ -52,3 +52,6 @@ Thumbs.db
 .opencode/
 .pytest_cache/
 .github/
+.agents/
+skills-lock.json
+.21st/

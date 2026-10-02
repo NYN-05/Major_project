@@ -10,6 +10,7 @@ import VerdictCard from "./components/VerdictCard.jsx";
 import KeyMetrics from "./components/KeyMetrics.jsx";
 import SignalPanel from "./components/SignalPanel.jsx";
 import CrossCheck from "./components/CrossCheck.jsx";
+import PreviousRun from "./components/PreviousRun.jsx";
 
 export default function App() {
   const [phase, setPhase] = useState("idle"); // idle | selected | running | done | error
@@ -21,10 +22,23 @@ export default function App() {
   const [lastElapsed, setLastElapsed] = useState(null);
   const [lines, setLines] = useState([]);
   const [signalRel, setSignalRel] = useState(null);
+  const [prevRun, setPrevRun] = useState(null);
   const [theme, setTheme] = useTheme();
   const elapsed = useElapsed(phase === "running");
   const elapsedRef = useRef(0);
   elapsedRef.current = elapsed;
+
+  useEffect(() => {
+    let alive = true;
+    previous()
+      .then(({ result }) => {
+        if (alive && result) setPrevRun(result);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   
 
@@ -131,7 +145,17 @@ export default function App() {
             <CrossCheck result={result} />
           </div>
         ) : (
-          <UploadZone phase={phase} onFile={pickFile} />
+          <>
+            <UploadZone phase={phase} onFile={pickFile} />
+            <PreviousRun
+              previous={prevRun}
+              onOpen={() => {
+                setResult(prevRun);
+                setStageIdx(3);
+                setPhase("done");
+              }}
+            />
+          </>
         )}
       </main>
 
