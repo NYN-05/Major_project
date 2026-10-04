@@ -22,7 +22,7 @@ _vqc_cfg = VQCConfig()
 from quantum.data import build_dataset, load_dataset, FEATURE_SETS
 from quantum.evaluation import evaluate_quantum_model, run_baselines
 from quantum.scaling import FeatureScaler, SCALER_FILE
-from quantum.artifacts import schema_digest
+from quantum.artifacts import schema_digest, write_sha256
 from quantum.preprocessing import transform_features
 from quantum.qaoa import (
     QAOASelector,
@@ -272,6 +272,7 @@ def run_pipeline_for_feature_set(
         if isinstance(ckpt, dict) and "metadata" in ckpt:
             ckpt["metadata"]["decision_threshold"] = float(opt_threshold)
             torch.save(ckpt, vqc_cfg.checkpoint_file)
+            write_sha256(vqc_cfg.checkpoint_file)
             print(f"    Saved optimal threshold to checkpoint")
 
     # Evaluate

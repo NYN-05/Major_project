@@ -290,8 +290,23 @@ if (Test-Artifact $FusedCsv) {
     $framesRoot = Join-Path $OutRoot 'frames\frame_sequences'
     $null = New-Item -ItemType Directory -Force -Path $visualDir
 
-    # Check if stage-1 frames exist
+    # Check if stage-1 frames exist for videos present in the rPPG CSV
+    $useStage1Frames = $false
     if (Test-Path $framesRoot) {
+        $rppgStems = @{}
+        foreach ($row in (Import-Csv -LiteralPath $RppgCsv)) {
+            if ($row.video_path) {
+                $rppgStems[([System.IO.Path]::GetFileNameWithoutExtension([string]$row.video_path)).ToLowerInvariant()] = $true
+            }
+        }
+        foreach ($frameDir in @(Get-ChildItem -LiteralPath $framesRoot -Directory -ErrorAction SilentlyContinue)) {
+            if ($rppgStems.ContainsKey($frameDir.Name.ToLowerInvariant())) { $useStage1Frames = $true; break }
+        }
+        if (-not $useStage1Frames) {
+            Write-Host "  Stage-1 frames do not cover the rPPG CSV videos; falling back to video extraction" -ForegroundColor Yellow
+        }
+    }
+    if ($useStage1Frames) {
         Write-Host "  Using stage-1 frames from $framesRoot" -ForegroundColor Green
         Write-Host "  Extracting visual features for rPPG-CSV videos, fusing, creating splits..."
         & $Venv (Join-Path $Working 'visual\pipeline.py') `
