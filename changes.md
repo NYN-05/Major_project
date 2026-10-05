@@ -57,6 +57,7 @@
 | 2026-10-04 16:40 IST | setup_and_run.ps1 | Made the stage-1 frames branch verify that `frames\frame_sequences` directories overlap the rPPG CSV video stems, otherwise falling back to direct video extraction; fixes `ValueError: No extracted visual videos matched the training partition` when unrelated frame folders exist. | Complete |
 | 2026-10-04 16:40 IST | Quantum pipeline | Rewrote the checkpoint `.sha256` sidecar after saving the Youden optimal threshold in `quantum/pipeline.py`, so `load_vqc_model` verification passes and stage 4 evaluation plus baselines complete on a fresh training run instead of raising `Artifact checksum mismatch`. | Complete |
 | 2026-10-04 16:40 IST | Quantum tests | Passed the fused feature-name list into `select_classical` in `test_real_hamiltonian_verification`, fixing a pre-existing `IndexError` that aborted `python -m quantum.tests`; suite now reports 10/10 checks passed. | Complete |
+| 2026-10-05 14:30 IST | Documentation | Scanned entire project and updated broken doc references in `README.md` (removed 5 references to non-existent files, corrected path to `Final_report_draft_V3.pdf`); added this change log entry. | Complete |
 
 ## Historical Entries
 

@@ -259,11 +259,10 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
 
 ## Docs
 
-- `Docs/RMTT_report.md` / `.pdf` — RMTT semester project report (historical snapshot)
-- `Docs/Key_Findings_Contributions_Significance.md` — honest findings (incl. negative result), contributions, significance
-- `Docs/IMMEDIATE_FIX_PLAN.md` — severity-ordered remediation roadmap
-- `Docs/problems.md` — ranked problem analysis
-- `Docs/Bottleneck_Diagnosis.md` — root cause diagnosis
+- `Docs/maj_proj_report_sem_6/SEM6_report/Final_report_draft_V3.pdf` — RMTT semester project report (historical snapshot)
+- `Docs/maj_proj_report_sem_6/research_paper/` — 23+ research papers on deepfake detection, QML, and rPPG
+- `Docs/charts/` — 5 performance comparison charts
+- `Docs/QML/M1-M5.pdf` — 5 Quantum Machine Learning module PDFs
 - `changes.md` — historical development log (Phases 1–10, superseded)
 
 ## Team

@@ -174,7 +174,7 @@ python rppg-pipeline/probe_features.py --max-per-class 120 --workers 8
   (AUC 0.47–0.53), confirming the physiological-signal limitation.
 - The documented next lever is the Phase-4 rPPG method/ROI probe (POS vs CHROM vs
   green-channel; ROI configurations) from the remediation plan
-  (`Docs/DEEPFAKE_KYC_SEQUENTIAL_REMEDIATION_PLAN.md`), not classifier changes.
+  (covered in semester report `Docs/maj_proj_report_sem_6/SEM6_report/`), not classifier changes.
 
 ### Train rPPG Classifier (Side Path - Not Used for Final Verdict)
 

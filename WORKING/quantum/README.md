@@ -99,7 +99,7 @@ python -m quantum.sweep --timeout 600 --out sweep_leaderboard.json
 - **VQC test:** acc 0.552 / AUC-ROC 0.535 / specificity 0.702 / balanced acc 0.499 / ECE 0.068 — confusion `[[177,75],[202,105]]`. **First practical quantum advantage in FAKE detection** (VQC specificity 0.702 vs LR 0.525).
 - **Classical baselines:** best test AUC 0.582 (LogisticRegression), LinearSVC 0.581, GNB 0.568 — same ceiling as the VQC.
 - **Decision bins:** 100% UNCERTAIN at 0.3/0.7 thresholds.
-- **Phase 1C diagnosis** (`threshold_analysis.json`): Case B — test scores lie in [0.428, 0.503], classes do not separate; thresholds cannot fix discrimination. Next lever is the upstream rPPG method/ROI probe (Phase 4 of `Docs/DEEPFAKE_KYC_SEQUENTIAL_REMEDIATION_PLAN.md`).
+- **Phase 1C diagnosis** (`threshold_analysis.json`): Case B — test scores lie in [0.428, 0.503], classes do not separate; thresholds cannot fix discrimination. Next lever is the upstream rPPG method/ROI probe (Phase 4 of the remediation plan, covered in semester report).
 - **Phase 1B experiment** (balanced class weighting in the focal loss): the collapse flipped to all-FAKE (acc 0.444 / specificity 0.974 / AUC 0.486) — still no separation, still 100% UNCERTAIN. Discrimination is the bottleneck, not the loss weighting.
 
 ## Performance Notes
@@ -111,7 +111,7 @@ python -m quantum.sweep --timeout 600 --out sweep_leaderboard.json
 
 ## Remediation Status
 
-Severity-ordered plan in `Docs/DEEPFAKE_KYC_SEQUENTIAL_REMEDIATION_PLAN.md` (24 phases):
+Severity-ordered plan in `Docs/maj_proj_report_sem_6/SEM6_report/` (24 phases, covered by semester report):
 - **Phase 1A (label/probability mapping) — DONE.** Explicit conversion contract + regression test.
 - **Phase 1B (single-class collapse) — intervention tested.** Balanced weighting added to focal loss; flipped collapse but no class separation.
 - **Phase 1C (threshold vs discrimination diagnosis) — DONE.** `threshold_analysis.json` diagnosis: **Case B** — all test scores in [0.428, 0.503], classes don't separate; next lever is upstream rPPG.
