@@ -58,6 +58,7 @@
 | 2026-10-04 16:40 IST | Quantum pipeline | Rewrote the checkpoint `.sha256` sidecar after saving the Youden optimal threshold in `quantum/pipeline.py`, so `load_vqc_model` verification passes and stage 4 evaluation plus baselines complete on a fresh training run instead of raising `Artifact checksum mismatch`. | Complete |
 | 2026-10-04 16:40 IST | Quantum tests | Passed the fused feature-name list into `select_classical` in `test_real_hamiltonian_verification`, fixing a pre-existing `IndexError` that aborted `python -m quantum.tests`; suite now reports 10/10 checks passed. | Complete |
 | 2026-10-05 14:30 IST | Documentation | Scanned entire project and updated broken doc references in `README.md` (removed 5 references to non-existent files, corrected path to `Final_report_draft_V3.pdf`); added this change log entry. | Complete |
+| 2026-10-11 17:30 IST | Decisioning | Removed UNCERTAIN/INCONCLUSIVE/REVIEW REQUIRED decision outcomes; pipeline now produces only REAL or FAKE verdicts (binary). rPPG/visual extraction failures default to FAKE with confidence 0.0. Updated quantum/explain.py, run_pipeline.py, frontend/contract.py, RPPG/quality_analysis.py, quantum/pipeline.py, quantum/__init__.py, AGENTS.md, README.md, frontend/README.md. | Complete |
 
 ## Historical Entries
 

@@ -104,7 +104,7 @@ idle
 4. **Visual** - ResNet50 + handcrafted features from face crops → 39 visual features
 5. **Fusion** - 63 fused features (24 rPPG + 39 visual)
 6. **Quantum** - QAOA feature selection (63 → 3) → Hybrid VQC → P(real)
-7. **Verdict** - Decision bins: REAL (≥0.7), FAKE (≤0.3), UNCERTAIN
+7. **Verdict** - Decision bins: REAL (≥0.5), FAKE (<0.5)
 8. **Artifacts** - Result JSON, signal waveform, frame thumbnails, plots
 
 ## Artifacts Served

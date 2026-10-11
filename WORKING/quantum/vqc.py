@@ -16,6 +16,7 @@ Checkpoints bundle state_dict + metadata so inference can reproduce the
 exact training-time transformation.
 """
 
+import importlib.util
 import json
 import math
 import sys
@@ -31,9 +32,18 @@ from torch.utils.data import DataLoader, TensorDataset
 from quantum.config import VQCConfig
 from quantum.operations import resolve_torch_device
 
+# Configure torch: set high matmul precision for TensorFloat32 on Ampere+ GPUs
+if hasattr(torch, 'set_float32_matmul_precision'):
+    torch.set_float32_matmul_precision('high')
+
 # Suppress torch.compile errors (e.g., missing Triton on Windows) and fall back to eager
 if hasattr(torch, '_dynamo'):
     torch._dynamo.config.suppress_errors = True
+
+# Check Triton availability for torch.compile
+_HAS_TRITON = importlib.util.find_spec('triton') is not None
+_IS_WINDOWS = sys.platform == 'win32'
+
 
 
 def resolve_device():
@@ -314,7 +324,8 @@ class HybridModel(nn.Module):
             nn.Dropout(cfg.dropout),
             nn.Linear(cfg.hidden_units, 1),
         )
-        if hasattr(torch, 'compile'):
+        # Only use torch.compile if Triton is available (not on Windows without Triton)
+        if _HAS_TRITON and not _IS_WINDOWS and hasattr(torch, 'compile'):
             try:
                 head = torch.compile(head, mode='reduce-overhead', fullgraph=False)
             except Exception:
@@ -363,6 +374,8 @@ def load_vqc_model(n_features, cfg=None):
     and "metadata") and legacy bare-state_dict checkpoints. Results are
     cached: a second call with the same (n_features, checkpoint identity)
     returns the already-loaded model on the same device.
+
+    Handles checkpoints saved with torch.compile (which adds _orig_mod prefix).
     """
     cfg = cfg or VQCConfig()
     stat = cfg.checkpoint_file.stat()
@@ -374,6 +387,9 @@ def load_vqc_model(n_features, cfg=None):
     model = HybridModel(n_features, cfg)
     ckpt = torch.load(cfg.checkpoint_file, map_location="cpu", weights_only=True)
     state = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
+    # Handle checkpoints saved with torch.compile (which adds _orig_mod prefix)
+    if any(k.startswith('head._orig_mod.') for k in state.keys()):
+        state = {k.replace('head._orig_mod.', 'head.'): v for k, v in state.items()}
     model.load_state_dict(state)
     model.to(resolve_device())
     model.eval()

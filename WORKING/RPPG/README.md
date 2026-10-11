@@ -125,8 +125,8 @@ pipeline = RPPGPipeline(
 Returns `features=None` when `n_frames_usable < min_usable_frames` (24) **or** when the
 raw features are degenerate (≥ 2 NaN values or `signal_quality_index == 0.0` — a flat/dead
 pulse). Degenerate signals are rejected at the pipeline level instead of being filled with
-"average human" constants (H1). `run_pipeline.py` then emits `INCONCLUSIVE` verdict and
-exits with code 3.
+"average human" constants (H1). `run_pipeline.py` then emits `FAKE` verdict with confidence 0.0 and
+exits with code 0.
 
 ## Data Generation
 

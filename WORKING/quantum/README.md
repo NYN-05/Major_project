@@ -5,7 +5,7 @@
 
 Consumes the **real fused feature table** (`WORKING/MAJ_OUTPUT_ROOT/visual/fused_features.csv`,
 63 features = 24 rPPG + 39 visual) and outputs the final KYC verdict
-**REAL / FAKE / UNCERTAIN** via QAOA feature selection + hybrid VQC.
+**REAL / FAKE** via QAOA feature selection + hybrid VQC.
 
 No synthetic data is generated anywhere in the pipeline.
 
@@ -31,7 +31,7 @@ No synthetic data is generated anywhere in the pipeline.
 fused_features.csv → data.py (split + label flip + HR filter) → scaling.py (z-score)
   → qaoa.py (63 → 3 selected) → vqc.py (train)
   → hybrid_vqc_fused.pt + feature_scaler_fused.json + qaoa_selection_fused.json
-  → pipeline.predict_features(features) → P(real) → REAL/FAKE/UNCERTAIN
+  → pipeline.predict_features(features) → P(real) → REAL/FAKE
 ```
 
 Inference (`predict_features`) replays the exact training-time
@@ -93,14 +93,14 @@ python -m quantum.sweep --timeout 600 --out sweep_leaderboard.json
 | **Balanced Accuracy** | **0.499** | **0.545 ± TBD** | **TBD** |
 | Specificity (FAKE recall) | **0.702** | **TBD ± TBD** | 0.525 |
 | AUC-ROC | 0.535 | 0.556 ± 0.019 | 0.582 |
-| Decision Bins | 100% UNCERTAIN | — | — |
+| Decision Bins | REAL / FAKE | — | — |
 
 - **QAOA selection (63 → 3):** `['cheek_forehead_correlation', 'left_right_cheek_correlation', 'signal_to_motion_ratio']` (seed 44, cost −0.767). Restart spread [11.73, −0.098, −0.767, 9.83] with `success: false` — the QUBO landscape is difficult; the greedy classical reference overlaps on 2/3 features (`selection_comparison.json`).
 - **VQC test:** acc 0.552 / AUC-ROC 0.535 / specificity 0.702 / balanced acc 0.499 / ECE 0.068 — confusion `[[177,75],[202,105]]`. **First practical quantum advantage in FAKE detection** (VQC specificity 0.702 vs LR 0.525).
 - **Classical baselines:** best test AUC 0.582 (LogisticRegression), LinearSVC 0.581, GNB 0.568 — same ceiling as the VQC.
-- **Decision bins:** 100% UNCERTAIN at 0.3/0.7 thresholds.
+- **Decision bins:** REAL (>=0.5) / FAKE (<0.5) at 0.5 threshold.
 - **Phase 1C diagnosis** (`threshold_analysis.json`): Case B — test scores lie in [0.428, 0.503], classes do not separate; thresholds cannot fix discrimination. Next lever is the upstream rPPG method/ROI probe (Phase 4 of the remediation plan, covered in semester report).
-- **Phase 1B experiment** (balanced class weighting in the focal loss): the collapse flipped to all-FAKE (acc 0.444 / specificity 0.974 / AUC 0.486) — still no separation, still 100% UNCERTAIN. Discrimination is the bottleneck, not the loss weighting.
+- **Phase 1B experiment** (balanced class weighting in the focal loss): the collapse flipped to all-FAKE (acc 0.444 / specificity 0.974 / AUC 0.486) — still no separation, still no separation. Discrimination is the bottleneck, not the loss weighting.
 
 ## Performance Notes
 

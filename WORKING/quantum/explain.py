@@ -35,8 +35,7 @@ class ReliabilityLevel(Enum):
     HIGH = "High reliability"
     MODERATE = "Moderate reliability"
     LOW = "Low reliability"
-    UNKNOWN = "Unknown reliability"
-
+    
 
 @dataclass
 class PhysiologicalEvidence:
@@ -50,8 +49,7 @@ class PhysiologicalEvidence:
     snr_db: float = 0.0
     cross_roi_consistency: float = 0.0
     temporal_consistency: float = 0.0
-    reliability_level: ReliabilityLevel = ReliabilityLevel.UNKNOWN
-    insufficient_reason: Optional[str] = None
+    reliability_level: ReliabilityLevel = ReliabilityLevel.LOW
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -66,8 +64,6 @@ class PhysiologicalEvidence:
                 "tier": self.pqs_result.quality_tier,
                 "components": self.pqs_result.components.to_dict(),
             }
-        if self.insufficient_reason:
-            result["insufficient_reason"] = self.insufficient_reason
         return result
 
 
@@ -77,7 +73,7 @@ class VisualEvidence:
     verdict: Optional[Verdict] = None
     probability_fake: float = 0.0
     confidence: float = 0.0
-    reliability_level: ReliabilityLevel = ReliabilityLevel.UNKNOWN
+    reliability_level: ReliabilityLevel = ReliabilityLevel.LOW
     features_used: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -97,7 +93,6 @@ class DecisionExplanation:
     physiological_evidence: PhysiologicalEvidence
     visual_evidence: Optional[VisualEvidence] = None
     decision_logic: str = ""
-    requires_verification: bool = False
     coverage: float = 0.0
     overall_confidence: float = 0.0
 
@@ -107,7 +102,6 @@ class DecisionExplanation:
             "physiological_evidence": self.physiological_evidence.to_dict(),
             "visual_evidence": self.visual_evidence.to_dict() if self.visual_evidence else None,
             "decision_logic": self.decision_logic,
-            "requires_verification": self.requires_verification,
             "coverage": self.coverage,
             "overall_confidence": self.overall_confidence,
         }
@@ -135,8 +129,6 @@ class DecisionExplanation:
             lines.append(f"  Signal Amplitude: {comp.signal_amplitude:.2f}")
             lines.append(f"  Temporal Consistency: {comp.temporal_consistency:.2f}")
         
-        if self.physiological_evidence.insufficient_reason:
-            lines.append(f"  Insufficient Reason: {self.physiological_evidence.insufficient_reason}")
 
         if self.visual_evidence:
             lines.append("")
@@ -149,13 +141,9 @@ class DecisionExplanation:
         lines.extend([
             "",
             f"Decision Logic: {self.decision_logic}",
-            f"Requires Verification: {'Yes' if self.requires_verification else 'No'}",
             f"Coverage: {self.coverage:.1%}",
             f"Overall Confidence: {self.overall_confidence:.2f}",
         ])
-        if self.requires_verification:
-            lines.append("")
-            lines.append("DECISION: Requires additional verification")
         return "\n".join(lines)
 
     def to_json(self, output_path: Optional[Path] = None) -> str:
@@ -192,10 +180,9 @@ def build_explanation(
     
     # --- Physiological Evidence ---
     phys_verdict = Verdict.REAL if prob_real >= cfg.decision_threshold else Verdict.FAKE
-    insufficient_reason = None
     
     # Check PQS quality threshold (for reliability info only, doesn't change verdict)
-    reliability = ReliabilityLevel.UNKNOWN
+    reliability = ReliabilityLevel.LOW
     if pqs_result:
         pqs_score = pqs_result.pqs
         if pqs_score >= 0.7:
@@ -205,7 +192,7 @@ def build_explanation(
         else:
             reliability = ReliabilityLevel.LOW
     else:
-        reliability = ReliabilityLevel.UNKNOWN
+        reliability = ReliabilityLevel.LOW
     
     phys_evidence = PhysiologicalEvidence(
         verdict=phys_verdict,
@@ -218,7 +205,6 @@ def build_explanation(
         cross_roi_consistency=0.0,
         temporal_consistency=0.0,
         reliability_level=reliability,
-        insufficient_reason=None,
     )
     
     if pqs_result:
@@ -261,15 +247,12 @@ def build_explanation(
     if pqs_result:
         overall_confidence = (overall_confidence + pqs_result.pqs) / 2
     
-    # Requires verification based on low confidence
-    requires_verification = overall_confidence < 0.3
     
     return DecisionExplanation(
         final_verdict=final_verdict,
         physiological_evidence=phys_evidence,
         visual_evidence=visual_evidence,
         decision_logic=decision_logic,
-        requires_verification=requires_verification,
         coverage=coverage,
         overall_confidence=overall_confidence,
     )

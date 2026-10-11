@@ -84,3 +84,4 @@ Thumbs.db
 .agents/
 skills-lock.json
 .21st/
+*.txt

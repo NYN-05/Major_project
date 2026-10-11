@@ -2,7 +2,7 @@
 
 QAOA feature selection + a hybrid quantum-classical VQC (PennyLane + PyTorch)
 over the real rPPG feature table, producing the final KYC verdict
-(REAL / FAKE / INSUFFICIENT EVIDENCE / REVIEW REQUIRED).
+(REAL / FAKE).
 
 Modules
 -------

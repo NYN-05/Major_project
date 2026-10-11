@@ -915,9 +915,9 @@ class RPPGPipeline:
         except ValueError:
             # Every ROI trace collapsed (e.g. sparse usable frames in a long
             # clip pushed each ROI below its 30% valid-sample floor). Treat
-            # as no-features (INCONCLUSIVE) rather than crashing inference.
+            # as no-features (no features returned) rather than crashing inference.
             warnings.append(
-                "No valid ROI signals to combine; treating as no-features (INCONCLUSIVE)."
+                "No valid ROI signals to combine; treating as no-features (no features returned)."
             )
             return RPPGResult(
                 fps=fps,
@@ -976,7 +976,7 @@ class RPPGPipeline:
             warnings.append(
                 f"Degenerate rPPG signal (non-finite features: {raw_nan_count}, "
                 f"SQI: {feats.signal_quality_index:.2f} < {self.min_sqi:.2f}); "
-                "treating as no-features (INCONCLUSIVE)."
+                "treating as no-features (no features returned)."
             )
             return RPPGResult(
                 fps=fps,
@@ -998,7 +998,7 @@ class RPPGPipeline:
             warnings.append(
                 f"Degenerate rPPG signal (non-finite features: {raw_nan_count}, "
                 f"SQI: {feats.signal_quality_index:.2f} < {self.min_sqi:.2f}); "
-                "treating as no-features (INCONCLUSIVE)."
+                "treating as no-features (no features returned)."
             )
             return RPPGResult(
                 fps=fps,

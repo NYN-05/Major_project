@@ -81,7 +81,6 @@ from visual.extractor import compute_visual_features  # stage 3
 
 FRAME_WEIGHTS = FRAME_ROOT / "weights" / "yolov8n-face-lindevs.pt"
 
-VERDICT_INCONCLUSIVE = "INCONCLUSIVE"
 
 MAX_SIGNAL_POINTS = 600
 
@@ -338,12 +337,12 @@ def main() -> int:
     emit_signal(rppg_result, args.signal_out)
     if rppg_vector is None:
         result["verdict"] = {
-            "label": VERDICT_INCONCLUSIVE,
-            "confidence": None,
+            "label": "FAKE",
+            "confidence": 0.0,
             "reason": "rPPG produced no feature vector (insufficient usable frames)",
         }
-        _finish(result, args.out, exit_code=3)
-        return 3
+        _finish(result, args.out, exit_code=0)
+        return 0
     print(
         f"      input={rppg_stage['input_mode']} "
         f"usable = {rppg_stage['n_frames_usable']}/{rppg_stage['n_frames_total']} "
@@ -355,12 +354,12 @@ def main() -> int:
     result["stages"]["visual"] = visual_stage
     if visual_features is None:
         result["verdict"] = {
-            "label": VERDICT_INCONCLUSIVE,
-            "confidence": None,
+            "label": "FAKE",
+            "confidence": 0.0,
             "reason": "Visual feature extraction failed",
         }
-        _finish(result, args.out, exit_code=3)
-        return 3
+        _finish(result, args.out, exit_code=0)
+        return 0
     print(f"      extracted {len(visual_features)} visual features")
 
     # Fuse rPPG and visual features

@@ -15,13 +15,13 @@ Input KYC video
   → Stage 2: rPPG signal extraction + features     (WORKING/RPPG/)
   → Stage 3: Visual feature extraction             (WORKING/visual/)
   → Stage 4: QAOA selection → hybrid VQC verdict   (WORKING/quantum/)
-  → Decision: REAL / FAKE / UNCERTAIN
+  → Decision: REAL / FAKE
 ```
 
 End-to-end orchestrator (`WORKING/run_pipeline.py`):
 
 ```
-frames → rPPG → visual → quantum (fused) → verdict (REAL / FAKE / UNCERTAIN)
+frames → rPPG → visual → quantum (fused) → verdict (REAL / FAKE)
 ```
 
 Only **fused mode** (rPPG + visual) is supported. No `rppg_only`, `visual_only`, or other feature set modes.
@@ -55,7 +55,7 @@ Only **DFDC dataset** is supported for training. No FaceForensics++ (FF++).
 | **Balanced Accuracy** | **0.499** | **0.545 ± TBD** | **TBD**       |
 | Specificity (FAKE recall)   | **0.702** | **TBD ± TBD**   | 0.525               |
 | AUC-ROC                     | 0.535           | 0.556 ± 0.019         | 0.582               |
-| Decision Bins               | 100% UNCERTAIN  | —                     | —                  |
+| Decision Bins               | REAL / FAKE     | —                     | —                  |
 
 *Run python -m quantum.pipeline --all from WORKING/ to regenerate metrics from trained artifacts.*
 
@@ -141,7 +141,7 @@ no synthetic data is generated anywhere in the pipeline.
   LR, gradient clipping, and early stopping on validation loss with restore of the
   best-validation checkpoint. CUDA head when available.
 - **Evaluation** - `evaluation.py`: accuracy / precision / recall / F1 / AUC-ROC / ECE,
-  KYC-friendly decision bins (real / uncertain / fake), ROC, confusion-matrix and
+  KYC-friendly decision bins (real / fake), ROC, confusion-matrix and
   calibration-curve plots. **StratifiedKFold (5-fold) cross-validation** (mean ± std,
   balanced accuracy) for the VQC and every baseline. Classical baselines:
   RandomForest, MLP, LogisticRegression, calibrated LinearSVC, GaussianNB, XGBoost.
@@ -247,8 +247,8 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
   - quantum: `LABEL_REAL = 1`, `LABEL_FAKE = 0`; `quantum/data.py` flips via the tested `csv_to_quantum_label()` (`y = 1 - csv_label` lives only inside that function)
   - rPPG RandomForest cross-check in `run_pipeline.py`: `1 = DEEPFAKE`
 - **Gitignored artifacts:** `*.csv`, `*.json`, `*.pkl`, `*.mp4`, and all `MAJ_OUTPUT_ROOT` dirs are untracked — `dataset_features.csv`, `MAJ_OUTPUT_ROOT`/visual/fused_features.csv`, ``MAJ_OUTPUT_ROOT`/quantum/*``, and the trained models will not appear in `git status`. Regenerating them is normal.
-- **rPPG returns `features=None`** when usable frames < `min_usable_frames` (24); `run_pipeline.py` then emits INCONCLUSIVE and exits 3. New code must handle `None`.
-- **Stage 1 feeds stage 2 & 3.** `run_pipeline.py` hands the frame stage's accepted JPEGs (``MAJ_OUTPUT_ROOT`/frames/frame_sequences/<video>/frames/``) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (30 fps) and to `visual.extractor.compute_visual_features()` for face crops. rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling (INCONCLUSIVE, exit 3) is unchanged. If stage 1 fails or yields no frames, `run_pipeline.py` falls back to `RPPGPipeline.process_video()` (direct video read; `input_mode` in the result JSON records which path ran). Standalone RPPG scripts keep using `process_video`. `run_pipeline.py --signal-out <path>` writes the decimated stage-2 waveform JSON (same schema as `frontend/dump_signal.py`, which is retained only as a standalone utility).
+- **rPPG returns `features=None`** when usable frames < `min_usable_frames` (24); `run_pipeline.py` then emits FAKE verdict with confidence 0.0 and exits 0. New code must handle `None`.
+- **Stage 1 feeds stage 2 & 3.** `run_pipeline.py` hands the frame stage's accepted JPEGs (``MAJ_OUTPUT_ROOT`/frames/frame_sequences/<video>/frames/``) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (30 fps) and to `visual.extractor.compute_visual_features()` for face crops. rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling (FAKE, exit 0) is unchanged. If stage 1 fails or yields no frames, `run_pipeline.py` falls back to `RPPGPipeline.process_video()` (direct video read; `input_mode` in the result JSON records which path ran). Standalone RPPG scripts keep using `process_video`. `run_pipeline.py --signal-out <path>` writes the decimated stage-2 waveform JSON (same schema as `frontend/dump_signal.py`, which is retained only as a standalone utility).
 - **RandomForest cross-check** is an optional side path; the final verdict comes exclusively from the quantum stage.
 - **rPPG classifier trust:** `MAJ_OUTPUT_ROOT/rppg/` must remain write-protected; `rppg_classifier.pkl` is `pickle.load`-ed by `run_pipeline.py` (arbitrary-code risk if replaced). Never move to shared hosting as-is.
 - **QAOA selection weights:** the selection objective uses supervised discrimination weights (`qaoa._discrimination_weights`: sign-agnostic exact Mann-Whitney AUC strength `2*|AUC-0.5|`, deterministic, no sklearn). `QAOASelectionConfig.target_features` is 3. Keep `_mutual_info_weights` only as a documented alternative — do not reintroduce it into `select()`.

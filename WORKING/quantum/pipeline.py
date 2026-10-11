@@ -65,7 +65,7 @@ def predict_features(features, feature_set: str = "fused"):
     Reuses the saved training-time artifacts so inference sees exactly
     the training-time transformation:
         train-fitted FeatureScaler -> QAOA-selected indices ->
-        trained hybrid VQC -> P(real) -> KYC verdict (REAL/FAKE/INSUFFICIENT EVIDENCE / REVIEW REQUIRED).
+        trained hybrid VQC -> P(real) -> KYC verdict (REAL/FAKE).
 
     `features` must be a dict keyed by the feature names for the specified feature_set.
 

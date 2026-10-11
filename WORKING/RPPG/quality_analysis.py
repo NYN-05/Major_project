@@ -524,7 +524,7 @@ def analyze_quality_robustness(
             performances.append({
                 'correct': classification_results[vid].get('correct', False),
                 'prob_real': classification_results[vid].get('prob_real', 0.5),
-                'verdict': classification_results[vid].get('verdict', 'UNCERTAIN'),
+                'verdict': classification_results[vid].get('verdict', 'FAKE'),
             })
     
     # Compute correlations
