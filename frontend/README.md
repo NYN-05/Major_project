@@ -13,7 +13,7 @@ The UI drives the **existing** Python pipeline untouched — the backend spawns
 
 - **Frontend**: React + Vite (dev server on `http://localhost:5173`)
 - **Backend**: `server.py` — pure Python stdlib (`http.server`), no pip installs.
-  Serves upload, progress (SSE), results, and artifact files from `WORKING/output/`.
+  Serves upload, progress (SSE), results, and artifact files from `MAJ_OUTPUT_ROOT/`.
 
 ## Layout
 
@@ -68,7 +68,7 @@ npm run preview           # Serves built app (still expects /api on :8000)
 | `/api/jobs/<id>/events` | GET | SSE stream: `line` / `stage` / `result` / `signal` / `error` |
 | `/api/previous` | GET | Last canonical pipeline result (with `_signal`) |
 | `/api/health` | GET | `{ok, platform, running, has_previous, sequences, artifacts}` |
-| `/api/artifacts?dir=` | GET | List files under `output/<rel>` |
+| `/api/artifacts?dir=` | GET | List files under ``MAJ_OUTPUT_ROOT/<rel>` |
 | `/api/files?rel=` | GET | Serve artifact file (path traversal protected) |
 
 ### Upload Limits & Validation
@@ -109,15 +109,15 @@ idle
 
 ## Artifacts Served
 
-The UI reads artifacts from `WORKING/output/` via `/api/files` and `/api/artifacts`:
+The UI reads artifacts from `MAJ_OUTPUT_ROOT/` via `/api/files` and `/api/artifacts`:
 
 | Source | Artifacts |
 |--------|-----------|
-| Stage 1 (frames) | `output/frames/frame_sequences/<job>/frames/*.jpg`, `frame_metadata.jsonl` |
-| Stage 2 (rPPG) | `output/rppg/plots/`, `dataset_features.csv` |
-| Stage 3 (visual) | `output/visual/visual_features.csv`, `fused_features.csv` |
-| Stage 4 (quantum) | `output/quantum/plots/`, `metrics_quantum.json`, `hybrid_vqc_fused.pt` |
-| Pipeline | `output/pipeline/pipeline_result.json` |
+| Stage 1 (frames) | `MAJ_OUTPUT_ROOT/frames/frame_sequences/<job>/frames/*.jpg`, `frame_metadata.jsonl` |
+| Stage 2 (rPPG) | `MAJ_OUTPUT_ROOT/rppg/plots/`, `dataset_features.csv` |
+| Stage 3 (visual) | `MAJ_OUTPUT_ROOT/visual/visual_features.csv`, `fused_features.csv` |
+| Stage 4 (quantum) | `MAJ_OUTPUT_ROOT/quantum/plots/`, `metrics_quantum.json`, `hybrid_vqc_fused.pt` |
+| Pipeline | `MAJ_OUTPUT_ROOT/pipeline/pipeline_result.json` |
 
 ## Environment Variables
 
@@ -128,7 +128,7 @@ The UI reads artifacts from `WORKING/output/` via `/api/files` and `/api/artifac
 
 ## Notes
 
-- Videos are stored temporarily in `WORKING/output/frontend_inbox/`
+- Videos are stored temporarily in `WORKING/MAJ_OUTPUT_ROOT/frontend_inbox/`
 - Each job runs the pipeline at 30 fps sampling; verdicts take 1–4 minutes
   depending on video length
 - A run's evidence (frames, plots, waveform) is readable from the artifact

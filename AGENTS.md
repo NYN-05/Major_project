@@ -36,7 +36,7 @@ WORKING/
   visual/             ResNet50 and handcrafted visual features
   quantum/            QAOA selection, VQC training, and inference
   run_pipeline.py     End-to-end frame → rPPG → visual → quantum pipeline
-  output/             Regenerated, gitignored artifacts
+  output/ (MAJ_OUTPUT_ROOT)  Regenerated, gitignored artifacts
 
 frontend/
   server.py           Standard-library API, uploads, jobs, SSE, and artifacts
@@ -89,8 +89,8 @@ Scrape/               Required location for tests, probes, logs, screenshots,
 
 ## Security Constraints
 
-- Treat `WORKING/output/rppg/rppg_classifier.pkl` as untrusted serialized code.
-- Keep `WORKING/output/rppg/` write-protected during inference.
+- Treat `MAJ_OUTPUT_ROOT/rppg/rppg_classifier.pkl` as untrusted serialized code.
+- Keep `MAJ_OUTPUT_ROOT/rppg/` write-protected during inference.
 - Never move the pickle model to shared hosting without a replacement strategy.
 - Keep upload validation, size limits, path-traversal protection, CORS
   restrictions, concurrency limits, and job timeouts intact.

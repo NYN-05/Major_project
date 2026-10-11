@@ -10,27 +10,26 @@ Quality thresholds **relaxed** for short/low-quality videos.
 
 ## Project Structure
 
-```
+`
 WORKING/frame/
-├── app/
-│   ├── config.py           # Model presets, runtime configuration
-│   ├── detector.py         # YOLO face detection wrapper
-│   ├── pipeline.py         # Single CLI: face pipeline AND frame extraction (was app/main.py)
-│   └── processing.py       # FrameIngestor, FrameQualityAssessor, StorageManager
+├── config.py           # Model presets, runtime configuration
+├── detector.py         # YOLO face detection wrapper
+├── pipeline.py         # Single CLI: face pipeline AND frame extraction
+└── processing.py       # FrameIngestor, FrameQualityAssessor, StorageManager
 ├── weights/
 │   └── yolov8n-face-lindevs.pt   # Auto-downloaded if missing
-├── requirements.txt
 └── README.md
-```
 
-## Module Responsibilities
+
+
+## ## ## Module Responsibilities
 
 | File | Responsibility |
 |------|----------------|
-| `app/pipeline.py` | **Single CLI entry** - `run_frame_sampling_quality_layer()` (used by `run_pipeline.py`) plus the standalone face pipeline and frame-extraction modes (replacing the legacy `app/main.py` / `app/extract_frames.py`, which no longer exist) |
-| `app/detector.py` | `FaceDetector` - loads YOLO weights, runs inference, returns face boxes + confidences |
-| `app/processing.py` | `FrameIngestor`, `FrameQualityAssessor`, `StorageManager` implementations |
-| `app/config.py` | Model preset mapping (`MODEL_WEIGHTS`), `build_config()` for normalized paths |
+| `pipeline.py` | **Single CLI entry** - `run_frame_sampling_quality_layer()` (used by `run_pipeline.py`) plus the standalone face pipeline and frame-extraction modes (replacing the legacy `app/main.py` / `app/extract_frames.py`, which no longer exist) |
+| `detector.py` | `FaceDetector` - loads YOLO weights, runs inference, returns face boxes + confidences |
+| `processing.py` | `FrameIngestor`, `FrameQualityAssessor`, `StorageManager` implementations |
+| `config.py` | Model preset mapping (`MODEL_WEIGHTS`), `build_config()` for normalized paths |
 
 ## Pipeline Flow
 
@@ -39,20 +38,20 @@ Input video
   → FrameIngestor (sample at --sample-fps, default 10 FPS standalone; 30 FPS via run_pipeline.py)
   → FaceDetector (YOLO face detection)
   → FrameQualityAssessor (blur/dark/bright/face-size/pose gates)
-  → Accepted frames saved as JPEGs to output/frames/frame_sequences/<video>/frames/
-  → Per-frame metadata JSONL to output/frames/frame_sequences/<video>/frame_metadata.jsonl
-  → Summary JSON to output/frames/frame_extraction_summary.json
+  → Accepted frames saved as JPEGs to MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frames/
+  → Per-frame metadata JSONL to MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frame_metadata.jsonl
+  → Summary JSON to MAJ_OUTPUT_ROOT/frames/frame_extraction_summary.json
 ```
 
 ## Output Contract (for Stage 2 rPPG & Stage 3 Visual)
 
 | Artifact | Path | Description |
 |----------|------|-------------|
-| **Accepted frames** | `output/frames/frame_sequences/<video>/frames/frame_XXXXXX_tYYYYYYYYYY.jpg` | Sampled frames passing all quality gates |
-| **Frame metadata** | `output/frames/frame_sequences/<video>/frame_metadata.jsonl` | Per-frame: `frame_id`, `source_frame_id`, `timestamp_ms`, `quality` (accepted, score, rejection_reasons, blur_score, brightness_score, face_confidence, max_face_area_ratio, face_too_small, extreme_pose) |
-| **Extraction log** | `output/frames/frame_extraction_log.jsonl` | Per-video success/failure + summary |
-| **Summary** | `output/frames/frame_extraction_summary.json` | Aggregate: `sampled_frames`, `accepted_frames`, `rejected_frames`, `rejections` (by category), `rppg_checks` (face resolution, color variation), `rppg_input_ready` boolean |
-| **Docs** | `output/frames/docs/` | Sampling rate comparison, quality checklist, examples report |
+| **Accepted frames** | `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frames/frame_XXXXXX_tYYYYYYYYYY.jpg` | Sampled frames passing all quality gates |
+| **Frame metadata** | `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frame_metadata.jsonl` | Per-frame: `frame_id`, `source_frame_id`, `timestamp_ms`, `quality` (accepted, score, rejection_reasons, blur_score, brightness_score, face_confidence, max_face_area_ratio, face_too_small, extreme_pose) |
+| **Extraction log** | `MAJ_OUTPUT_ROOT`/frames/frame_extraction_log.jsonl | Per-video success/failure + summary |
+| **Summary** | `MAJ_OUTPUT_ROOT/frames/frame_extraction_summary.json` | Aggregate: `sampled_frames`, `accepted_frames`, `rejected_frames`, `rejections` (by category), `rppg_checks` (face resolution, color variation), `rppg_input_ready` boolean |
+| **Docs** | `MAJ_OUTPUT_ROOT`/frames/docs/ | Sampling rate comparison, quality checklist, examples report |
 
 ## Quality Rejection Categories (Relaxed Thresholds)
 
@@ -67,9 +66,9 @@ Input video
 
 ## Install
 
-```bash
-pip install -r requirements.txt
-```
+`ash
+pip install torch torchvision opencv-python numpy pyyaml
+`
 
 Requires CUDA 12.1 PyTorch wheels (in requirements.txt). Falls back to CPU when `--device auto` is used and CUDA unavailable.
 
@@ -88,10 +87,10 @@ This automatically runs Stage 1 (frame sampling + quality at 30 fps) and passes 
 
 ```bash
 # From WORKING/frame/
-python app/pipeline.py --source test.mp4 --save-metadata
+python pipeline.py --source test.mp4 --save-metadata
 ```
 
-### Main Options (app/pipeline.py — face pipeline mode)
+### Main Options (pipeline.py — face pipeline mode)
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -102,12 +101,12 @@ python app/pipeline.py --source test.mp4 --save-metadata
 | `--imgsz` | Inference image size | `320` |
 | `--device` | `auto`, `cpu`, `gpu`, `cuda`, or GPU index | `auto` |
 | `--half` | Enable FP16 on CUDA | off |
-| `--output-root` | Root output folder | `WORKING/output/frames/annotated` |
+| `--output-root` | Root output folder | `WORKING/output/frames/annotated` (or `MAJ_OUTPUT_ROOT/frames/annotated`) |
 | `--display` | Show live annotated window | off |
 | `--save-metadata` | Write JSONL metadata per frame | off |
 | `--max-io-workers` | Storage thread pool size | `4` |
 
-### Extraction Script Options (app/pipeline.py — extraction mode)
+### Extraction Script Options (pipeline.py — extraction mode)
 
 | Option | Description | Default |
 |--------|-------------|---------|

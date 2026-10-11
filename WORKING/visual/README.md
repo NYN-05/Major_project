@@ -50,8 +50,8 @@ Stage-1 frames (JPEGs) + cropped_faces/
   → VisualFeatureExtractor (ResNet50 + handcrafted)
   → Shared training PCA (fit once on training videos) → averaged across frames
   → VisualFeatures dataclass (39-dim vector)
-  → CSV: output/visual/visual_features.csv
-  → fuse_features() with rPPG CSV → fused_features.csv (63 features)
+  → CSV: MAJ_OUTPUT_ROOT/visual/visual_features.csv
+  → fuse_features() with rPPG CSV → MAJ_OUTPUT_ROOT/visual/fused_features.csv (63 features)
   → create_experiment_splits() → metadata-aware grouped train/val/test splits
 ```
 
@@ -81,8 +81,8 @@ pip install torchvision scikit-image
 ```bash
 # From WORKING/
 python visual/pipeline.py \
-  --frames-root output/frames/frame_sequences \
-  --rppg-csv ../output/rppg/dataset_features.csv \
+  --frames-root MAJ_OUTPUT_ROOT/frames/frame_sequences \
+  --rppg-csv MAJ_OUTPUT_ROOT/rppg/dataset_features.csv \
   --fuse \
   --create-splits
 ```
@@ -102,12 +102,12 @@ Options:
 ```bash
 python visual/pipeline.py \
   --video-root archive/DFDC_Dataset \
-  --rppg-csv ../output/rppg/dataset_features.csv \
+  --rppg-csv MAJ_OUTPUT_ROOT/rppg/dataset_features.csv \
   --fuse \
   --create-splits
 ```
 
-## Output Files (in `WORKING/output/visual/`)
+## Output Files (in `MAJ_OUTPUT_ROOT`/visual/)
 
 | File | Description |
 |------|-------------|
@@ -124,10 +124,10 @@ python visual/pipeline.py \
 ## Integration with End-to-End Pipeline
 
 `run_pipeline.py` calls `compute_visual_features()` with:
-- `frames_dir`: `output/frames/frame_sequences/<video>/frames/`
-- Uses face crops from `output/frames/frame_sequences/<video>/cropped_faces/`
+- `frames_dir`: `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frames/`
+- Uses face crops from `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/cropped_faces/`
 - Falls back to full frames + center crop if crops unavailable
-- Loads `output/visual/visual_pca.npz`; inference never fits PCA or falls back to
+- Loads `MAJ_OUTPUT_ROOT/visual/visual_pca.npz`; inference never fits PCA or falls back to
   raw-dimension truncation. Generate this artifact with the batch extraction command
   before serving inference.
 

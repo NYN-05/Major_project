@@ -3,7 +3,7 @@
 **Component 4** of the deepfake-verification system under `WORKING/`:
 `frame/` → `RPPG/` → `visual/` → `quantum/` (this directory).
 
-Consumes the **real fused feature table** (`WORKING/output/visual/fused_features.csv`,
+Consumes the **real fused feature table** (`WORKING/MAJ_OUTPUT_ROOT/visual/fused_features.csv`,
 63 features = 24 rPPG + 39 visual) and outputs the final KYC verdict
 **REAL / FAKE / UNCERTAIN** via QAOA feature selection + hybrid VQC.
 
@@ -39,7 +39,7 @@ transformation: fitted scaler → QAOA-selected indices → trained VQC.
 
 ## Artifacts
 
-All regenerated and gitignored under `WORKING/output/quantum/`:
+All regenerated and gitignored under `WORKING/MAJ_OUTPUT_ROOT/quantum/`:
 `data_fused.npz`, `split_manifest_fused.json`, `qaoa_selection_fused.json`, `selection_comparison.json`,
 `feature_scaler_fused.json`, `hybrid_vqc_fused.pt`, `training_log.jsonl`, `metrics_quantum.json`,
 `metrics_baselines.json`, `threshold_analysis.json`, and the three PNG plots.
@@ -121,14 +121,14 @@ Severity-ordered plan in `Docs/maj_proj_report_sem_6/SEM6_report/` (24 phases, c
 
 `run_pipeline.py` calls `predict_features()` from `quantum.pipeline` as the single inference entry point.
 Requires pre-trained fused artifacts:
-- `output/quantum/qaoa_selection_fused.json`
-- `output/quantum/feature_scaler_fused.json`
-- `output/quantum/hybrid_vqc_fused.pt`
+- `MAJ_OUTPUT_ROOT/quantum/qaoa_selection_fused.json`
+- `MAJ_OUTPUT_ROOT/quantum/feature_scaler_fused.json`
+- `MAJ_OUTPUT_ROOT/quantum/hybrid_vqc_fused.pt`
 
 If missing, run from `WORKING/`:
 ```bash
 export DFDC_DATASET_PATH=/path/to/DFDC_Dataset
 python rppg-pipeline/extract_dataset_features.py --workers 0 --gpu
-python visual/pipeline.py --frames-root output/frames/frame_sequences --rppg-csv ../output/rppg/dataset_features.csv --fuse --create-splits
+python visual/pipeline.py --frames-root MAJ_OUTPUT_ROOT/frames/frame_sequences --rppg-csv MAJ_OUTPUT_ROOT/rppg/dataset_features.csv --fuse --create-splits
 python -m quantum.pipeline --all
 ```

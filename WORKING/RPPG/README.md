@@ -4,7 +4,7 @@
 `frame/` (stage 1) → `RPPG/` (this directory, stage 2) → `visual/` (stage 3) → `quantum/` (stage 4).
 
 Extracts **24** physiological features from facial video via remote photoplethysmography (rPPG) (20 base + 4 Phase 4 probe).
-The feature table `output/rppg/dataset_features.csv` is the **direct data source** for the quantum
+The feature table `MAJ_OUTPUT_ROOT/rppg/dataset_features.csv` is the **direct data source** for the quantum
 decision layer (`WORKING/quantum/`): it consumes the 24 rPPG features as-is (no synthetic data),
 flips the label convention (CSV `1 = fake` → quantum `0 = fake`), and builds its
 training/eval splits from this table.
@@ -66,7 +66,7 @@ pipeline = RPPGPipeline(
 | `process_frames(frames_dir, metadata_path, fps)` | Stage-1 accepted frames + JSONL | **Called by `run_pipeline.py`** (stage-1 handoff) |
 
 **Stage-1 handoff path** (used by `run_pipeline.py`):
-- Receives accepted JPEGs from `output/frames/frame_sequences/<video>/frames/`
+- Receives accepted JPEGs from `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frames/`
 - Receives `frame_metadata.jsonl` with per-frame timestamps
 - Runs at stage-1 sample rate (30 fps)
 - **Skips blur/brightness re-gating** (stage 1 already did this)
@@ -150,7 +150,7 @@ Reads videos from (see `collect_samples()`):
 - `archive/DFDC_Dataset/Fake/` and `Real/` (DFDC phone-style face-swaps)
 - No FaceForensics++ (FF++) support
 
-Writes: `WORKING/output/rppg/dataset_features.csv` (relative to `WORKING/`)
+Writes: `WORKING/MAJ_OUTPUT_ROOT/rppg/dataset_features.csv` (relative to `WORKING/`)
 
 ### Featurability Probe (`probe_features.py`)
 
@@ -165,7 +165,7 @@ python rppg-pipeline/probe_features.py --max-per-class 120 --workers 8
 
 ### Dataset Findings (Validated Sep 2026)
 
-- **Current training table** (`output/rppg/dataset_features.csv`): **Rebuild in progress** — DFDC archive only. This is the **direct, exclusive data source for the quantum layer**; no synthetic data.
+- **Current training table** (`MAJ_OUTPUT_ROOT/rppg/dataset_features.csv`): **Rebuild in progress** — DFDC archive only. This is the **direct, exclusive data source for the quantum layer**; no synthetic data.
 - **Quality caveats**: across all 24 features, per-feature |AUC−0.5| ≤ ~0.06 — rPPG
   features carry limited class signal because face-swap fakes transplant the source
   person's genuine skin/vascular signal. The rPPG features are near chance-level on
@@ -182,7 +182,7 @@ python rppg-pipeline/probe_features.py --max-per-class 120 --workers 8
 python rppg-pipeline/train_classifier.py
 ```
 
-Saves to `WORKING/output/rppg/`:
+Saves to `WORKING/MAJ_OUTPUT_ROOT/rppg/`:
 - `rppg_classifier.pkl` - RandomForest model
 - `rppg_classifier_metadata.json` - Training summary, column metadata
 
@@ -283,7 +283,7 @@ NaN features are filled with physiologically neutral fallbacks (HR=72, SNR=0, et
 rejected as `features=None` before the fallback runs, and `estimate_snr` returns NaN
 (not `-inf`) for zero-power signals so NaN is the single missing-value convention.
 
-## Output Files (in `WORKING/output/rppg/`)
+## Output Files (in `WORKING/MAJ_OUTPUT_ROOT/rppg/`)
 
 | File | Description |
 |------|-------------|

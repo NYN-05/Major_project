@@ -29,35 +29,35 @@ Only **DFDC dataset** is supported for training. No FaceForensics++ (FF++).
 
 ## Repository Layout
 
-| Path                         | Description                                                                                                               |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `WORKING/`                 | Active project root (all four pipeline stages + end-to-end runner)                                                       |
-| `WORKING/frame/`           | Stage 1 - frame sampling, YOLO face detection, quality filtering (has its own `app/` + `requirements.txt`)             |
-| `WORKING/RPPG/`            | Stage 2 - MediaPipe face ROIs → POS/CHROM pulse → 24 physiological features (+ `rppg-pipeline/`, `requirements.txt`) |
-| `WORKING/visual/`          | Stage 3 - ResNet50 + handcrafted visual features from face crops (39 features)                                          |
-| `WORKING/quantum/`         | Stage 4 - QAOA feature selection → hybrid VQC → P(real) → verdict (run via `python -m quantum.pipeline`)        |
-| `WORKING/run_pipeline.py`  | End-to-end orchestrator: frames → rPPG → visual → quantum → verdict                                                     |
-| `WORKING/output/`          | Global regenerated-artifacts root (all `output/` dirs untracked)                                                         |
-| `WORKING/output/frames/`   | Stage 1: `frame_sequences/`, `frame_extraction_*.json(l)`, `docs/`                                                   |
-| `WORKING/output/rppg/`     | Stage 2: `dataset_features.csv`, `rppg_classifier.pkl` + metadata, plots                                               |
-| `WORKING/output/visual/`   | Stage 3: `visual_features.csv`, `fused_features.csv`                                                                  |
-| `WORKING/output/quantum/`  | Stage 4: `data_fused.npz`, `qaoa_selection_fused.json`, `feature_scaler_fused.json`, `hybrid_vqc_fused.pt`, metrics, plots |
-| `WORKING/output/pipeline/` | `run_pipeline.py` result JSON                                                                                           |
-| `frontend/`                | Web UI: React + Vite frontend + stdlib-only API server (port 8000)                                                        |
-| `Docs/`                    | Project docs: RMTT semester report, key findings, remediation plan, problem analysis, bottleneck diagnosis                   |
-| `Scrape/`                  | Dev scratch: tests, temp scripts, debug artifacts (gitignored)                                                            |
+| Path                         | Description                                                                                                                                              |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WORKING/`                 | Active project root (all four pipeline stages + end-to-end runner)                                                                                       |
+| `WORKING/frame/`           | Stage 1 - frame sampling, YOLO face detection, quality filtering (has its own`app/` + `requirements.txt`)                                            |
+| `WORKING/RPPG/`            | Stage 2 - MediaPipe face ROIs → POS/CHROM pulse → 24 physiological features (+`rppg-pipeline/`, `requirements.txt`)                                |
+| `WORKING/visual/`          | Stage 3 - ResNet50 + handcrafted visual features from face crops (39 features)                                                                           |
+| `WORKING/quantum/`         | Stage 4 - QAOA feature selection → hybrid VQC → P(real) → verdict (run via`python -m quantum.pipeline`)                                             |
+| `WORKING/run_pipeline.py`  | End-to-end orchestrator: frames → rPPG → visual → quantum → verdict                                                                                  |
+| `WORKING/`MAJ_OUTPUT_ROOT`          | Default global regenerated-artifacts root (all `MAJ_OUTPUT_ROOT` dirs untracked); configurable via `MAJ_OUTPUT_ROOT` env var (defaults to `Scrape/output/`) |
+| `MAJ_OUTPUT_ROOT`/frames/   | Stage 1:`frame_sequences/`, `frame_extraction_*.json(l)`, `docs/`                                                                                  |
+| `MAJ_OUTPUT_ROOT`/rppg/     | Stage 2:`dataset_features.csv`, `rppg_classifier.pkl` + metadata, plots                                                                              |
+| `MAJ_OUTPUT_ROOT`/visual/   | Stage 3:`visual_features.csv`, `fused_features.csv`                                                                                                  |
+| `MAJ_OUTPUT_ROOT`/quantum/  | Stage 4:`data_fused.npz`, `qaoa_selection_fused.json`, `feature_scaler_fused.json`, `hybrid_vqc_fused.pt`, metrics, plots                        |
+| `MAJ_OUTPUT_ROOT`/pipeline/ | `run_pipeline.py` result JSON                                                                                                                          |
+| `frontend/`                | Web UI: React + Vite frontend + stdlib-only API server (port 8000)                                                                                       |
+| `Docs/`                    | Project docs: RMTT semester report, key findings, remediation plan, problem analysis, bottleneck diagnosis                                               |
+| `Scrape/`                  | Dev scratch: tests, temp scripts, debug artifacts (gitignored)                                                                                           |
 
 ## Current Performance (Fused Mode, DFDC Only)
 
-| Metric | VQC Test | VQC 5-Fold CV | Best Classical (LR) |
-|--------|----------|---------------|---------------------|
-| Accuracy | TBD | TBD | TBD |
-| **Balanced Accuracy** | **TBD** | **TBD ± TBD** | **TBD** |
-| Specificity (FAKE recall) | **TBD** | **TBD ± TBD** | TBD |
-| AUC-ROC | TBD | TBD ± TBD | TBD |
-| Decision Bins | TBD | — | — |
+| Metric                      | VQC Test        | VQC 5-Fold CV          | Best Classical (LR) |
+| --------------------------- | --------------- | ---------------------- | ------------------- |
+| Accuracy                    | 0.552           | 0.556 ± 0.019         | TBD                 |
+| **Balanced Accuracy** | **0.499** | **0.545 ± TBD** | **TBD**       |
+| Specificity (FAKE recall)   | **0.702** | **TBD ± TBD**   | 0.525               |
+| AUC-ROC                     | 0.535           | 0.556 ± 0.019         | 0.582               |
+| Decision Bins               | 100% UNCERTAIN  | —                     | —                  |
 
-*Artifacts not yet regenerated — run `python -m quantum.pipeline --all` from `WORKING/` after building fused features to produce current metrics.*
+*Run python -m quantum.pipeline --all from WORKING/ to regenerate metrics from trained artifacts.*
 
 ## Components
 
@@ -85,10 +85,10 @@ inter-ROI phase lag / pulse-transit-time proxy, motion contamination,
 spectral/statistical probes (spectral flatness, centroid, kurtosis, phase coherence).
 **Quality thresholds relaxed** for short/low-quality videos: min usable frames 24, min SQI 0.05.
 Features are persisted with labels (1 = fake, 0 = real) in
-`WORKING/output/rppg/dataset_features.csv`, the direct data source for the quantum layer.
+`WORKING/`MAJ_OUTPUT_ROOT/rppg/dataset_features.csv`, the direct data source for the quantum layer.
 
 ```bash
-# From WORKING/RPPG/ - rebuild output/rppg/dataset_features.csv
+# From WORKING/RPPG/ - rebuild `MAJ_OUTPUT_ROOT/rppg/dataset_features.csv`
 #   --workers 0          = all CPU cores
 #   --gpu                = GPU-accelerated face detection (YuNet ONNX CUDA)
 python rppg-pipeline/extract_dataset_features.py --workers 0 --gpu
@@ -108,7 +108,7 @@ Fuses with rPPG features to create the **fused feature set** (63 features) used 
 
 ```bash
 # From WORKING/visual/ - extract visual features from stage-1 frames
-python pipeline.py --frames-root output/frames/frame_sequences --rppg-csv ../output/rppg/dataset_features.csv --fuse --create-splits
+python pipeline.py --frames-root MAJ_OUTPUT_ROOT/frames/frame_sequences --rppg-csv MAJ_OUTPUT_ROOT/rppg/dataset_features.csv --fuse --create-splits
 ```
 
 ### 4. Quantum Model (`WORKING/quantum/`)
@@ -117,8 +117,8 @@ Hybrid classical-quantum decision stage built with PennyLane + PyTorch. It consu
 the **fused (rPPG + visual) 63-feature vector directly** (same names/order as `RPPGFeatures.feature_names()` + `VISUAL_FEATURE_NAMES`);
 no synthetic data is generated anywhere in the pipeline.
 
-- **Data** - `data.py` builds `output/quantum/data_fused.npz` from the real labeled fused feature
-  table `output/visual/fused_features.csv`. 
+- **Data** - `data.py` builds `MAJ_OUTPUT_ROOT`/quantum/data_fused.npz` from the real labeled fused feature
+  table `MAJ_OUTPUT_ROOT`/visual/fused_features.csv`.
   rPPG label `1 = fake` is flipped via the explicit, tested conversion
   `csv_to_quantum_label()` to the quantum convention `LABEL_REAL = 1, LABEL_FAKE = 0`
   (Phase 1A of the remediation plan). HR-plausibility filter (30–220 BPM, non-finite rejection)
@@ -185,14 +185,14 @@ cd frontend && npm install
 python run_pipeline.py --source path/to/video.mp4 --method POS --out result.json
 ```
 
-Requires pre-trained quantum artifacts for **fused mode** (`output/quantum/qaoa_selection_fused.json`, `hybrid_vqc_fused.pt`, `feature_scaler_fused.json`).
+Requires pre-trained quantum artifacts for **fused mode** (`MAJ_OUTPUT_ROOT`/quantum/qaoa_selection_fused.json`, `hybrid_vqc_fused.pt`, `feature_scaler_fused.json`).
 If missing, run once from `WORKING/`:
 
 ```bash
 # Build fused training data first (requires DFDC_DATASET_PATH env var)
 export DFDC_DATASET_PATH=/path/to/DFDC_Dataset
 python rppg-pipeline/extract_dataset_features.py --workers 0 --gpu
-python visual/pipeline.py --frames-root output/frames/frame_sequences --rppg-csv ../output/rppg/dataset_features.csv --fuse --create-splits
+python visual/pipeline.py --frames-root MAJ_OUTPUT_ROOT/frames/frame_sequences --rppg-csv MAJ_OUTPUT_ROOT/rppg/dataset_features.csv --fuse --create-splits
 # Then train quantum model
 python -m quantum.pipeline --all
 ```
@@ -217,7 +217,7 @@ GET  /api/jobs/<id>           {done, error, video, signal, lines[-400:], result}
 GET  /api/jobs/<id>/events    SSE: line / stage / result / signal / error
 GET  /api/previous            last canonical pipeline result (with _signal)
 GET  /api/health              {ok, platform, running, has_previous, sequences, artifacts}
-GET  /api/artifacts?dir=      list files under output/<rel>
+GET  /api/artifacts?dir=      list files under MAJ_OUTPUT_ROOT/<rel>
 GET  /api/files?rel=          serve artifact file (path traversal protected)
 ```
 
@@ -238,7 +238,7 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
 
 ## Verified Constraints (do not break)
 
-- **No synthetic data.** The quantum layer consumes only the real fused feature table `output/visual/fused_features.csv`. Never reintroduce a generator or a transform/bridge layer.
+- **No synthetic data.** The quantum layer consumes only the real fused feature table `MAJ_OUTPUT_ROOT`/visual/fused_features.csv`. Never reintroduce a generator or a transform/bridge layer.
 - **Feature contract:** `FUSED_FEATURE_NAMES` in `quantum/config.py` (63 features = 24 rPPG + 39 visual) must stay identical in name AND order to `RPPGFeatures.feature_names()` + `VISUAL_FEATURE_NAMES`. Keep the two lists in sync; `test_feature_contract_sync` guards it.
 - **Only fused mode supported.** No `rppg_only`, `visual_only`, `rppg_base`, `rppg_cross_roi`, or ablation feature sets.
 - **Only DFDC dataset supported.** No FaceForensics++ (FF++). `DFDC_DATASET_PATH` env var must point to `archive/DFDC_Dataset`.
@@ -246,11 +246,11 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
   - rPPG CSV: `1 = fake, 0 = real`
   - quantum: `LABEL_REAL = 1`, `LABEL_FAKE = 0`; `quantum/data.py` flips via the tested `csv_to_quantum_label()` (`y = 1 - csv_label` lives only inside that function)
   - rPPG RandomForest cross-check in `run_pipeline.py`: `1 = DEEPFAKE`
-- **Gitignored artifacts:** `*.csv`, `*.json`, `*.pkl`, `*.mp4`, and all `output/` dirs are untracked — `dataset_features.csv`, `output/visual/fused_features.csv`, `output/quantum/*`, and the trained models will not appear in `git status`. Regenerating them is normal.
+- **Gitignored artifacts:** `*.csv`, `*.json`, `*.pkl`, `*.mp4`, and all `MAJ_OUTPUT_ROOT` dirs are untracked — `dataset_features.csv`, `MAJ_OUTPUT_ROOT`/visual/fused_features.csv`, ``MAJ_OUTPUT_ROOT`/quantum/*``, and the trained models will not appear in `git status`. Regenerating them is normal.
 - **rPPG returns `features=None`** when usable frames < `min_usable_frames` (24); `run_pipeline.py` then emits INCONCLUSIVE and exits 3. New code must handle `None`.
-- **Stage 1 feeds stage 2 & 3.** `run_pipeline.py` hands the frame stage's accepted JPEGs (`output/frames/frame_sequences/<video>/frames/`) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (30 fps) and to `visual.extractor.compute_visual_features()` for face crops. rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling (INCONCLUSIVE, exit 3) is unchanged. If stage 1 fails or yields no frames, `run_pipeline.py` falls back to `RPPGPipeline.process_video()` (direct video read; `input_mode` in the result JSON records which path ran). Standalone RPPG scripts keep using `process_video`. `run_pipeline.py --signal-out <path>` writes the decimated stage-2 waveform JSON (same schema as `frontend/dump_signal.py`, which is retained only as a standalone utility).
+- **Stage 1 feeds stage 2 & 3.** `run_pipeline.py` hands the frame stage's accepted JPEGs (``MAJ_OUTPUT_ROOT`/frames/frame_sequences/<video>/frames/``) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (30 fps) and to `visual.extractor.compute_visual_features()` for face crops. rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling (INCONCLUSIVE, exit 3) is unchanged. If stage 1 fails or yields no frames, `run_pipeline.py` falls back to `RPPGPipeline.process_video()` (direct video read; `input_mode` in the result JSON records which path ran). Standalone RPPG scripts keep using `process_video`. `run_pipeline.py --signal-out <path>` writes the decimated stage-2 waveform JSON (same schema as `frontend/dump_signal.py`, which is retained only as a standalone utility).
 - **RandomForest cross-check** is an optional side path; the final verdict comes exclusively from the quantum stage.
-- **rPPG classifier trust:** `output/rppg/` must remain write-protected; `rppg_classifier.pkl` is `pickle.load`-ed by `run_pipeline.py` (arbitrary-code risk if replaced). Never move to shared hosting as-is.
+- **rPPG classifier trust:** `MAJ_OUTPUT_ROOT/rppg/` must remain write-protected; `rppg_classifier.pkl` is `pickle.load`-ed by `run_pipeline.py` (arbitrary-code risk if replaced). Never move to shared hosting as-is.
 - **QAOA selection weights:** the selection objective uses supervised discrimination weights (`qaoa._discrimination_weights`: sign-agnostic exact Mann-Whitney AUC strength `2*|AUC-0.5|`, deterministic, no sklearn). `QAOASelectionConfig.target_features` is 3. Keep `_mutual_info_weights` only as a documented alternative — do not reintroduce it into `select()`.
 - **QAOA ansatz:** `_apply_qaoa` applies precomputed cost gates with `gamma` and X-mixer gates with `beta` separately. Regression guard: `test_beta_alive` in `quantum/tests.py`. Any refactor must keep beta alive and re-run `python -m quantum.tests` + `--all`.
 - **Hamiltonian ≡ classical cost:** `_cost_terms` reproduces `_classical_cost` exactly (verified ~1e-14 on real data) and `pipeline.py` hard-asserts `error < 1e-6`.
