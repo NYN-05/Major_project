@@ -8,12 +8,14 @@ from pathlib import Path
 # Add WORKING directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "WORKING"))
 
-from visual.features import VisualFeatures, VISUAL_FEATURE_NAMES
 from visual.extractor import (
     PCA_PREPROCESSING_VERSION,
     RESNET_FEATURE_DIM,
+    VisualFeatures,
+    VISUAL_FEATURE_NAMES,
     VisualFeatureExtractor,
 )
+from quantum.config import VISUAL_FEATURE_NAMES as QUANTUM_VISUAL_FEATURE_NAMES
 from visual.pipeline import _fit_shared_pca
 
 
@@ -41,6 +43,11 @@ class TestVisualFeatures(unittest.TestCase):
         vec = features.to_vector()
         self.assertEqual(vec.shape, (39,))
         self.assertEqual(vec.dtype, np.float64)
+
+    def test_visual_feature_contract_matches_quantum_config(self):
+        """visual.extractor and quantum.config must agree, name-for-name."""
+        self.assertEqual(list(VISUAL_FEATURE_NAMES), list(QUANTUM_VISUAL_FEATURE_NAMES))
+        self.assertEqual(VISUAL_FEATURE_NAMES, VisualFeatures.feature_names())
 
 
 class TestVisualFeatureExtractor(unittest.TestCase):
@@ -76,13 +83,6 @@ class TestVisualFeatureExtractor(unittest.TestCase):
             self.assertEqual(features.to_vector().shape[0], 39)
         except Exception as e:
             self.skipTest(f"Feature extraction failed: {e}")
-
-    def test_compute_visual_features_from_video(self):
-        """Test visual feature computation from video file."""
-        if not self.has_extractor:
-            self.skipTest("VisualFeatureExtractor not available")
-        # This would need a test video file
-        self.skipTest("Requires test video file")
 
     def test_pca_artifact_round_trip_and_fixed_shape(self):
         """A persisted training PCA can transform the expected ResNet space."""

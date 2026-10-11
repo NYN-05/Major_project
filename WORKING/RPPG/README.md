@@ -3,9 +3,9 @@
 **Component 2** of the deepfake-verification system under `WORKING/`:
 `frame/` (stage 1) → `RPPG/` (this directory, stage 2) → `visual/` (stage 3) → `quantum/` (stage 4).
 
-Extracts **24** physiological features from facial video via remote photoplethysmography (rPPG) (20 base + 4 Phase 4 probe).
+Extracts **20** physiological features from facial video via remote photoplethysmography (rPPG).
 The feature table `MAJ_OUTPUT_ROOT/rppg/dataset_features.csv` is the **direct data source** for the quantum
-decision layer (`WORKING/quantum/`): it consumes the 24 rPPG features as-is (no synthetic data),
+decision layer (`WORKING/quantum/`): it consumes the 20 rPPG features as-is (no synthetic data),
 flips the label convention (CSV `1 = fake` → quantum `0 = fake`), and builds its
 training/eval splits from this table.
 
@@ -15,34 +15,22 @@ Current table: **TBD rows** @30 fps (DFDC archive, rebuild in progress).
 
 ```
 WORKING/RPPG/
-├── rppg/                      # Core rPPG library
-│   ├── __init__.py
-│   ├── face_roi.py           # MediaPipe face landmarks -> motion-compensated ROI extraction (cheeks, forehead; RANSAC stabilization + EMA smoothing, skin-mask-refined polygons)
-│   ├── gpu_face_detector.py  # YuNet ONNX face detector (GPU via ONNX Runtime CUDA EP) for extraction-time face finding
-│   ├── pipeline.py           # RPPGPipeline: video/frames -> features + signals
-│   ├── signal_extraction.py  # POS/CHROM pulse reconstruction (vectorized)
-│   ├── preprocessing.py      # Detrend, bandpass, normalize (cached filters)
-│   ├── features.py           # 24-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations, HR half-diff, peak prominence, morphology, phase lag, motion, stability, spectral flatness, centroid, kurtosis, phase coherence)
-│   └── model_utils.py        # MediaPipe Face Landmarker + Haar cascade download/caching (SHA-256 verified)
-├── rppg-pipeline/            # Training & demo scripts
-│   ├── extract_dataset_features.py  # Build dataset_features.csv from archive/ (--gpu for YuNet)
-│   ├── probe_features.py            # Per-feature AUC probe on a dataset (signal-level study)
-│   ├── train_classifier.py         # Train rPPG RandomForest (side path)
-│   ├── retrain_dfdc.py             # DFDC-only RandomForest retrain with checkpointing
-│   ├── run_on_video.py             # Single video inference
-│   ├── batch_run.py                # Batch processing
-│   ├── run_live_webcam.py          # Webcam demo
-│   ├── streamlit_app.py            # Streamlit UI
-│   ├── debug_run.py                # Debug utilities
-│   ├── _check_video.py             # Video validation
-│   ├── _make_test_video.py         # Synthetic test video generator
-│   └── Scrape/                     # Extraction logs / scratch
-├── train_rppg_full.ps1      # One-shot PowerShell: full extraction + classifier retrain
-├── requirements.txt
+├── __init__.py                   # Package exports (RPPGPipeline, features)
+├── extract_dataset_features.py   # Build dataset_features.csv from archive/ (--gpu for YuNet)
+├── face_roi.py                   # MediaPipe face landmarks -> motion-compensated ROIs (cheeks, forehead; RANSAC + EMA, skin-mask refinement) + bundled model-asset resolution (SHA-256 verified)
+├── features.py                   # 20-feature computation (HR, SNR, PRV, entropy, MAD, SQI, correlations, HR half-diff, peak prominence, morphology, phase lag, motion, stability, spectral flatness, centroid, kurtosis, phase coherence)
+├── gpu_face_detector.py          # YuNet ONNX face detector (GPU via ONNX Runtime CUDA EP)
+├── pipeline.py                   # RPPGPipeline: video/frames -> features + signals
+├── pqs.py                        # Physiological Quality Score (evidence reliability, not verdict)
+├── preprocessing.py              # Detrend, bandpass, normalize (cached filters)
+├── signal_extraction.py          # POS/CHROM pulse reconstruction (vectorized)
+├── train_classifier.py           # Train rPPG RandomForest (side path; --incremental DFDC retrain)
+├── face_landmarker.task          # Bundled MediaPipe Face Landmarker asset
+├── haarcascade_frontalface_default.xml  # Bundled Haar cascade fallback asset
 └── README.md
 ```
 
-## Core Pipeline (`rppg/pipeline.py`)
+## Core Pipeline (`pipeline.py`)
 
 ### `RPPGPipeline` Class
 
@@ -81,7 +69,7 @@ pipeline = RPPGPipeline(
 | `fps` | float | Effective sampling rate |
 | `n_frames_total` | int | Total frames processed |
 | `n_frames_usable` | int | Frames with face detected |
-| `features` | `RPPGFeatures \| None` | **24-feature vector (or None if < 24 usable frames / degenerate signal)** |
+| `features` | `RPPGFeatures \| None` | **20-feature vector (or None if < 24 usable frames / degenerate signal)** |
 | `combined_signal` | `np.ndarray \| None` | Cleaned combined pulse waveform |
 | `left_cheek_signal` | `np.ndarray \| None` | Cleaned left cheek pulse |
 | `right_cheek_signal` | `np.ndarray \| None` | Cleaned right cheek pulse |
@@ -89,7 +77,7 @@ pipeline = RPPGPipeline(
 | `quality_log` | `List[FrameQuality]` | Per-frame quality records |
 | `warnings` | `List[str]` | Runtime warnings |
 
-### 24 Physiological Features (`rppg/features.py`)
+### 20 Physiological Features (`features.py`)
 
 | Feature | Description | Units/Range |
 |---------|-------------|-------------|
@@ -109,37 +97,33 @@ pipeline = RPPGPipeline(
 | `signal_to_motion_ratio` | Log ratio of physiological-band to motion-band spectral power | dB |
 | `peak_amplitude_variability` | Coefficient of variation of systolic peak amplitudes | ratio |
 | `pulse_transit_time_proxy` | Inter-ROI propagation delay (pulse transit time proxy) | ms |
-| `hr_window_std` | Std of per-window HR estimates (pulse stability across the clip) | BPM |
-| `sqi_window_std` | Std of per-window signal quality index | 0-1 |
-| `entropy_window_std` | Std of per-window spectral entropy | 0-1 |
-| `max_hr_deviation_bpm` | Max per-window HR deviation from median HR | BPM |
 | `spectral_flatness` | Geometric/arithmetic mean ratio of in-band PSD (flat=1, tonal<1) | 0-1 |
 | `spectral_centroid` | Center of mass of in-band power spectrum (Hz) | Hz |
 | `kurtosis` | Fisher kurtosis of time-domain pulse waveform (heavy-tailed=artifacts) | ratio |
 | `phase_coherence_lr` | Phase coherence std between left/right cheek signals (lower=more coherent) | 0-1 |
 
-**Feature order is fixed** - must match `FEATURE_NAMES` in `quantum/config.py` and `RPPGFeatures.feature_names()`.
+**Feature order is fixed** - must match `RPPG_FEATURE_NAMES` in `quantum/config.py` and `RPPGFeatures.feature_names()`.
 
 ### Failure Mode
 
 Returns `features=None` when `n_frames_usable < min_usable_frames` (24) **or** when the
 raw features are degenerate (≥ 2 NaN values or `signal_quality_index == 0.0` — a flat/dead
 pulse). Degenerate signals are rejected at the pipeline level instead of being filled with
-"average human" constants (H1). `run_pipeline.py` then emits `FAKE` verdict with confidence 0.0 and
-exits with code 0.
+"average human" constants (H1). `run_pipeline.py` then emits an `INCONCLUSIVE` verdict
+(confidence `null`) and exits with status 3.
 
 ## Data Generation
 
 ### Build Training Feature Table
 
 ```bash
-# From WORKING/RPPG/
+# From WORKING/
 # Full extraction (DFDC only, rebuild in progress):
-python rppg-pipeline/extract_dataset_features.py --workers 0 --gpu
+python RPPG/extract_dataset_features.py --workers 0 --gpu
 
 # Optional flags:
 #   --max-per-class N     cap samples per class (smoke test)
-#   --output <path>       redirect the output CSV (probe runs)
+#   --output <path>       redirect the output CSV
 #   --gpu                 GPU-accelerated face detection (YuNet via ONNX Runtime CUDA)
 #   --gpu-workers N       GPU worker processes (default 8 when --gpu)
 #   --min-sqi N           drop clips below this signal quality index (default 0.10)
@@ -152,21 +136,10 @@ Reads videos from (see `collect_samples()`):
 
 Writes: `WORKING/MAJ_OUTPUT_ROOT/rppg/dataset_features.csv` (relative to `WORKING/`)
 
-### Featurability Probe (`probe_features.py`)
-
-Signal-level study of how much class signal each of the 24 features actually
-carries on a dataset — no classifier involved. Emits per-feature AUC (real vs
-fake) per method (POS/CHROM) per target fps, plus an all-24-feature oracle AUC,
-and a table ranking features.
-
-```bash
-python rppg-pipeline/probe_features.py --max-per-class 120 --workers 8
-```
-
 ### Dataset Findings (Validated Sep 2026)
 
 - **Current training table** (`MAJ_OUTPUT_ROOT/rppg/dataset_features.csv`): **Rebuild in progress** — DFDC archive only. This is the **direct, exclusive data source for the quantum layer**; no synthetic data.
-- **Quality caveats**: across all 24 features, per-feature |AUC−0.5| ≤ ~0.06 — rPPG
+- **Quality caveats**: across all 20 features, per-feature |AUC−0.5| ≤ ~0.06 — rPPG
   features carry limited class signal because face-swap fakes transplant the source
   person's genuine skin/vascular signal. The rPPG features are near chance-level on
   this task; growing the table and expanding the feature set did not lift the ceiling.
@@ -179,7 +152,7 @@ python rppg-pipeline/probe_features.py --max-per-class 120 --workers 8
 ### Train rPPG Classifier (Side Path - Not Used for Final Verdict)
 
 ```bash
-python rppg-pipeline/train_classifier.py
+python RPPG/train_classifier.py
 ```
 
 Saves to `WORKING/MAJ_OUTPUT_ROOT/rppg/`:
@@ -190,28 +163,9 @@ Saves to `WORKING/MAJ_OUTPUT_ROOT/rppg/`:
 
 ## Run Inference
 
-### Single Video (Direct Video Read)
-
 ```bash
-python rppg-pipeline/run_on_video.py path/to/video.mp4 --method POS --plot
-```
-
-### Batch Processing
-
-```bash
-python rppg-pipeline/batch_run.py
-```
-
-### Webcam Demo
-
-```bash
-python rppg-pipeline/run_live_webcam.py
-```
-
-### Streamlit App
-
-```bash
-streamlit run rppg-pipeline/streamlit_app.py
+# End-to-end (recommended) — from WORKING/
+python run_pipeline.py --source path/to/video.mp4 --method POS
 ```
 
 ## Key Optimizations (Completed)
@@ -226,6 +180,7 @@ streamlit run rppg-pipeline/streamlit_app.py
 ## Install
 
 ```bash
+# From the repository root
 pip install -r requirements.txt
 ```
 
@@ -287,7 +242,7 @@ rejected as `features=None` before the fallback runs, and `estimate_snr` returns
 
 | File | Description |
 |------|-------------|
-| `dataset_features.csv` | 24 features + label per video (1=fake, 0=real) |
+| `dataset_features.csv` | 20 features + label per video (1=fake, 0=real) |
 | `rppg_classifier.pkl` | Trained RandomForest (side path) |
 | `rppg_classifier_metadata.json` | Training summary, feature columns, metrics |
 | `plots/` | Diagnostic plots (PSD, waveforms, feature distributions) |
@@ -306,15 +261,14 @@ Measure heart-rate error against contact-PPG reference; report MAE/RMSE.
 - Strong occlusion, masks, or very poor lighting → unreliable features
 - Very low frame rates reduce usable heart-rate range
 - Heavy compression distorts skin-tone cues, weakens rPPG
-- Per-feature |AUC−0.5| ≤ ~0.06 across all 24 features on the current dataset — rPPG features carry
+- Per-feature |AUC−0.5| ≤ ~0.06 across all 20 features on the current dataset — rPPG features carry
   limited class signal for deepfake detection (face-swap fakes transplant
   the source person's genuine skin/vascular signal)
 
 ## Recommended Workflow
 
 1. Add new videos to `archive/DFDC_Dataset/Fake|Real`
-2. Probe the dataset first: `python rppg-pipeline/probe_features.py --max-per-class N --workers 8`
-3. Regenerate features: `python rppg-pipeline/extract_dataset_features.py --workers 0 --gpu`
-4. Retrain classifier (optional): `python rppg-pipeline/train_classifier.py`
-5. Rerun quantum pipeline: `python -m quantum.pipeline --all` (from `WORKING/`)
-6. Test end-to-end: `python run_pipeline.py --source <video> --method POS`
+2. Regenerate features: `python RPPG/extract_dataset_features.py --workers 0 --gpu`
+3. Retrain classifier (optional): `python RPPG/train_classifier.py`
+4. Rerun quantum pipeline: `python -m quantum.pipeline --all` (from `WORKING/`)
+5. Test end-to-end: `python run_pipeline.py --source <video> --method POS`

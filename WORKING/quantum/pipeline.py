@@ -16,18 +16,17 @@ from quantum.config import (
     OUTPUT_DIR,
     QAOASelectionConfig,
     VQCConfig,
+    schema_digest,
+    write_sha256,
 )
-
-_vqc_cfg = VQCConfig()
 from quantum.data import build_dataset, load_dataset, FEATURE_SETS
 from quantum.evaluation import evaluate_quantum_model, run_baselines
-from quantum.scaling import FeatureScaler, SCALER_FILE
-from quantum.artifacts import schema_digest, write_sha256
-from quantum.preprocessing import transform_features
+from quantum.scaling import FeatureScaler, transform_features
 from quantum.qaoa import (
     QAOASelector,
     compare_selections,
     load_selection,
+    remap_selection_to_original_space,
     save_selection,
     select_classical,
     verify_hamiltonian,
@@ -115,8 +114,6 @@ def predict_features(features, feature_set: str = "fused"):
     opt_threshold = ckpt.get("metadata", {}).get("decision_threshold", DecisionConfig().decision_threshold)
     prob_real = float(predict_vqc(model, x_scaled[:, indices])[0])
     
-    # Build explainable output using Phase 11 explain module
-    from quantum.explain import build_explanation
     decision_cfg = DecisionConfig()
     return build_explanation(
         prob_real=prob_real,
@@ -200,12 +197,16 @@ def run_pipeline_for_feature_set(
             "_cost_terms does not reproduce _classical_cost"
         )
         print(f"  Hamiltonian verification OK (max error {error:.2e})")
-        selection = QAOASelector(qaoa_cfg).select(X_train_qaoa, data["y_train"])
+        selection = QAOASelector(qaoa_cfg).select(
+            X_train_qaoa, data["y_train"], feature_names=feat_names_qaoa
+        )
+        # Map QAOA indices back to the original (full-width) feature space
+        # BEFORE saving so persisted indices are directly indexable into the
+        # scaled feature vector used at inference (predict_features).
+        selection = remap_selection_to_original_space(
+            selection, classical_pre, feature_names
+        )
         save_selection(selection, qaoa_cfg.selection_file)
-        # Map QAOA indices back to original feature space
-        if classical_pre is not None:
-            selection["selected_indices"] = [classical_pre[i] for i in selection["selected_indices"]]
-            selection["selected_features"] = [feature_names[i] for i in selection["selected_indices"]]
         print(
             f"  Selected {len(selection['selected_features'])} features: {selection['selected_features']}"
         )

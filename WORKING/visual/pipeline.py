@@ -20,9 +20,9 @@ sys.path.insert(0, str(WORKING_ROOT))
 
 from visual.extractor import (
     VisualFeatureExtractor,
+    iter_video_center_crops,
     load_face_crops_from_frames,
 )
-from visual.features import VisualFeatures, VISUAL_FEATURE_NAMES
 from quantum.operations import (
     OPERATIONS_VERSION,
     cache_key,
@@ -224,29 +224,11 @@ def extract_visual_features_from_videos(
 
     for video_path in video_files:
         try:
-            # Use the existing video helper once for crops, then reuse raw
-            # features after the shared PCA is fitted.
-            import cv2
-            cap = cv2.VideoCapture(str(video_path))
-            if not cap.isOpened():
-                raise IOError(f"Could not open video: {video_path}")
-            native_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-            stride = max(1, round(native_fps / sample_fps))
-            crops = []
-            frame_idx = 0
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                if frame_idx % stride == 0:
-                    h, w = frame.shape[:2]
-                    crop = frame[h // 4:3 * h // 4, w // 4:3 * w // 4]
-                    if crop.size > 0:
-                        crops.append(crop)
-                    if max_frames_per_video and len(crops) >= max_frames_per_video:
-                        break
-                frame_idx += 1
-            cap.release()
+            # Shared center-crop sampler; reuse raw features after the
+            # shared PCA is fitted.
+            crops = iter_video_center_crops(
+                video_path, sample_fps=sample_fps, max_frames=max_frames_per_video
+            )
             if not crops:
                 raise ValueError("No usable frames found")
             video_crops[video_path.stem] = crops

@@ -5,8 +5,9 @@ The quantum model is scored on the held-out test split (accuracy, F1,
 AUC-ROC, ECE, decision bins). The train split is additionally
 cross-validated to report procedure stability (mean +/- std). Classical
 baselines (RandomForest, MLP, LogisticRegression, LinearSVC, GaussianNB,
-XGBoost) run on the same selected features for comparison. Plots are
-delegated to quantum.plots.
+XGBoost) run on the same selected features for comparison. Figure
+helpers for ROC/confusion/calibration PNGs live at the bottom of this
+module (deferred matplotlib/sklearn imports keep module import fast).
 """
 
 import functools
@@ -16,13 +17,7 @@ import os
 import numpy as np
 
 from quantum.config import DecisionConfig, VQCConfig
-from quantum.plots import (
-    plot_calibration_curve,
-    plot_confusion_matrix,
-    plot_roc_curve,
-)
 from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
-from quantum.validation import choose_validation_threshold, repeated_seed_summary
 
 
 def _sklearn():
@@ -259,17 +254,41 @@ def decision_bins(y_true, prob_real, cfg=None, pqs=None):
     }
 
 
+def choose_validation_threshold(y_true, prob_real, *, method="youden"):
+    """Choose a threshold using validation data only."""
+    y = np.asarray(y_true, dtype=int)
+    p = np.asarray(prob_real, dtype=float)
+    arr = np.asarray(p, dtype=np.float64)
+    nan_count = int(np.isnan(arr).sum())
+    inf_count = int(np.isinf(arr).sum())
+    if nan_count + inf_count:
+        raise ValueError(
+            f"Invalid feature vector: nan_count={nan_count}, inf_count={inf_count}"
+        )
+    if len(y) != len(p) or len(np.unique(y)) < 2:
+        raise ValueError("Threshold selection requires paired validation data with both classes")
+    candidates = np.unique(np.r_[0.0, p, 1.0])
+    best = (float("-inf"), 0.5)
+    for threshold in candidates:
+        pred = p >= threshold
+        tp = np.sum(pred & (y == 1))
+        tn = np.sum(~pred & (y == 0))
+        fp = np.sum(pred & (y == 0))
+        fn = np.sum(~pred & (y == 1))
+        sensitivity = tp / max(tp + fn, 1)
+        specificity = tn / max(tn + fp, 1)
+        score = sensitivity + specificity - 1 if method == "youden" else (sensitivity + specificity) / 2
+        if score > best[0]:
+            best = (float(score), float(threshold))
+    return best[1]
+
+
 def optimal_threshold_youden(y_true, prob_real):
     """Compute optimal threshold using Youden's J statistic (max sensitivity + specificity - 1).
     
     Returns the threshold that maximizes J = sensitivity + specificity - 1.
     """
     return choose_validation_threshold(y_true, prob_real, method="youden")
-
-
-def repeated_seed_evaluation(run_fn, seeds=(42, 123, 456, 789, 999)):
-    """Evaluate a fixed experiment over the required deterministic seeds."""
-    return repeated_seed_summary(run_fn, seeds=seeds)
 
 
 def analyze_threshold_behavior(y_true, prob_real, cfg=None):
@@ -492,3 +511,85 @@ def run_baselines(
     with open(decision_cfg.metrics_baseline_file, "w") as fh:
         json.dump(results, fh, indent=2)
     return results
+
+
+# ---------------------------------------------------------------------------
+# Figure helpers (formerly quantum/plots.py). Deferred matplotlib/sklearn
+# imports keep `import quantum.evaluation` fast for QAOA spawn workers and
+# server restarts; only evaluation that renders figures pays the import cost.
+# ---------------------------------------------------------------------------
+
+
+def _plt():
+    """Deferred matplotlib import (~0.76 s on this host)."""
+    import matplotlib  # noqa: PLC0415
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt  # noqa: PLC0415
+
+    return plt
+
+
+def _plot_sklearn():
+    """Deferred sklearn import (~2.4 s on this host)."""
+    from sklearn.metrics import ConfusionMatrixDisplay, roc_auc_score, roc_curve  # noqa: PLC0415
+
+    return ConfusionMatrixDisplay, roc_auc_score, roc_curve
+
+
+def plot_roc_curve(y_true, prob_real, path):
+    if len(set(int(v) for v in y_true)) < 2:
+        return
+    plt = _plt()
+    ConfusionMatrixDisplay, roc_auc_score, roc_curve = _plot_sklearn()
+    fpr, tpr, _ = roc_curve(y_true, prob_real)
+    auc = roc_auc_score(y_true, prob_real)
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.plot(fpr, tpr, label=f"AUC-ROC = {auc:.3f}")
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.5)
+    ax.set_xlabel("False Positive Rate")
+    ax.set_ylabel("True Positive Rate")
+    ax.set_title("Hybrid VQC ROC Curve")
+    ax.legend()
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def plot_confusion_matrix(y_true, predictions, path):
+    plt = _plt()
+    ConfusionMatrixDisplay, _, _ = _plot_sklearn()
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ConfusionMatrixDisplay.from_predictions(y_true, predictions, ax=ax, colorbar=False)
+    ax.set_title("Confusion Matrix (Hybrid VQC)")
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def plot_calibration_curve(y_true, prob_real, path, n_bins=10):
+    """Reliability diagram: observed vs predicted probability per bin."""
+    plt = _plt()
+    bins = np.linspace(0.0, 1.0, n_bins + 1)
+    centers, observed, counts = [], [], []
+    for lo, hi in zip(bins[:-1], bins[1:]):
+        in_bin = (prob_real > lo) & (prob_real <= hi)
+        if int(in_bin.sum()) == 0:
+            continue
+        centers.append((lo + hi) / 2.0)
+        observed.append(float(y_true[in_bin].mean()))
+        counts.append(int(in_bin.sum()))
+    fig, ax = plt.subplots(figsize=(5, 5))
+    if centers:
+        ax.plot([0, 1], [0, 1], "k--", alpha=0.5, label="Perfect calibration")
+        ax.plot(centers, observed, "o-", label="Hybrid VQC")
+    ax.set_xlabel("Mean predicted probability")
+    ax.set_ylabel("Observed fraction of positives")
+    ax.set_title("Calibration Curve (Hybrid VQC)")
+    ax.legend()
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)

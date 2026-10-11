@@ -102,7 +102,8 @@ export default function SignalPanel({ signalData, result }) {
   const data = signalData?.signal;
   const rppg = result?.stages?.rppg ?? null;
   const features = rppg?.features ?? null;
-  const verdictTone = (result?.verdict?.label ?? "FAKE") === "REAL" ? "ok" : "bad";
+  const verdictLabel = result?.verdict?.label ?? "FAKE";
+  const verdictTone = verdictLabel === "REAL" ? "ok" : verdictLabel === "INCONCLUSIVE" ? "warn" : "bad";
 
   const bpm = features?.heart_rate_bpm ?? null;
   const sqi = features?.signal_quality_index ?? null;

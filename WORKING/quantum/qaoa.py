@@ -1,14 +1,34 @@
-﻿import json
+import json
 import os
-from dataclasses import replace
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pennylane as qml
 from scipy.optimize import minimize
-from quantum.validation import selection_stability
 
 from quantum.config import FEATURE_NAMES, QAOASelectionConfig
+
+
+def selection_stability(selections):
+    """Return per-feature selection frequency and pairwise Jaccard stability."""
+    normalized = [set(map(str, selection)) for selection in selections]
+    if not normalized:
+        return {"selection_frequency": {}, "mean_jaccard": 0.0}
+    counts = {}
+    for selection in normalized:
+        for feature in selection:
+            counts[feature] = counts.get(feature, 0) + 1
+    jaccards = []
+    for i, left in enumerate(normalized):
+        for right in normalized[i + 1:]:
+            union = left | right
+            jaccards.append(len(left & right) / len(union) if union else 1.0)
+    total = len(normalized)
+    return {
+        "selection_frequency": {key: value / total for key, value in sorted(counts.items())},
+        "mean_jaccard": float(np.mean(jaccards)) if jaccards else 1.0,
+        "n_runs": total,
+    }
 
 
 def _numpy_qnode(qnode):
@@ -23,114 +43,6 @@ def _numpy_qnode(qnode):
         return np.asarray(out, dtype=np.float64)
 
     return wrapped
-
-
-def _make_torch_device(wires):
-    """CUDA-capable torch statevector device (default.qubit.torch), or
-    None when this PennyLane version/platform has no such backend."""
-    if not torch_available():
-        return None
-    try:
-        return qml.device(
-            "default.qubit.torch", wires=wires, torch_device="cuda"
-        )
-    except Exception:
-        return None
-
-
-def torch_available():
-    try:
-        import torch  # noqa: F401
-
-        return torch.cuda.is_available()
-    except Exception:
-        return False
-
-
-_GPU_PROBE = {"done": False, "ok": False, "detail": ""}
-
-
-def _probe_gpu_device():
-    """One-time per-process gate deciding whether the GPU torch backend is
-    usable for QAOA. Two conditions must hold:
-
-    1. Precision: the float64 classical bitstring energy must be reproduced
-       within 1e-6 (the pipeline hard-asserts Hamiltonian == classical
-       cost at that tolerance; float32 statevectors do not pass).
-    2. Speed: the GPU per-call cost must not exceed ~3x lightning.qubit's,
-       otherwise QAOA would be net-slower on GPU (COBYLA is call-bound;
-       tiny 8-qubit states make transfer overhead dominate).
-    """
-    if _GPU_PROBE["done"]:
-        return _GPU_PROBE["ok"]
-    _GPU_PROBE["done"] = True
-    dev = _make_torch_device(8)
-    if dev is None:
-        _GPU_PROBE["detail"] = "default.qubit.torch not available (PennyLane >= 0.39 removed it)"
-        return False
-    try:
-        rng = np.random.RandomState(0)
-        lin = rng.uniform(-1.0, 1.0, 8)
-        quad = np.triu(rng.uniform(-0.3, 0.8, (8, 8)), 1)
-        quad = quad + quad.T
-        ops = [qml.PauliZ(i) for i in range(8)]
-        coeffs = [float(c) for c in lin]
-        for i in range(8):
-            for j in range(i + 1, 8):
-                ops.append(qml.PauliZ(i) @ qml.PauliZ(j))
-                coeffs.append(float(quad[i, j]))
-        hamiltonian = qml.Hamiltonian(coeffs, ops)
-
-        @qml.qnode(dev, interface="torch")
-        def energy(bitstring):
-            for i, bit in enumerate(bitstring):
-                if bit:
-                    qml.PauliX(wires=i)
-            return qml.expval(hamiltonian)
-
-        err = 0.0
-        for _ in range(4):
-            bs = rng.randint(0, 2, size=8)
-            quantum = float(energy(bs))
-            classical = float(lin @ bs + bs @ quad @ bs)
-            err = max(err, abs(quantum - classical))
-        if err >= 1e-6:
-            _GPU_PROBE["detail"] = f"precision gate failed (max err {err:.2e} >= 1e-6)"
-            return False
-
-        try:
-            import pennylane_lightning  # noqa: F401
-
-            cpu_dev = qml.device("lightning.qubit", wires=8)
-        except ImportError:
-            cpu_dev = qml.device("default.qubit", wires=8)
-
-        @qml.qnode(cpu_dev)
-        def cpu_energy(bitstring):
-            for i, bit in enumerate(bitstring):
-                if bit:
-                    qml.PauliX(wires=i)
-            return qml.expval(hamiltonian)
-
-        t0 = time.perf_counter()
-        for _ in range(5):
-            cpu_energy(rng.randint(0, 2, size=8))
-        cpu_ms = (time.perf_counter() - t0) / 5 * 1e3
-        t0 = time.perf_counter()
-        for _ in range(5):
-            energy(rng.randint(0, 2, size=8))
-        gpu_ms = (time.perf_counter() - t0) / 5 * 1e3
-        if gpu_ms > max(3.0 * cpu_ms, cpu_ms + 2.0):
-            _GPU_PROBE["detail"] = (
-                f"speed gate failed (gpu {gpu_ms:.3f} ms/call vs cpu {cpu_ms:.3f} ms/call)"
-            )
-            return False
-        _GPU_PROBE["ok"] = True
-        _GPU_PROBE["detail"] = f"precision 1e-6 OK, gpu {gpu_ms:.3f} ms vs cpu {cpu_ms:.3f} ms/call"
-        return True
-    except Exception as exc:  # noqa: BLE001
-        _GPU_PROBE["detail"] = f"probe raised {type(exc).__name__}: {exc}"
-        return False
 
 
 def simulator_device(wires, cfg=None):
@@ -371,7 +283,28 @@ class QAOASelector:
     def __init__(self, cfg=None):
         self.cfg = cfg or QAOASelectionConfig()
 
-    def select(self, X, y):
+    def select(self, X, y, feature_names=None):
+        # feature_names must describe the columns of X (the candidate matrix
+        # actually handed to the selector). Defaults to the legacy RPPG alias
+        # for backward compatibility with old call sites.
+        if feature_names is not None:
+            names = list(feature_names)
+            if len(names) != X.shape[1]:
+                raise ValueError(
+                    "feature_names length (%d) does not match X columns (%d)"
+                    % (len(names), X.shape[1])
+                )
+        else:
+            # Legacy default: index into the RPPG alias (as before), but fail
+            # early with a clear error when X is wider than that list instead
+            # of an opaque IndexError at naming time.
+            names = list(FEATURE_NAMES)
+            if len(names) < X.shape[1]:
+                raise ValueError(
+                    "X has %d columns but no feature_names were provided and the "
+                    "legacy default list only has %d entries; pass feature_names "
+                    "explicitly" % (X.shape[1], len(names))
+                )
         cfg = self.cfg
         weights = _normalize_weights(_discrimination_weights(X, y, cfg.seed))
         correlation = np.abs(np.corrcoef(X.T))
@@ -418,7 +351,7 @@ class QAOASelector:
         selected = order[: cfg.target_features]
         return {
             "selected_indices": [int(i) for i in selected],
-            "selected_features": [FEATURE_NAMES[i] for i in selected],
+            "selected_features": [names[i] for i in selected],
             "marginal_probabilities": [float(m) for m in sim_marginals],
             "feature_weights": [float(w) for w in weights],
             "cost": best["cost"],
@@ -428,21 +361,43 @@ class QAOASelector:
                 "chosen_seed": best["seed"],
                 "all_costs": [r["cost"] for r in restarts],
                 "selection_stability": selection_stability(
-                    [[FEATURE_NAMES[i] for i in order[: cfg.target_features]]]
+                    [[names[i] for i in order[: cfg.target_features]]]
                 ),
             },
         }
 
 
-def evaluate_selection_stability(X, y, cfg=None, seeds=(42, 123, 456, 789, 999)):
-    """Run QAOA selection over fixed seeds and report feature frequencies."""
-    cfg = cfg or QAOASelectionConfig()
-    selections = []
-    for seed in seeds:
-        seeded = replace(cfg, seed=int(seed), n_jobs=1)
-        result = QAOASelector(seeded).select(X, y)
-        selections.append(result["selected_features"])
-    return selection_stability(selections) | {"seeds": list(map(int, seeds))}
+def remap_selection_to_original_space(selection, preselect_indices, feature_names):
+    """Remap selector-local indices to the original full-width feature space.
+
+    The QAOA selector may run on a classically pre-selected candidate matrix
+    (local columns 0..k-1) rather than on the full feature vector. Training and
+    inference must both consume indices into the SAME original feature space,
+    so this helper rewrites ``selected_indices``/``selected_features`` (and any
+    restart selection-frequency names) before the selection is persisted.
+
+    Mutates and returns ``selection``.
+    """
+    if preselect_indices is None:
+        return selection
+    local_names = [str(feature_names[i]) for i in preselect_indices]
+    selection["selected_indices"] = [
+        int(preselect_indices[int(i)]) for i in selection["selected_indices"]
+    ]
+    selection["selected_features"] = [
+        str(feature_names[int(i)]) for i in selection["selected_indices"]
+    ]
+    name_map = {
+        local_names[local_i]: str(feature_names[global_i])
+        for local_i, global_i in enumerate(preselect_indices)
+    }
+    stability = selection.setdefault("restarts", {}).setdefault("selection_stability", {})
+    stability["selection_frequency"] = {
+        name_map.get(str(k), str(k)): v
+        for k, v in stability.get("selection_frequency", {}).items()
+    }
+    selection.setdefault("restarts", {})["index_space"] = "original_feature_space"
+    return selection
 
 
 def select_classical(X, y, cfg=None, feature_names=None):

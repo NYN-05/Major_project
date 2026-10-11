@@ -30,7 +30,7 @@ from .preprocessing import clean_signal
 from .signal_extraction import extract_pulse_signal, combine_roi_signals
 from .features import compute_features, RPPGFeatures
 from .pqs import compute_pqs, PQSResult
-from quantum.validation import PipelineStatus
+from quantum.config import PipelineStatus
 
 _FRAME_RE = re.compile(r"frame_(\d+)_t(\d+)\.jpg")
 

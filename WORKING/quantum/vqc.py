@@ -21,7 +21,7 @@ import json
 import math
 import sys
 from pathlib import Path
-from quantum.artifacts import verify_sha256, write_sha256
+from quantum.config import verify_sha256, write_sha256
 
 import numpy as np
 import pennylane as qml

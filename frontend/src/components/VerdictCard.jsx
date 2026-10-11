@@ -82,7 +82,10 @@ export default function VerdictCard({ result, onTryAgain }) {
             </span>
           </div>
         </div>
-        <ConfidenceRing value={probReal ?? confidence ?? 0.5} tone={p.tone} />
+        <ConfidenceRing
+          value={probReal ?? confidence ?? (label === "INCONCLUSIVE" ? null : 0.5)}
+          tone={p.tone}
+        />
       </div>
 
       <div className="verdict-actions">

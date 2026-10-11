@@ -25,21 +25,20 @@ from quantum.config import (
     RPPG_FEATURE_NAMES,
     VISUAL_FEATURE_NAMES,
     FUSED_FEATURE_NAMES,
+    FEATURE_SET_CONFIGS,
     LABEL_FAKE,
     LABEL_REAL,
     OUTPUT_DIR,
 )
 
 RPPG_LABEL_FAKE = 1  # rPPG CSV convention: 1 = deepfake, 0 = real
-LABEL_REAL = 1  # quantum convention: 1 = real
-LABEL_FAKE = 0  # quantum convention: 0 = fake
+# LABEL_REAL / LABEL_FAKE are imported from quantum.config (single source).
 
 SPLITS = ("train", "val", "test")
 
-# Feature set configurations - only fused is supported
-FEATURE_SETS = {
-    "fused": FUSED_FEATURE_NAMES,
-}
+# Single source of feature-set names lives in quantum.config; re-exported
+# here for the data-loading call sites and tests.
+FEATURE_SETS = FEATURE_SET_CONFIGS
 
 def csv_to_quantum_label(csv_label):
     """Convert rPPG CSV label to quantum convention.

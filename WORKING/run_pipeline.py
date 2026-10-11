@@ -263,9 +263,9 @@ def quantum_inference(features: dict) -> dict:
 
 def emit_signal(result, path: str | None) -> None:
     """Write the decimated rPPG waveform JSON for the UI (same schema as the
-    old frontend/dump_signal.py subprocess, which this replaces). The signal
-    is produced in-process from the stage-2 result — no duplicate MediaPipe
-    pass and the fps matches the one actually used for the verdict."""
+    retired frontend/dump_signal.py subprocess). The signal is produced
+    in-process from the stage-2 result — no duplicate MediaPipe pass and the
+    fps matches the one actually used for the verdict."""
     if not path:
         return
     payload: dict = {"fps": 0.0, "n": 0, "signal": None, "error": None}
@@ -301,7 +301,7 @@ def build_parser():
     parser.add_argument(
         "--signal-out",
         default=None,
-        help="Write the decimated rPPG waveform JSON here (same schema as frontend/dump_signal.py)",
+        help="Write the decimated rPPG waveform JSON here (same schema as the retired frontend/dump_signal.py)",
     )
     return parser
 
@@ -337,12 +337,12 @@ def main() -> int:
     emit_signal(rppg_result, args.signal_out)
     if rppg_vector is None:
         result["verdict"] = {
-            "label": "FAKE",
-            "confidence": 0.0,
+            "label": "INCONCLUSIVE",
+            "confidence": None,
             "reason": "rPPG produced no feature vector (insufficient usable frames)",
         }
-        _finish(result, args.out, exit_code=0)
-        return 0
+        _finish(result, args.out, exit_code=3)
+        return 3
     print(
         f"      input={rppg_stage['input_mode']} "
         f"usable = {rppg_stage['n_frames_usable']}/{rppg_stage['n_frames_total']} "
@@ -354,12 +354,12 @@ def main() -> int:
     result["stages"]["visual"] = visual_stage
     if visual_features is None:
         result["verdict"] = {
-            "label": "FAKE",
-            "confidence": 0.0,
+            "label": "INCONCLUSIVE",
+            "confidence": None,
             "reason": "Visual feature extraction failed",
         }
-        _finish(result, args.out, exit_code=0)
-        return 0
+        _finish(result, args.out, exit_code=3)
+        return 3
     print(f"      extracted {len(visual_features)} visual features")
 
     # Fuse rPPG and visual features

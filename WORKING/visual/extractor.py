@@ -10,15 +10,129 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
+from dataclasses import dataclass, asdict
 from torchvision.models import resnet50, ResNet50_Weights
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
-from .features import VisualFeatures, VISUAL_FEATURE_NAMES
-from quantum.operations import memory_snapshot, resolve_torch_device
+from quantum.operations import resolve_torch_device
 
 RESNET_FEATURE_DIM = 2048
 PCA_PREPROCESSING_VERSION = "resnet50_imagenet_v1_bgr_to_rgb_224_normalized"
+
+
+@dataclass
+class VisualFeatures:
+    """
+    Compact visual feature representation extracted from face crops.
+
+    Uses the penultimate layer (global average pooling) of a pre-trained
+    ResNet50 (2048-dim) or similar backbone. For the quantum pipeline,
+    we project to a lower dimension (e.g., 16 features) via PCA or
+    use the raw 2048-dim vector with a classical baseline.
+    """
+    # Deep CNN features (ResNet50 GAP output = 2048 dim)
+    # We store a reduced set for practical use with the quantum pipeline
+    deep_feat_0: float = 0.0
+    deep_feat_1: float = 0.0
+    deep_feat_2: float = 0.0
+    deep_feat_3: float = 0.0
+    deep_feat_4: float = 0.0
+    deep_feat_5: float = 0.0
+    deep_feat_6: float = 0.0
+    deep_feat_7: float = 0.0
+    deep_feat_8: float = 0.0
+    deep_feat_9: float = 0.0
+    deep_feat_10: float = 0.0
+    deep_feat_11: float = 0.0
+    deep_feat_12: float = 0.0
+    deep_feat_13: float = 0.0
+    deep_feat_14: float = 0.0
+    deep_feat_15: float = 0.0
+
+    # Handcrafted complementary features
+    lbp_uniform_hist_0: float = 0.0
+    lbp_uniform_hist_1: float = 0.0
+    lbp_uniform_hist_2: float = 0.0
+    lbp_uniform_hist_3: float = 0.0
+    lbp_uniform_hist_4: float = 0.0
+    lbp_uniform_hist_5: float = 0.0
+    lbp_uniform_hist_6: float = 0.0
+    lbp_uniform_hist_7: float = 0.0
+    lbp_uniform_hist_8: float = 0.0
+    lbp_uniform_hist_9: float = 0.0
+
+    # Texture statistics (computed on grayscale face crop)
+    texture_contrast: float = 0.0
+    texture_energy: float = 0.0
+    texture_homogeneity: float = 0.0
+    texture_correlation: float = 0.0
+
+    # Color statistics (mean/std per channel on face crop)
+    color_mean_r: float = 0.0
+    color_mean_g: float = 0.0
+    color_mean_b: float = 0.0
+    color_std_r: float = 0.0
+    color_std_g: float = 0.0
+    color_std_b: float = 0.0
+
+    # Frequency domain (DCT/FFT energy in bands)
+    freq_low_energy: float = 0.0
+    freq_mid_energy: float = 0.0
+    freq_high_energy: float = 0.0
+
+    def to_vector(self) -> np.ndarray:
+        """Fixed-order numeric feature vector."""
+        return np.array([
+            # Deep features (16 dims)
+            self.deep_feat_0, self.deep_feat_1, self.deep_feat_2, self.deep_feat_3,
+            self.deep_feat_4, self.deep_feat_5, self.deep_feat_6, self.deep_feat_7,
+            self.deep_feat_8, self.deep_feat_9, self.deep_feat_10, self.deep_feat_11,
+            self.deep_feat_12, self.deep_feat_13, self.deep_feat_14, self.deep_feat_15,
+            # LBP histogram (10 dims)
+            self.lbp_uniform_hist_0, self.lbp_uniform_hist_1, self.lbp_uniform_hist_2,
+            self.lbp_uniform_hist_3, self.lbp_uniform_hist_4, self.lbp_uniform_hist_5,
+            self.lbp_uniform_hist_6, self.lbp_uniform_hist_7, self.lbp_uniform_hist_8,
+            self.lbp_uniform_hist_9,
+            # Texture (4 dims)
+            self.texture_contrast, self.texture_energy, self.texture_homogeneity,
+            self.texture_correlation,
+            # Color (6 dims)
+            self.color_mean_r, self.color_mean_g, self.color_mean_b,
+            self.color_std_r, self.color_std_g, self.color_std_b,
+            # Frequency (3 dims)
+            self.freq_low_energy, self.freq_mid_energy, self.freq_high_energy,
+        ], dtype=np.float64)
+
+    @staticmethod
+    def feature_names() -> List[str]:
+        return [
+            # Deep features (16 dims)
+            "deep_feat_0", "deep_feat_1", "deep_feat_2", "deep_feat_3",
+            "deep_feat_4", "deep_feat_5", "deep_feat_6", "deep_feat_7",
+            "deep_feat_8", "deep_feat_9", "deep_feat_10", "deep_feat_11",
+            "deep_feat_12", "deep_feat_13", "deep_feat_14", "deep_feat_15",
+            # LBP histogram (10 dims)
+            "lbp_uniform_hist_0", "lbp_uniform_hist_1", "lbp_uniform_hist_2",
+            "lbp_uniform_hist_3", "lbp_uniform_hist_4", "lbp_uniform_hist_5",
+            "lbp_uniform_hist_6", "lbp_uniform_hist_7", "lbp_uniform_hist_8",
+            "lbp_uniform_hist_9",
+            # Texture (4 dims)
+            "texture_contrast", "texture_energy", "texture_homogeneity",
+            "texture_correlation",
+            # Color (6 dims)
+            "color_mean_r", "color_mean_g", "color_mean_b",
+            "color_std_r", "color_std_g", "color_std_b",
+            # Frequency (3 dims)
+            "freq_low_energy", "freq_mid_energy", "freq_high_energy",
+        ]
+
+    def to_dict(self) -> Dict[str, float]:
+        return asdict(self)
+
+
+# Full feature list (39 features total); must match quantum.config.VISUAL_FEATURE_NAMES.
+VISUAL_FEATURE_NAMES = VisualFeatures.feature_names()
 
 
 class VisualFeatureExtractor:
@@ -439,53 +553,41 @@ def load_face_crops_from_frames(
     return face_crops
 
 
-def compute_visual_features_from_video(
-    video_path: str,
-    max_frames: Optional[int] = None,
+def iter_video_center_crops(
+    video_path,
     sample_fps: float = 10.0,
-    backbone: str = "resnet50",
-    device: str = "auto",
-    deep_feature_dim: int = 16,
-    pca_path: Optional[str] = None,
-) -> VisualFeatures:
+    max_frames: Optional[int] = None,
+) -> List[np.ndarray]:
+    """Yield center-cropped frames sampled at ``sample_fps`` from a video.
+
+    Shared by the frames-dir fallback and the batch video-root extraction
+    in visual/pipeline.py (single source for the crop/stride logic).
     """
-    Extract visual features directly from a video file (fallback when
-    stage-1 frames are not available).
-    """
-    import cv2
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise IOError(f"Could not open video: {video_path}")
 
     native_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    sample_stride = max(1, round(native_fps / sample_fps))
+    stride = max(1, round(native_fps / sample_fps))
 
-    face_crops = []
+    crops: List[np.ndarray] = []
     frame_idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if frame_idx % sample_stride == 0:
-            h, w = frame.shape[:2]
-            crop = frame[h//4:3*h//4, w//4:3*w//4]
-            if crop.size > 0:
-                face_crops.append(crop)
-            if max_frames and len(face_crops) >= max_frames:
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
                 break
-        frame_idx += 1
-    cap.release()
-
-    if not face_crops:
-        return VisualFeatures()
-
-    extractor = VisualFeatureExtractor(
-        backbone=backbone,
-        device=device,
-        deep_feature_dim=deep_feature_dim,
-        pca_path=pca_path or _default_pca_path(),
-    )
-    return extractor.extract_from_crops(face_crops)
+            if frame_idx % stride == 0:
+                h, w = frame.shape[:2]
+                crop = frame[h // 4:3 * h // 4, w // 4:3 * w // 4]
+                if crop.size > 0:
+                    crops.append(crop)
+                if max_frames and len(crops) >= max_frames:
+                    break
+            frame_idx += 1
+    finally:
+        cap.release()
+    return crops
 
 
 def _default_pca_path() -> str:

@@ -19,8 +19,7 @@ import json
 
 import numpy as np
 
-from quantum.config import FEATURE_NAMES, OUTPUT_DIR
-from quantum.artifacts import schema_digest
+from quantum.config import FEATURE_NAMES, OUTPUT_DIR, schema_digest
 
 SCALER_FILE = OUTPUT_DIR / "feature_scaler.json"
 
@@ -82,3 +81,20 @@ class FeatureScaler:
         scaler.mean_ = np.asarray(payload["mean"], dtype=np.float64)
         scaler.scale_ = np.asarray(payload["scale"], dtype=np.float64)
         return scaler
+
+
+def validate_feature_schema(feature_names, expected_names) -> None:
+    actual = list(feature_names)
+    expected = list(expected_names)
+    if actual != expected:
+        raise ValueError(
+            f"Feature schema mismatch: expected ordered schema {expected}, got {actual}"
+        )
+
+
+def transform_features(values, feature_names, scaler: FeatureScaler) -> np.ndarray:
+    validate_feature_schema(scaler.feature_names, feature_names)
+    transformed = scaler.transform(np.asarray(values, dtype=np.float64))
+    if not np.isfinite(transformed).all():
+        raise ValueError("Preprocessing produced non-finite scaled features")
+    return transformed

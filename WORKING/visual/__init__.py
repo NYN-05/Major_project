@@ -8,8 +8,12 @@ a pre-trained CNN backbone (ResNet50 by default). Designed to run
 alongside the rPPG physiological branch for multi-source evidence fusion.
 """
 
-from .extractor import VisualFeatureExtractor, compute_visual_features
-from .features import VisualFeatures, VISUAL_FEATURE_NAMES
+from .extractor import (
+    VisualFeatureExtractor,
+    VisualFeatures,
+    VISUAL_FEATURE_NAMES,
+    compute_visual_features,
+)
 
 __all__ = [
     "VisualFeatureExtractor",

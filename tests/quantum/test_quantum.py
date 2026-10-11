@@ -125,7 +125,7 @@ def test_real_hamiltonian_verification():
     assert set(y.tolist()) <= {0, 1}
     
     # Classical pre-selection to 18 features (pipeline default)
-    classical_pre = select_classical(X, y, QAOASelectionConfig())
+    classical_pre = select_classical(X, y, QAOASelectionConfig(), feature_names=feature_names)
     classical_pre = classical_pre["selected_indices"][:18]
     X_pre = X[:, classical_pre]
     

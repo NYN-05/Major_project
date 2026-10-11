@@ -10,15 +10,14 @@ Extracts **39** visual features from face crops saved by Stage 1:
 - 6 color statistics (mean/std per RGB channel)
 - 3 DCT frequency domain features (low/mid/high energy bands)
 
-Fuses with rPPG features (24) to create the **fused feature set (63 features)** used for training.
+Fuses with rPPG features (20) to create the **fused feature set (59 features)** used for training.
 
 ## Project Structure
 
 ```
 WORKING/visual/
 ├── __init__.py
-├── extractor.py          # VisualFeatureExtractor + compute_visual_features()
-├── features.py           # VisualFeatures dataclass + VISUAL_FEATURE_NAMES
+├── extractor.py          # VisualFeatureExtractor, VisualFeatures, VISUAL_FEATURE_NAMES
 ├── pipeline.py           # Batch extraction + fusion + experiment splits CLI
 └── README.md
 ```
@@ -27,8 +26,7 @@ WORKING/visual/
 
 | File | Responsibility |
 |------|----------------|
-| `extractor.py` | `VisualFeatureExtractor` class (ResNet50 + handcrafted features), `compute_visual_features()` (stage-1 handoff), `compute_visual_features_from_video()` (fallback) |
-| `features.py` | `VisualFeatures` dataclass (39 fields), `feature_names()` (fixed order), `VISUAL_FEATURE_NAMES` list |
+| `extractor.py` | `VisualFeatureExtractor` class (ResNet50 + handcrafted features), `VisualFeatures` dataclass (39 fields) + `VISUAL_FEATURE_NAMES` (fixed order), `compute_visual_features()` (stage-1 handoff), `iter_video_center_crops()` shared video sampler |
 | `pipeline.py` | `extract_visual_features_dataset()`, `fuse_features()`, `create_experiment_splits()`, CLI entry point |
 
 ## Feature Breakdown (39 Total)
@@ -41,7 +39,7 @@ WORKING/visual/
 | Color (RGB mean/std) | 6 | `color_mean_r/g/b`, `color_std_r/g/b` |
 | Frequency (DCT) | 3 | `freq_low_energy`, `freq_mid_energy`, `freq_high_energy` |
 
-**Feature order is fixed** — must match `VISUAL_FEATURE_NAMES` in `features.py` and the fused order in `quantum/config.py`.
+**Feature order is fixed** — must match `VISUAL_FEATURE_NAMES` in `extractor.py` and the fused order in `quantum/config.py`.
 
 ## Pipeline Flow
 
@@ -51,7 +49,7 @@ Stage-1 frames (JPEGs) + cropped_faces/
   → Shared training PCA (fit once on training videos) → averaged across frames
   → VisualFeatures dataclass (39-dim vector)
   → CSV: MAJ_OUTPUT_ROOT/visual/visual_features.csv
-  → fuse_features() with rPPG CSV → MAJ_OUTPUT_ROOT/visual/fused_features.csv (63 features)
+  → fuse_features() with rPPG CSV → MAJ_OUTPUT_ROOT/visual/fused_features.csv (59 features)
   → create_experiment_splits() → metadata-aware grouped train/val/test splits
 ```
 
@@ -113,13 +111,13 @@ python visual/pipeline.py \
 |------|-------------|
 | `visual_features.csv` | 39 features + label per video |
 | `visual_pca.npz` | Training-only 2048→16 PCA parameters and schema metadata |
-| `fused_features.csv` | 63 features (24 rPPG + 39 visual) + label |
+| `fused_features.csv` | 59 features (20 rPPG + 39 visual) + label |
 | `experiments/fused_split.npz` | Train/val/test arrays for quantum layer |
 | `experiments/split_indices.npz` | Split indices for reproducibility |
 
 ## Feature Contract
 
-`VISUAL_FEATURE_NAMES` in `features.py` (39 features) must stay identical in name AND order to the visual portion of `FUSED_FEATURE_NAMES` in `quantum/config.py`. The test `test_feature_contract_sync` in `quantum/tests.py` guards this.
+`VISUAL_FEATURE_NAMES` in `extractor.py` (39 features) must stay identical in name AND order to the visual portion of `FUSED_FEATURE_NAMES` in `quantum/config.py`. The test `test_feature_contract_sync` in `quantum/tests.py` guards this.
 
 ## Integration with End-to-End Pipeline
 

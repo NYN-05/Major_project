@@ -26,6 +26,13 @@ export const PLAIN = {
     headline: "Synthetic or manipulated footage",
     note: "This video does not show the natural pulse of a live person. The physiological signal is inconsistent with a genuine recording — consistent with AI-generated or manipulated footage.",
   },
+  INCONCLUSIVE: {
+    word: "Inconclusive",
+    tone: "warn",
+    verdictLabel: "INCONCLUSIVE",
+    headline: "Not enough signal to decide",
+    note: "Too few usable frames or no reliable facial pulse could be extracted, so the system cannot issue a real-or-deepfake verdict. Try a longer, well-lit, front-facing clip with the face clearly visible.",
+  },
 };
 
 export const PIPELINE = [
@@ -163,4 +170,5 @@ export const TONE_ICON = {
 export const VERDICT_ICON = {
   REAL: UserCheck,
   FAKE: ShieldAlert,
+  INCONCLUSIVE: ShieldAlert,
 };

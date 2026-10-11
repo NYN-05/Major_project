@@ -10,26 +10,25 @@ Quality thresholds **relaxed** for short/low-quality videos.
 
 ## Project Structure
 
-`
+```
 WORKING/frame/
-├── config.py           # Model presets, runtime configuration
 ├── detector.py         # YOLO face detection wrapper
-├── pipeline.py         # Single CLI: face pipeline AND frame extraction
-└── processing.py       # FrameIngestor, FrameQualityAssessor, StorageManager
+├── pipeline.py         # Frame extraction CLI + run_frame_sampling_quality_layer()
+├── processing.py       # FrameIngestor, FrameQualityAssessor
 ├── weights/
-│   └── yolov8n-face-lindevs.pt   # Auto-downloaded if missing
+│   ├── yolov8n-face-lindevs.pt   # Default face detector
+│   ├── yolov9e-face-lindevs.pt   # Optional larger preset
+│   └── yolov9t-face-lindevs.pt   # Optional smaller preset
 └── README.md
+```
 
-
-
-## ## ## Module Responsibilities
+## Module Responsibilities
 
 | File | Responsibility |
 |------|----------------|
-| `pipeline.py` | **Single CLI entry** - `run_frame_sampling_quality_layer()` (used by `run_pipeline.py`) plus the standalone face pipeline and frame-extraction modes (replacing the legacy `app/main.py` / `app/extract_frames.py`, which no longer exist) |
+| `pipeline.py` | `run_frame_sampling_quality_layer()` (stage-1 entry used by `run_pipeline.py`) + the frame-extraction CLI (`python -m frame.pipeline`) |
 | `detector.py` | `FaceDetector` - loads YOLO weights, runs inference, returns face boxes + confidences |
-| `processing.py` | `FrameIngestor`, `FrameQualityAssessor`, `StorageManager` implementations |
-| `config.py` | Model preset mapping (`MODEL_WEIGHTS`), `build_config()` for normalized paths |
+| `processing.py` | `FrameIngestor`, `FrameQualityAssessor` implementations |
 
 ## Pipeline Flow
 
@@ -66,11 +65,11 @@ Input video
 
 ## Install
 
-`ash
-pip install torch torchvision opencv-python numpy pyyaml
-`
+```bash
+pip install -r requirements.txt   # from the repository root
+```
 
-Requires CUDA 12.1 PyTorch wheels (in requirements.txt). Falls back to CPU when `--device auto` is used and CUDA unavailable.
+Requires CUDA 12.1 PyTorch wheels (see root `requirements.txt`). Falls back to CPU when `--device auto` is used and CUDA unavailable.
 
 ## Run
 
@@ -83,30 +82,15 @@ python run_pipeline.py --source path/to/video.mp4 --method POS
 
 This automatically runs Stage 1 (frame sampling + quality at 30 fps) and passes accepted frames to Stage 2 (rPPG) and Stage 3 (visual).
 
-### Standalone Frame Stage
+### Frame Extraction CLI
 
 ```bash
-# From WORKING/frame/
-python pipeline.py --source test.mp4 --save-metadata
+# From WORKING/
+python -m frame.pipeline --source path/to/video.mp4
+python -m frame.pipeline --input-dir path/to/videos/ --save-quality-examples
 ```
 
-### Main Options (pipeline.py — face pipeline mode)
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--source` | Video path, stream URL, or webcam index | `1` |
-| `--model` | YOLO preset: `yolov8n`, `yolov8x`, `yolov9e`, `yolov9t` | `yolov8n` |
-| `--weights` | Custom weights path (overrides `--model`) | - |
-| `--conf` | Minimum face confidence threshold | `0.25` |
-| `--imgsz` | Inference image size | `320` |
-| `--device` | `auto`, `cpu`, `gpu`, `cuda`, or GPU index | `auto` |
-| `--half` | Enable FP16 on CUDA | off |
-| `--output-root` | Root output folder | `WORKING/output/frames/annotated` (or `MAJ_OUTPUT_ROOT/frames/annotated`) |
-| `--display` | Show live annotated window | off |
-| `--save-metadata` | Write JSONL metadata per frame | off |
-| `--max-io-workers` | Storage thread pool size | `4` |
-
-### Extraction Script Options (pipeline.py — extraction mode)
+### Extraction Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -123,9 +107,9 @@ python pipeline.py --source test.mp4 --save-metadata
 
 ## Model Weight Behavior
 
-- For preset models, weight files are expected under `weights/`.
-- If `yolov8n-face-lindevs.pt` is missing, the detector downloads it automatically.
-- For other missing weight files, the app raises `FileNotFoundError`.
+- For preset models, weight files are bundled under `weights/`.
+- If the selected weight file is missing, the detector raises `FileNotFoundError`
+  with download instructions.
 
 ## Metadata Record Example
 

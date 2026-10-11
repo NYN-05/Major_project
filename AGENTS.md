@@ -41,7 +41,6 @@ WORKING/
 frontend/
   server.py           Standard-library API, uploads, jobs, SSE, and artifacts
   src/                React + Vite frontend
-  dump_signal.py      Standalone waveform reconstruction utility
 
 Scrape/               Required location for tests, probes, logs, screenshots,
                       temporary scripts, and other development artifacts
@@ -111,7 +110,7 @@ python -m quantum.tests
 python run_pipeline.py --source path\to\video.mp4 --method POS --out result.json
 
 # Rebuild rPPG training features
-python rppg-pipeline\extract_dataset_features.py
+python RPPG\extract_dataset_features.py
 
 # Extract visual features and create the fused table
 python visual\pipeline.py --frames-root output\frames\frame_sequences `

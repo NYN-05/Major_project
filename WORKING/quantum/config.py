@@ -1,9 +1,61 @@
+import hashlib
+import json
 import os
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 LABEL_REAL = 1
 LABEL_FAKE = 0
+
+
+class PipelineStatus(StrEnum):
+    """Pipeline stage status codes shared with the rPPG layer."""
+
+    VALID = "VALID"
+    INSUFFICIENT_FRAMES = "INSUFFICIENT_FRAMES"
+    NO_FACE = "NO_FACE"
+    MULTIPLE_FACES = "MULTIPLE_FACES"
+    LOW_QUALITY = "LOW_QUALITY"
+    RPPG_INVALID = "RPPG_INVALID"
+    MODEL_ERROR = "MODEL_ERROR"
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_sha256(path: Path, digest_path: Path | None = None) -> str:
+    """Verify an artifact against its adjacent checksum sidecar."""
+    digest_path = digest_path or path.with_suffix(path.suffix + ".sha256")
+    if not path.is_file():
+        raise FileNotFoundError(f"Artifact not found: {path}")
+    if not digest_path.is_file():
+        raise RuntimeError(
+            f"Refusing to load unsigned artifact {path}; missing checksum {digest_path}"
+        )
+    expected = digest_path.read_text(encoding="ascii").strip().split()[0].lower()
+    actual = sha256_file(path)
+    if expected != actual:
+        raise RuntimeError(
+            f"Artifact checksum mismatch for {path}: expected {expected}, got {actual}"
+        )
+    return actual
+
+
+def write_sha256(path: Path) -> Path:
+    digest_path = path.with_suffix(path.suffix + ".sha256")
+    digest_path.write_text(sha256_file(path) + "\n", encoding="ascii")
+    return digest_path
+
+
+def schema_digest(feature_names) -> str:
+    payload = json.dumps(list(feature_names), separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def get_dfdc_dataset_path() -> Path:
@@ -28,7 +80,7 @@ def get_dfdc_dataset_path() -> Path:
     return path
 
 # Feature contract: the raw 20-feature vector produced by the rPPG layer
-# (same names/order as RPPGFeatures.feature_names() in RPPG/rppg/features.py).
+# (same names/order as RPPGFeatures.feature_names() in RPPG/features.py).
 RPPG_FEATURE_NAMES = [
     "heart_rate_bpm",
     "snr_db",
@@ -53,7 +105,7 @@ RPPG_FEATURE_NAMES = [
     "phase_coherence_lr",
 ]
 
-# Visual feature names (from visual/features.py)
+# Visual feature names (from visual/extractor.py)
 VISUAL_FEATURE_NAMES = [
     # Deep features (16 dims)
     "deep_feat_0", "deep_feat_1", "deep_feat_2", "deep_feat_3",

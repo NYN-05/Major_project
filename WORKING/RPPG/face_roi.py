@@ -18,27 +18,122 @@ Note on MediaPipe API version
 MediaPipe 0.10.30+ dropped the legacy `mp.solutions.face_mesh` API
 in favor of the newer Tasks API (`FaceLandmarker`), which this
 module uses. It requires a small model file
-(`face_landmarker.task`), which is auto-downloaded and cached on
-first use via `model_utils.ensure_face_landmarker_model`.
+(`face_landmarker.task`), which is located and SHA-256-verified on
+first use via `ensure_face_landmarker_model` (defined below; the model
+is bundled with the repository, no download is needed).
 """
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
 
 try:
-    from .model_utils import ensure_haar_cascade
-except Exception:  # pragma: no cover - defensive import
-    ensure_haar_cascade = None
-
-try:
     import mediapipe as mp
     _MEDIAPIPE_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _MEDIAPIPE_AVAILABLE = False
+
+
+# ---------------------------------------------------------------------------
+# Bundled model assets (formerly model_utils.py)
+# ---------------------------------------------------------------------------
+# Search order:
+#   1. This directory (WORKING/RPPG/) - bundled models
+#   2. User cache (~/.cache/rppg_pipeline/) - legacy cached copies
+#   3. OpenCV data dir (cv2.data) - Haar cascade only
+# All model files are bundled in the repo - no internet download is needed
+# at runtime.
+
+import hashlib  # noqa: E402
+
+_REPOSITORY_MODELS_DIR = Path(__file__).resolve().parent  # WORKING/RPPG/
+
+_BUNDLED_FACE_LANDMARKER = _REPOSITORY_MODELS_DIR / "face_landmarker.task"
+_BUNDLED_HAAR_CASCADE = _REPOSITORY_MODELS_DIR / "haarcascade_frontalface_default.xml"
+
+_CACHE_DIR = Path.home() / ".cache" / "rppg_pipeline"
+_CACHE_FACE_LANDMARKER = _CACHE_DIR / "face_landmarker.task"
+_CACHE_HAAR_CASCADE = _CACHE_DIR / "haarcascade_frontalface_default.xml"
+
+MODEL_SHA256 = "64184E229B263107BC2B804C6625DB1341FF2BB731874B0BCC2FE6544E0BC9FF"
+HAAR_SHA256 = "0F7D4527844EB514D4A4948E822DA90FBB16A34A0BBBBC6ADC6498747A5AAFB0"
+
+
+def _asset_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest().upper()
+
+
+def _verify_asset(path: Path, expected: str, what: str) -> None:
+    actual = _asset_sha256(path)
+    if actual != expected:
+        raise RuntimeError(
+            f"{what} checksum mismatch at {path}:\n"
+            f"  expected SHA-256: {expected}\n"
+            f"  actual   SHA-256: {actual}\n"
+            "The bundled model file may be corrupted. Re-clone the repository."
+        )
+
+
+def _find_asset(candidates: list[Path], label: str, expected_sha: str) -> str:
+    """Return the first candidate that exists, passes size check and SHA-256
+    verification. Raise FileNotFoundError with a clear message if none found."""
+    for p in candidates:
+        if p.exists() and p.stat().st_size > 0:
+            _verify_asset(p, expected_sha, label)
+            return str(p)
+    locations = "\n  ".join(str(c) for c in candidates)
+    raise FileNotFoundError(
+        f"{label} not found.\n"
+        "Searched:\n"
+        f"  {locations}\n\n"
+        "This file should be bundled in the repository under WORKING/RPPG/.\n"
+        "Re-clone the repository or restore the file from git history."
+    )
+
+
+def ensure_face_landmarker_model(dest_path: str = None) -> str:
+    """
+    Locate face_landmarker.task - bundled in the repo, no download needed.
+
+    Parameters
+    ----------
+    dest_path : optional custom path override. If provided and the file
+                exists there, it is returned directly (no search).
+    """
+    if dest_path and Path(dest_path).exists():
+        _verify_asset(Path(dest_path), MODEL_SHA256, "face_landmarker.task")
+        return dest_path
+
+    return _find_asset(
+        [_BUNDLED_FACE_LANDMARKER, _CACHE_FACE_LANDMARKER],
+        "face_landmarker.task",
+        MODEL_SHA256,
+    )
+
+
+def ensure_haar_cascade(dest_path: str = None) -> str:
+    """
+    Locate haarcascade_frontalface_default.xml - bundled in repo, or
+    shipped inside opencv-python (cv2/data). No download needed.
+    """
+    if dest_path and Path(dest_path).exists():
+        _verify_asset(Path(dest_path), HAAR_SHA256, "haarcascade_frontalface_default.xml")
+        return dest_path
+
+    cv2_cascade = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
+    return _find_asset(
+        [_BUNDLED_HAAR_CASCADE, _CACHE_HAAR_CASCADE, cv2_cascade],
+        "haarcascade_frontalface_default.xml",
+        HAAR_SHA256,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -86,11 +181,12 @@ def _load_haar_cascade() -> Optional[cv2.CascadeClassifier]:
     Load the frontal-face Haar cascade used as a fallback when
     MediaPipe landmarks are unavailable. Some OpenCV distributions
     (notably opencv-python 5.0.x wheels) ship without the cascade XML
-    files; in that case download the cascade once via model_utils.
+    files; in that case resolve the bundled/cache copy once via
+    ensure_haar_cascade (SHA-256 verified).
     Returns None if the cascade cannot be made available.
     """
     path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    if not os.path.exists(path) and ensure_haar_cascade is not None:
+    if not os.path.exists(path):
         try:
             path = ensure_haar_cascade()
         except Exception as e:
@@ -176,7 +272,6 @@ if _MEDIAPIPE_AVAILABLE:
                 FaceLandmarkerOptions,
                 RunningMode,
             )
-            from .model_utils import ensure_face_landmarker_model
 
             resolved_model_path = model_path or ensure_face_landmarker_model()
 

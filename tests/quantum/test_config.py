@@ -23,11 +23,8 @@ class TestQuantumConfig(unittest.TestCase):
     """Test quantum configuration classes."""
 
     def test_decision_config_defaults(self):
-        """Test DecisionConfig default values."""
+        """Test DecisionConfig default values (binary contract)."""
         cfg = DecisionConfig()
-        self.assertEqual(cfg.fake_max_prob, 0.3)
-        self.assertEqual(cfg.real_min_prob, 0.7)
-        self.assertEqual(cfg.quality_threshold, 0.5)
         self.assertEqual(cfg.decision_threshold, 0.5)
 
     def test_data_config_defaults(self):
@@ -86,20 +83,18 @@ class TestEvaluationMetrics(unittest.TestCase):
         self.assertIn('auc_roc', metrics)
         self.assertIn('pr_auc', metrics)
 
-    def test_classification_metrics_three_state(self):
-        """Test classification metrics for three-state decision."""
-        metrics = classification_metrics(self.y_true, self.prob_real, fake_max_prob=0.3, real_min_prob=0.7)
+    def test_classification_metrics_with_threshold(self):
+        """Test binary classification metrics honour a custom threshold."""
+        metrics = classification_metrics(self.y_true, self.prob_real, decision_threshold=0.6)
         self.assertIn('accuracy', metrics)
         self.assertIn('coverage', metrics)
-        self.assertIn('n_classified', metrics)
-        self.assertIn('n_insufficient', metrics)
-        self.assertIn('confusion_matrix_3class', metrics)
+        self.assertIn('confusion_matrix_binary', metrics)
 
     def test_balanced_accuracy(self):
         """Test balanced accuracy calculation."""
         y_true = np.array([0, 0, 1, 1])
         prob_real = np.array([0.1, 0.2, 0.8, 0.9])
-        bal_acc = balanced_accuracy(y_true, prob_real, fake_max_prob=0.3, real_min_prob=0.7)
+        bal_acc = balanced_accuracy(y_true, prob_real)
         self.assertIsInstance(bal_acc, float)
         self.assertGreaterEqual(bal_acc, 0.0)
         self.assertLessEqual(bal_acc, 1.0)
@@ -118,28 +113,27 @@ class TestEvaluationMetrics(unittest.TestCase):
         bins = decision_bins(self.y_true, self.prob_real, cfg=cfg)
         self.assertIn('real', bins)
         self.assertIn('fake', bins)
-        self.assertIn('insufficient_evidence', bins)
         self.assertIn('coverage', bins)
-        self.assertIn('fake_max_prob', bins)
-        self.assertIn('real_min_prob', bins)
-        self.assertIn('quality_threshold', bins)
+        self.assertIn('decision_threshold', bins)
+        self.assertEqual(bins['real'] + bins['fake'], len(self.y_true))
 
-    def test_decision_bins_three_state(self):
-        """Test decision bins for three-state decision (using DecisionConfig)."""
-        cfg = DecisionConfig(fake_max_prob=0.3, real_min_prob=0.7)
+    def test_decision_bins_custom_threshold(self):
+        """Test decision bins honour a custom decision threshold."""
+        cfg = DecisionConfig(decision_threshold=0.6)
         bins = decision_bins(self.y_true, self.prob_real, cfg=cfg)
-        self.assertIn('real', bins)
-        self.assertIn('fake', bins)
-        self.assertIn('insufficient_evidence', bins)
-        self.assertIn('coverage', bins)
+        self.assertEqual(bins['decision_threshold'], 0.6)
+        # 0.1 0.2 0.4 -> FAKE; 0.6 0.8 0.9 -> REAL
+        self.assertEqual(bins['fake'], 3)
+        self.assertEqual(bins['real'], 3)
 
     def test_decision_bins_with_pqs(self):
-        """Test decision bins with PQS."""
+        """PQS argument is accepted and coverage stays 1.0 (binary contract)."""
         cfg = DecisionConfig()
         pqs = np.array([0.8, 0.8, 0.3, 0.6, 0.9, 0.9])
         bins = decision_bins(self.y_true, self.prob_real, cfg=cfg, pqs=pqs)
-        self.assertIn('insufficient_evidence', bins)
-        self.assertLessEqual(bins['coverage'], 1.0)
+        self.assertIn('real', bins)
+        self.assertIn('fake', bins)
+        self.assertEqual(bins['coverage'], 1.0)
 
 
 if __name__ == '__main__':

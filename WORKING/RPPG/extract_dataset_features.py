@@ -353,7 +353,7 @@ def _init_worker_gpu(
     )
     _WORKER["min_sqi"] = min_sqi
     _WORKER["max_nan_features"] = max_nan_features
-    from WORKING.RPPG.gpu_face_detector import GPUFaceDetector
+    from RPPG.gpu_face_detector import GPUFaceDetector
     _WORKER["gpu_detector"] = GPUFaceDetector(conf_threshold=0.25)
     _WORKER["roi_extractor"] = FaceROIExtractor()
 

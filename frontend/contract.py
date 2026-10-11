@@ -4,7 +4,7 @@ from __future__ import annotations
 
 API_VERSION = "1"
 PIPELINE_VERSION = "p2-1"
-VERDICTS = {"REAL", "FAKE"}
+VERDICTS = {"REAL", "FAKE", "INCONCLUSIVE"}
 
 
 def validate_result_payload(payload: dict) -> dict:

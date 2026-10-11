@@ -4,7 +4,7 @@
 `frame/` → `RPPG/` → `visual/` → `quantum/` (this directory).
 
 Consumes the **real fused feature table** (`WORKING/MAJ_OUTPUT_ROOT/visual/fused_features.csv`,
-63 features = 24 rPPG + 39 visual) and outputs the final KYC verdict
+59 features = 20 rPPG + 39 visual) and outputs the final KYC verdict
 **REAL / FAKE** via QAOA feature selection + hybrid VQC.
 
 No synthetic data is generated anywhere in the pipeline.
@@ -13,23 +13,23 @@ No synthetic data is generated anywhere in the pipeline.
 
 | File | Responsibility |
 |------|----------------|
-| `config.py` | Feature contract (`FUSED_FEATURE_NAMES`, 63 features), label conventions, dataclass configs, artifact paths |
+| `config.py` | Feature contract (`FUSED_FEATURE_NAMES`, 59 features), `PipelineStatus`, label conventions, sha256 helpers, dataclass configs, artifact paths |
 | `data.py` | Build/load `data_fused.npz`: label flip (`csv_to_quantum_label`), HR plausibility filter (30–220 BPM), subject-grouped 60/20/20 split + `split_manifest_fused.json` |
-| `scaling.py` | Train-only z-score `FeatureScaler` (saved as JSON) |
+| `scaling.py` | Train-only z-score `FeatureScaler` (saved as JSON), `validate_feature_schema()` / `transform_features()` |
 | `qaoa.py` | QAOA feature selection (59 → 3) with supervised discrimination weights (Mann-Whitney AUC) + parallel restarts |
 | `qaoa_sim.py` | Exact torch-native complex128 QAOA statevector simulator (default backend, ~20× faster than PennyLane) |
 | `vqc.py` | `HybridModel` (default quantum layer: `QuantumLayerTorch` exact torch sim; legacy PennyLane QNode kept for cross-verification) + head, class-balanced focal loss, CUDA-aware train / predict / cached load |
-| `evaluation.py` | Metrics (accuracy/F1/AUC/ECE), decision bins, `analyze_threshold_behavior` (Phase 1C diagnosis), 5-fold CV, classical baselines |
-| `plots.py` | ROC / confusion / calibration figure helpers |
+| `evaluation.py` | Metrics (accuracy/F1/AUC/ECE), decision bins, `analyze_threshold_behavior` (Phase 1C diagnosis), 5-fold CV, classical baselines, ROC/confusion/calibration figure helpers |
 | `pipeline.py` | CLI entry (`python -m quantum.pipeline`) + `predict_features()` inference entry |
-| `sweep.py` | Crash-safe hyperparameter sweep harness (QAOA × configs, VQC ~174 combos, leaderboard by AUC) |
+| `explain.py` | Evidence dossier builder (verdict explanation consumed by the API/frontend) |
+| `operations.py` | Shared hashing/fingerprint/dataset utilities for artifacts |
 | `tests.py` | Self-checks (10/10): beta-alive ansatz, Hamiltonian≡classical cost, feature-contract sync, split determinism, grouping, sim cross-verification, checkpoint compat, label conversion |
 
 ## Data Flow
 
 ```
 fused_features.csv → data.py (split + label flip + HR filter) → scaling.py (z-score)
-  → qaoa.py (63 → 3 selected) → vqc.py (train)
+  → qaoa.py (59 → 3 selected) → vqc.py (train)
   → hybrid_vqc_fused.pt + feature_scaler_fused.json + qaoa_selection_fused.json
   → pipeline.predict_features(features) → P(real) → REAL/FAKE
 ```
@@ -58,14 +58,11 @@ python -m quantum.pipeline --train --evaluate
 
 # Self-checks (10/10) — run after any qaoa.py/config.py/vqc.py change
 python -m quantum.tests
-
-# Hyperparameter sweep (dev tool)
-python -m quantum.sweep --timeout 600 --out sweep_leaderboard.json
 ```
 
 ## Constraints (Do Not Break)
 
-- `FUSED_FEATURE_NAMES` (63 features) must stay identical in name AND order to
+- `FUSED_FEATURE_NAMES` (59 features) must stay identical in name AND order to
   `RPPGFeatures.feature_names()` + `VISUAL_FEATURE_NAMES` — `data.py`, `qaoa.py`, `pipeline.py` index by it.
 - Label conventions differ per stage (do not unify): rPPG CSV uses
   `1 = fake` / `0 = real`; this layer uses `LABEL_REAL = 1`, `LABEL_FAKE = 0`.
@@ -95,7 +92,7 @@ python -m quantum.sweep --timeout 600 --out sweep_leaderboard.json
 | AUC-ROC | 0.535 | 0.556 ± 0.019 | 0.582 |
 | Decision Bins | REAL / FAKE | — | — |
 
-- **QAOA selection (63 → 3):** `['cheek_forehead_correlation', 'left_right_cheek_correlation', 'signal_to_motion_ratio']` (seed 44, cost −0.767). Restart spread [11.73, −0.098, −0.767, 9.83] with `success: false` — the QUBO landscape is difficult; the greedy classical reference overlaps on 2/3 features (`selection_comparison.json`).
+- **QAOA selection (59 → 3):** `['cheek_forehead_correlation', 'left_right_cheek_correlation', 'signal_to_motion_ratio']` (seed 44, cost −0.767). Restart spread [11.73, −0.098, −0.767, 9.83] with `success: false` — the QUBO landscape is difficult; the greedy classical reference overlaps on 2/3 features (`selection_comparison.json`).
 - **VQC test:** acc 0.552 / AUC-ROC 0.535 / specificity 0.702 / balanced acc 0.499 / ECE 0.068 — confusion `[[177,75],[202,105]]`. **First practical quantum advantage in FAKE detection** (VQC specificity 0.702 vs LR 0.525).
 - **Classical baselines:** best test AUC 0.582 (LogisticRegression), LinearSVC 0.581, GNB 0.568 — same ceiling as the VQC.
 - **Decision bins:** REAL (>=0.5) / FAKE (<0.5) at 0.5 threshold.
@@ -104,7 +101,7 @@ python -m quantum.sweep --timeout 600 --out sweep_leaderboard.json
 
 ## Performance Notes
 
-- **QAOA simulator (torch-native default):** `qaoa.simulator_device(wires, cfg)` with `QAOASelectionConfig.device="auto"` uses `qaoa_sim.QAOASimulator` — an exact complex128 statevector simulation, ~0.3–0.5 ms per circuit call on the 24-wire selection problem (~5.6 s via PennyLane, ~20× faster) and ~5 µs for 3 wires. CPU-process-safe (workers never open CUDA contexts). Restarts (default 8) run in parallel via `ProcessPoolExecutor`. Full selection: ~15 s.
+- **QAOA simulator (torch-native default):** `qaoa.simulator_device(wires, cfg)` with `QAOASelectionConfig.device="auto"` uses `qaoa_sim.QAOASimulator` — an exact complex128 statevector simulation, ~0.3–0.5 ms per circuit call on the 59-wire selection problem (~5.6 s via PennyLane, ~20× faster) and ~5 µs for 3 wires. CPU-process-safe (workers never open CUDA contexts). Restarts (default 8) run in parallel via `ProcessPoolExecutor`. Full selection: ~15 s.
 - **VQC training device:** the torch head of `HybridModel` runs on CUDA when available (`vqc.resolve_device()`); the circuit itself runs on the exact torch-native `QuantumLayerTorch` (complex128, batched state evolution). `VQCConfig.qnode_impl="auto"` selects it; `"pennylane"` selects the legacy PennyLane QNode (`default.qubit` + `backprop`) for cross-verification. Checkpoints are interchangeable (same `weights` shape `(qml_layers, n, 3)`).
 - **Lazy imports:** sklearn and xgboost are imported lazily so QAOA spawn workers and module imports stay cheap.
 - `lightning.gpu` is not installable on Windows (cuQuantum/custatevec has no Windows wheels) and PennyLane ≥ 0.39 removed `default.qubit.torch` — which is why the project ships its own exact torch-native simulators.
@@ -128,7 +125,7 @@ Requires pre-trained fused artifacts:
 If missing, run from `WORKING/`:
 ```bash
 export DFDC_DATASET_PATH=/path/to/DFDC_Dataset
-python rppg-pipeline/extract_dataset_features.py --workers 0 --gpu
+python RPPG/extract_dataset_features.py --workers 0 --gpu
 python visual/pipeline.py --frames-root MAJ_OUTPUT_ROOT/frames/frame_sequences --rppg-csv MAJ_OUTPUT_ROOT/rppg/dataset_features.csv --fuse --create-splits
 python -m quantum.pipeline --all
 ```

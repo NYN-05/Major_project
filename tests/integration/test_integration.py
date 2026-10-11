@@ -105,31 +105,30 @@ class TestPQSIntegration(unittest.TestCase):
         self.assertEqual(pqs_result.quality_tier, 'HIGH')
 
 
-class TestThreeStateDecision(unittest.TestCase):
-    """Test three-state decision logic."""
+class TestBinaryDecision(unittest.TestCase):
+    """Test binary decision logic (REAL/FAKE quantum-stage contract)."""
 
-    def test_decision_bins_three_state(self):
-        """Test three-state decision bins."""
+    def test_decision_bins_binary(self):
+        """Test binary decision bins."""
         y_true = np.array([0, 0, 1, 1, 1, 1])
         prob_real = np.array([0.1, 0.2, 0.4, 0.6, 0.8, 0.9])
-        cfg = DecisionConfig(fake_max_prob=0.3, real_min_prob=0.7)
+        cfg = DecisionConfig()
         bins = decision_bins(y_true, prob_real, cfg=cfg)
         self.assertIn('real', bins)
         self.assertIn('fake', bins)
-        self.assertIn('insufficient_evidence', bins)
         self.assertIn('coverage', bins)
-        self.assertIn('fake_max_prob', bins)
-        self.assertIn('real_min_prob', bins)
+        self.assertEqual(bins['real'] + bins['fake'], len(y_true))
 
     def test_decision_bins_with_pqs(self):
-        """Test decision bins with PQS."""
+        """PQS argument accepted; coverage stays 1.0 in binary contract."""
         y_true = np.array([0, 0, 1, 1, 1, 1])
         prob_real = np.array([0.1, 0.2, 0.4, 0.6, 0.8, 0.9])
         pqs = np.array([0.8, 0.8, 0.3, 0.6, 0.9, 0.9])
-        cfg = DecisionConfig(fake_max_prob=0.3, real_min_prob=0.7)
+        cfg = DecisionConfig()
         bins = decision_bins(y_true, prob_real, cfg=cfg, pqs=pqs)
-        self.assertIn('insufficient_evidence', bins)
-        self.assertLessEqual(bins['coverage'], 1.0)
+        self.assertIn('real', bins)
+        self.assertIn('fake', bins)
+        self.assertEqual(bins['coverage'], 1.0)
 
 
 class TestEndToEndWorkflow(unittest.TestCase):
