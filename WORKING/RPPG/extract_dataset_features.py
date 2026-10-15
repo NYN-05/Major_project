@@ -291,6 +291,7 @@ def _init_worker(
         pass
     os.environ.setdefault("GLOG_minloglevel", "2")
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
     _WORKER["pipeline"] = RPPGPipeline(
         method=method,
         target_fps=target_fps,
@@ -330,6 +331,7 @@ def _init_worker_gpu(
         pass
     os.environ.setdefault("GLOG_minloglevel", "2")
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
     # Ensure torch lib (cuDNN) is on PATH before ORT loads CUDA provider
     try:
         import torch as _torch  # noqa: F401
@@ -355,7 +357,9 @@ def _init_worker_gpu(
     _WORKER["max_nan_features"] = max_nan_features
     from RPPG.gpu_face_detector import GPUFaceDetector
     _WORKER["gpu_detector"] = GPUFaceDetector(conf_threshold=0.25)
-    _WORKER["roi_extractor"] = FaceROIExtractor()
+    # Bbox-only: YuNet supplies bbox (landmarks_px=None), so skip the
+    # MediaPipe FaceLandmarker entirely (avoids XNNPACK/feedback spam).
+    _WORKER["roi_extractor"] = FaceROIExtractor(init_landmarker=False)
 
 
 def _gate_result(result, min_sqi: float, max_nan_features: int) -> Optional[str]:

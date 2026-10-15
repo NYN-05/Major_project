@@ -259,6 +259,7 @@ if _MEDIAPIPE_AVAILABLE:
             skin_mask_enabled: bool = True,
             motion_comp: bool = True,
             model_path: Optional[str] = None,
+            init_landmarker: bool = True,
         ):
             if not _MEDIAPIPE_AVAILABLE:
                 raise ImportError(
@@ -266,24 +267,26 @@ if _MEDIAPIPE_AVAILABLE:
                     "Install with: pip install mediapipe"
                 )
 
-            from mediapipe.tasks.python import BaseOptions
-            from mediapipe.tasks.python.vision import (
-                FaceLandmarker,
-                FaceLandmarkerOptions,
-                RunningMode,
-            )
+            self._landmarker = None
+            if init_landmarker:
+                from mediapipe.tasks.python import BaseOptions
+                from mediapipe.tasks.python.vision import (
+                    FaceLandmarker,
+                    FaceLandmarkerOptions,
+                    RunningMode,
+                )
 
-            resolved_model_path = model_path or ensure_face_landmarker_model()
+                resolved_model_path = model_path or ensure_face_landmarker_model()
 
-            options = FaceLandmarkerOptions(
-                base_options=BaseOptions(model_asset_path=resolved_model_path),
-                running_mode=RunningMode.VIDEO,
-                num_faces=1,
-                min_face_detection_confidence=min_detection_confidence,
-                min_face_presence_confidence=min_detection_confidence,
-                min_tracking_confidence=min_tracking_confidence,
-            )
-            self._landmarker = FaceLandmarker.create_from_options(options)
+                options = FaceLandmarkerOptions(
+                    base_options=BaseOptions(model_asset_path=resolved_model_path),
+                    running_mode=RunningMode.VIDEO,
+                    num_faces=1,
+                    min_face_detection_confidence=min_detection_confidence,
+                    min_face_presence_confidence=min_detection_confidence,
+                    min_tracking_confidence=min_tracking_confidence,
+                )
+                self._landmarker = FaceLandmarker.create_from_options(options)
             self._smoother = LandmarkSmoother(alpha=smoothing_alpha)
             self.skin_mask_enabled = skin_mask_enabled
             self.motion_comp = motion_comp
@@ -293,7 +296,9 @@ if _MEDIAPIPE_AVAILABLE:
             self._fallback_cascade = _load_haar_cascade()
 
         def close(self):
-            self._landmarker.close()
+            if getattr(self, '_landmarker', None) is not None:
+                self._landmarker.close()
+                self._landmarker = None
 
         def __enter__(self):
             return self
@@ -305,6 +310,16 @@ if _MEDIAPIPE_AVAILABLE:
 
         def detect(self, frame_bgr: np.ndarray, frame_index: int) -> TrackedFace:
             h, w = frame_bgr.shape[:2]
+            if getattr(self, '_landmarker', None) is None:
+                # GPU/YuNet path: bbox-only extractor, no MediaPipe landmarker.
+                # Fall back to Haar cascade so detect() stays usable.
+                gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+                if getattr(self, '_fallback_cascade', None) is not None and not self._fallback_cascade.empty():
+                    faces = self._fallback_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
+                    if len(faces) > 0:
+                        x, y, w, h = faces[0]
+                        return TrackedFace(frame_index=frame_index, found=True, landmarks_px=None, bbox=(x, y, w, h), confidence=0.6)
+                return TrackedFace(frame_index=frame_index, found=False, landmarks_px=None, bbox=None, confidence=0.0)
             rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 

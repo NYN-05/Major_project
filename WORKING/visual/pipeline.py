@@ -156,6 +156,7 @@ def extract_visual_features_dataset(
         return
 
     out_df = pd.DataFrame(features_list)
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
     out_df.to_csv(output_csv, index=False)
     cache_metadata = {
         "cache_key": cache_key(
@@ -268,6 +269,7 @@ def extract_visual_features_from_videos(
         return
 
     out_df = pd.DataFrame(features_list)
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
     out_df.to_csv(output_csv, index=False)
     print(f"Visual features saved to {output_csv} ({stats['processed']} videos)")
     print(f"Failed: {stats['failed']}")
@@ -328,6 +330,7 @@ def fuse_features(
         fused = fused.rename(columns={"video_path_rppg": "video_path"})
         fused = fused.drop(columns=["video_path_visual"], errors="ignore")
 
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
     fused.to_csv(output_csv, index=False)
     print(f"Fused features saved to {output_csv} ({len(fused)} videos)")
     print(f"  rPPG features: {len([c for c in rppg_df.columns if c not in ['label', 'video_path', 'video_id', 'source', 'video_stem']])}")

@@ -117,9 +117,9 @@ if (Test-Artifact $Venv) {
 }
 
 # Check if key packages are already installed (avoid slow reinstall)
-$pkgsInstalled = & $Venv -c "import torch, numpy, scipy, sklearn; print('ok')" 2>$null
+$pkgsInstalled = & $Venv -c "import torch, numpy, scipy, sklearn, onnxruntime as ort; assert ort.__version__ == '1.20.2', ort.__version__; print('ok')" 2>$null
 if ($pkgsInstalled -eq 'ok') {
-    Write-Host "  Core packages already installed" -ForegroundColor Green
+    Write-Host "  Core packages already installed (incl. onnxruntime-gpu 1.20.2)" -ForegroundColor Green
 } else {
     Write-Host "  Installing Python packages (this may take a few minutes)..."
     $stderr_log = Join-Path $OutRoot 'pip_install_stderr.log'
@@ -141,7 +141,7 @@ print(f'Torch CUDA: {torch.cuda.is_available()}')
 if torch.cuda.is_available():
     print(f'  GPU: {torch.cuda.get_device_name(0)}')
     print(f'  cuDNN: {torch.backends.cudnn.version()}')
-print(f'ORT providers: {ort.get_available_providers()}')
+print(f'ORT {ort.__version__} providers: {ort.get_available_providers()}')
 " 2>&1
 Write-Host "  $gpuCheck" -ForegroundColor DarkGray
 
@@ -184,7 +184,10 @@ for p in [r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin',
           r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.3\bin',
           r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin',
           r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.5\bin',
-          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin']:
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin',
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.7\bin',
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin',
+          r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\bin']:
     if os.path.isdir(p):
         print(p)
         break
@@ -248,7 +251,8 @@ for p in [r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin',
     Write-Host "  Extracting features..."
     Write-Host "  log: $stderr_log"
     # Capture both stdout and stderr to log file
-    & $Venv (Join-Path $Working 'RPPG\extract_dataset_features.py') @extractArgs *>&1 > $stderr_log
+    # pwsh file writes are blocked by Controlled Folder Access; tee through python
+    & $Venv -c "import subprocess,sys; p=subprocess.Popen([sys.executable,sys.argv[2],*sys.argv[3:]],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',bufsize=1); f=open(sys.argv[1],'w',encoding='utf-8',errors='replace',buffering=1); BENIGN=('face_landmarker_graph.cc','inference_feedback_manager.cc','Created TensorFlow Lite XNNPACK delegate','Sets FaceBlendshapesGraph acceleration','Feedback manager requires a model');[(print(l,end='') if not any(b in l for b in BENIGN) else None) or f.write(l) for l in p.stdout]; f.close(); sys.exit(p.wait())" $stderr_log (Join-Path $Working 'RPPG\extract_dataset_features.py') @extractArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host "FAILED: feature extraction (exit $LASTEXITCODE). See $stderr_log" -ForegroundColor Red
         Get-Content $stderr_log -Tail 50
@@ -354,7 +358,7 @@ if ($allQuantumExist) {
     Push-Location $Working
     # Explicitly pass the environment variable to avoid trailing space issues
     $env:MAJ_OUTPUT_ROOT = $env:MAJ_OUTPUT_ROOT.Trim()
-    $proc = Start-Process -FilePath $Venv -ArgumentList "-m quantum.pipeline --all --csv-file $FusedCsv" -Wait -PassThru -NoNewWindow
+    $proc = Start-Process -FilePath $Venv -ArgumentList "-m quantum.pipeline --all --csv-file $FusedCsv" -Wait -PassThru -NoNewWindow -WorkingDirectory $Working
     $exit = $proc.ExitCode
     Pop-Location
     # Training succeeds but evaluation may fail on fresh run due to checksum mismatch

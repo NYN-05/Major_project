@@ -74,6 +74,14 @@
 
 | 2026-10-11 23:18 IST | Refactoring — validation | Final validation of the file-count consolidation (49 → 28 package py files under `WORKING/{frame,RPPG,visual,quantum}`): removed the trivial one-comment `frame/__init__.py` (namespace-package imports verified for `from frame.pipeline import ...` and `python -m frame.pipeline --help`; plan target frame 5 → 3 reached). Final counts: frame 3, RPPG 10, visual 3, quantum 12. Validation: `python -m quantum.tests` 10/10 PASS (with `MAJ_OUTPUT_ROOT` set), `pytest tests` 71 passed / 4 skipped (skips pre-existing), `npm run build` succeeded. Stage-1 handoff, fused 59-feature contract, label conventions, sha256 artifact verification, and `run_pipeline.py` INCONCLUSIVE/exit-3 behavior all preserved. | Complete |
 
+| 2026-10-11 23:10 IST | setup_and_run.ps1 | Extended CUDA 12.x probe to v12.7-v12.9; CFA-safe extraction log write via python tee; explicit Start-Process -WorkingDirectory; -Quick smoke run completed end-to-end (38 videos, fused 59 features, quantum VQC trained+evaluated). | Complete |
+
+| 2026-10-12 00:10 IST | Documentation | Created PROJECT_RESEARCH_REPORT.md at the project root: evidence-based 20-section research audit of the repository (architecture, preprocessing, dataset, splits, quantum config, training config, smoke-run metrics with n=8 caveats, baselines, limitations, licensing gaps, repo/team evidence). Report only; no source, config, dataset, or artifact was modified. |
+
+| 2026-10-15 19:12 IST | rPPG GPU + setup script | Restored YuNet CUDA face detection by upgrading onnxruntime-gpu 1.18.1 to 1.20.2 (cuDNN 9 compatible; CUDA 12.9 sufficient, no 12.4/12.6 install needed) and enforcing the ORT version in the setup venv check; eliminated GPU-mode MediaPipe XNNPACK/feedback log spam via lazy FaceROIExtractor landmarker (init_landmarker=False) plus console tee filtering (full log kept on disk). Validation: YuNet preflight CUDA active with no ORT errors, 2-video GPU smoke extraction in Scrape/ clean (1 fake + 1 real), tests/rppg 18/18 pass, quantum.tests 2 pass + 1 pre-existing skip (fused CSV absent). | Complete |
+
+
+| 2026-10-15 19:40 IST | setup_and_run.ps1 + visual pipeline | Fixed the console-tee one-liner (PowerShell quoting: single quotes inside; print-before-write order so benign-line filter actually prints); added output_csv.parent.mkdir guards before CSV writes in WORKING/visual/pipeline.py after a transient missing-directory failure. Validation: dummy-emitter tee test (console 2/5 lines, file 5/5), visual rerun exit 0 with 162 videos fused to 59 features. | Complete |
 ## Historical Entries
 
 ### Architecture and Feature Fusion
