@@ -56,6 +56,122 @@ _WORKER: dict = {}
 _PAUSE_REQUESTED = False
 
 
+# CSV durability: transient Windows file locks (AV/indexer/sync tools holding
+# the CSV, or a second writer) surface as PermissionError on os.replace. Retry
+# with backoff before giving up, and batch multi-worker appends so a 4000-row
+# table is rewritten ~160x per run instead of ~4000x.
+_CSV_WRITE_RETRIES = 5
+_CSV_RETRY_BASE_S = 0.5
+_CSV_FLUSH_EVERY = 25
+
+
+def _atomic_csv_replace(out_df, out_csv_path: Path) -> None:
+    """Write df to out_csv_path atomically via temp file + rename.
+
+    Retries transient lock errors (PermissionError/OSError) with exponential
+    backoff; re-raises the last error when retries are exhausted. Cleans up
+    the temp file on permanent failure.
+    """
+    import time
+
+    os.makedirs(out_csv_path.parent, exist_ok=True)
+    temp_path = out_csv_path.with_suffix(".csv.tmp")
+    attempt = 0
+    while True:
+        try:
+            out_df.to_csv(str(temp_path), index=False)
+            os.replace(temp_path, out_csv_path)
+            return
+        except OSError as exc:
+            attempt += 1
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except OSError:
+                pass
+            if attempt > _CSV_WRITE_RETRIES:
+                raise
+            delay = _CSV_RETRY_BASE_S * (2 ** (attempt - 1))
+            print(f"  [csv-retry] {type(exc).__name__} writing {out_csv_path.name} "
+                  f"(attempt {attempt}/{_CSV_WRITE_RETRIES}); retrying in {delay:.1f}s")
+            time.sleep(delay)
+
+
+def _read_existing_csv(out_csv_path: Path):
+    """Read the existing CSV, retrying transient lock errors; None if absent/unreadable."""
+    import time
+
+    for attempt in range(4):
+        try:
+            if out_csv_path.exists():
+                return pd.read_csv(str(out_csv_path))
+            return None
+        except OSError:
+            if attempt >= 3:
+                return None
+            time.sleep(_CSV_RETRY_BASE_S * (2 ** attempt))
+        except Exception:
+            return None
+    return None
+
+
+_EXTRACTION_LOCK_NAME = "extraction.lck"
+_EXTRACTION_LOCK_STALE_S = 6 * 3600
+_extraction_lock_path = None
+
+
+def _acquire_extraction_lock(out_dir: Path) -> Path:
+    """Ensure no other extraction is writing to out_dir.
+
+    Creates an exclusive lock file; a second concurrent extraction exits
+    instead of racing on the CSV/checkpoint. Stale locks (>6h, e.g. from a
+    killed run) are reclaimed with a warning. Released via atexit.
+    """
+    import atexit
+
+    global _extraction_lock_path
+    lock_path = Path(out_dir) / _EXTRACTION_LOCK_NAME
+    os.makedirs(out_dir, exist_ok=True)
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            age_s = time.time() - lock_path.stat().st_mtime
+        except OSError:
+            age_s = 0
+        if age_s > _EXTRACTION_LOCK_STALE_S:
+            print(f"[lock] Reclaiming stale extraction lock ({age_s / 3600:.1f}h old): {lock_path}")
+            lock_path.unlink(missing_ok=True)
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        else:
+            holder = ""
+            try:
+                holder = lock_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+            holder = f" ({holder})" if holder else ""
+            raise SystemExit(
+                f"FATAL: another extraction already holds {lock_path}{holder}. "
+                f"Refusing to run two writers on the same CSV. If no extraction is "
+                f"running, delete the lock file and retry."
+            )
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(f"pid={os.getpid()}")
+    _extraction_lock_path = lock_path
+    atexit.register(_release_extraction_lock)
+    return lock_path
+
+
+def _release_extraction_lock() -> None:
+    """Best-effort release of the extraction lock (atexit)."""
+    global _extraction_lock_path
+    if _extraction_lock_path is not None:
+        try:
+            _extraction_lock_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        _extraction_lock_path = None
+
 @dataclass
 class CheckpointState:
     """Persistent checkpoint state for dataset generation."""
@@ -84,19 +200,45 @@ class CheckpointState:
 class CheckpointManager:
     """Manages checkpoint state with atomic writes and resume capability."""
 
+    # Keys that MUST match exactly between runs (structural changes) vs
+    # keys that may differ (execution params) without invalidating completed work.
+    _IDENTITY_CONFIG_KEYS = (
+        "method",
+        "target_fps",
+        "blur_threshold",
+        "brightness_min",
+        "brightness_max",
+        "min_usable_frames",
+        "min_sqi",
+        "max_nan_features",
+        "max_per_class",
+    )
+    _RUNTIME_CONFIG_KEYS = (
+        "gpu",
+        "gpu_workers",
+        "workers",
+    )
+
     def __init__(self, checkpoint_path: Path, samples: List[Tuple[int, Path, str, Path]], config: dict):
         self.checkpoint_path = checkpoint_path
         self.samples = samples
         self.config = config
         self.state = CheckpointState()
-        self._config_hash = self._compute_config_hash(config)
+        # Hash only identity keys so runtime changes (gpu/workers) do not invalidate checkpoint.
+        identity_config = {k: config.get(k) for k in self._IDENTITY_CONFIG_KEYS if k in config}
+        self._config_hash = self._compute_config_hash(identity_config)
         self._sample_hashes = [self._hash_sample(s) for s in samples]
         self._sample_paths = [str(s[1]) for s in samples]  # for quick lookup
         self._index_to_path = {i: str(s[1]) for i, s in enumerate(samples)}
         self._lock = mp.Lock()
 
     def _compute_config_hash(self, config: dict) -> str:
-        """Compute a hash of the configuration for validation."""
+        """Compute a hash of the IDENTITY configuration for validation.
+
+        Only keys in _IDENTITY_CONFIG_KEYS are included; runtime keys like
+        gpu/workers are intentionally excluded so resuming with different
+        execution parameters does not discard completed work.
+        """
         import hashlib
         config_str = json.dumps(config, sort_keys=True)
         return hashlib.sha256(config_str.encode()).hexdigest()[:16]
@@ -122,15 +264,37 @@ class CheckpointManager:
         try:
             with open(self.checkpoint_path, "r") as f:
                 data = json.load(f)
-            # Verify config compatibility
-            if data.get("config_hash") != self._config_hash:
-                print(f"[checkpoint] Config mismatch, starting fresh (hash: {data.get('config_hash')} vs {self._config_hash})")
-                return False
+
+            # Verify config compatibility (IDENTITY keys only)
+            saved_hash = data.get("config_hash", "")
+            if saved_hash != self._config_hash:
+                # Differentiate: which identity keys actually differ?
+                diff_keys = []
+                saved_config = data.get("config", {})
+                for k in self._IDENTITY_CONFIG_KEYS:
+                    if saved_config.get(k) != self.config.get(k):
+                        diff_keys.append(k)
+                if diff_keys:
+                    parts = []
+                    for k in diff_keys:
+                        v = self.config.get(k)
+                        parts.append("--" + k.replace("_", "-") + " " + str(v))
+                    joined = ", ".join(parts)
+                    print(f"[checkpoint] Config mismatch on identity keys {diff_keys}; "
+                          f"cannot resume. Re-run with matching: " + joined)
+                    return False
+                # Hash differs but keys dont — possible hash collision or extra keys.
+                print(f"[checkpoint] Config hash mismatch (hash: {saved_hash} vs {self._config_hash}), "
+                      f"but identity keys match. Continuing with warning.")
+                # fall through to load anyway
+
             # Verify sample list integrity
             saved_hashes = data.get("sample_hashes", [])
             if saved_hashes != self._sample_hashes:
-                print(f"[checkpoint] Sample list changed, starting fresh")
+                print(f"[checkpoint] Sample list changed (dataset path/--max-per-class differs); "
+                      f"cannot resume. Delete checkpoint or re-run with same --max-per-class.")
                 return False
+
             # Restore state
             self.state = CheckpointState(
                 last_completed_index=data.get("last_completed_index", -1),
@@ -139,12 +303,12 @@ class CheckpointManager:
                 failed_count=data.get("failed_count", 0),
                 no_features_count=data.get("no_features_count", 0),
                 gated_count=data.get("gated_count", 0),
-                config_hash=data.get("config_hash", ""),
+                config_hash=saved_hash,
                 sample_hashes=data.get("sample_hashes", []),
                 completed_samples=data.get("completed_samples", []),
                 completed_indices=set(data.get("completed_indices", [])),
                 paused=data.get("paused", False),
-                resume_from_index=data.get("resume_from_index", 0),
+                resume_from_index=data.get("resume_from_index", -1),  # normalize to -1 default
             )
             # Validate state consistency
             if self.state.last_completed_index >= len(self.samples) and self.state.last_completed_index != -1:
@@ -186,6 +350,7 @@ class CheckpointManager:
             "no_features_count": self.state.no_features_count,
             "gated_count": self.state.gated_count,
             "config_hash": self._config_hash,
+            "config": {k: self.config.get(k) for k in self._IDENTITY_CONFIG_KEYS if k in self.config},
             "sample_hashes": self._sample_hashes,
             "completed_samples": self.state.completed_samples,
             "completed_indices": sorted(self.state.completed_indices),
@@ -522,50 +687,39 @@ def _write_features_csv_atomic(features_list: List[dict], out_csv_path: Path) ->
     """Atomically write the accumulated feature rows to CSV, sorted by video_path.
 
     Writes to a temp file first, then renames to the target path to prevent
-    partial/corrupt CSV files on interruption.
+    partial/corrupt CSV files on interruption. Transient lock errors are
+    retried (see _atomic_csv_replace).
     """
     out_df = pd.DataFrame(features_list)
     out_df = out_df.sort_values("video_path").reset_index(drop=True)
-    os.makedirs(out_csv_path.parent, exist_ok=True)
-    temp_path = out_csv_path.with_suffix(".csv.tmp")
-    try:
-        temp_df = out_df.sort_values("video_path").reset_index(drop=True)
-        temp_df.to_csv(str(temp_path), index=False)
-        os.replace(temp_path, out_csv_path)
-    except OSError:
-        if temp_path.exists():
-            temp_path.unlink()
-        raise
+    _atomic_csv_replace(out_df, out_csv_path)
 
 
 def _append_entry_to_csv_atomic(entry: dict, out_csv_path: Path) -> None:
     """Append a single entry to the CSV atomically.
 
     Reads the existing CSV (if any), appends the new entry, sorts by video_path,
-    and writes atomically via temp file + rename.
+    and writes atomically via temp file + rename. Transient lock errors are
+    retried (see _atomic_csv_replace).
     """
     out_df = pd.DataFrame([entry])
-    os.makedirs(out_csv_path.parent, exist_ok=True)
-    temp_path = out_csv_path.with_suffix(".csv.tmp")
-
-    # Read existing data if CSV exists
-    if out_csv_path.exists():
-        try:
-            existing_df = pd.read_csv(str(out_csv_path))
-            out_df = pd.concat([existing_df, out_df], ignore_index=True)
-        except Exception:
-            pass  # Start fresh if read fails
-
-    # Sort by video_path for consistent ordering
+    existing_df = _read_existing_csv(out_csv_path)
+    if existing_df is not None:
+        out_df = pd.concat([existing_df, out_df], ignore_index=True)
     out_df = out_df.sort_values("video_path").reset_index(drop=True)
-    try:
-        temp_df = out_df.sort_values("video_path").reset_index(drop=True)
-        temp_df.to_csv(str(temp_path), index=False)
-        os.replace(temp_path, out_csv_path)
-    except OSError:
-        if temp_path.exists():
-            temp_path.unlink()
-        raise
+    _atomic_csv_replace(out_df, out_csv_path)
+
+
+def _append_entries_to_csv_atomic(entries: List[dict], out_csv_path: Path) -> None:
+    """Append a batch of entries with a single atomic rewrite (flush path)."""
+    if not entries:
+        return
+    out_df = pd.DataFrame(entries)
+    existing_df = _read_existing_csv(out_csv_path)
+    if existing_df is not None:
+        out_df = pd.concat([existing_df, out_df], ignore_index=True)
+    out_df = out_df.sort_values("video_path").reset_index(drop=True)
+    _atomic_csv_replace(out_df, out_csv_path)
 
 
 def _repo_root() -> Path:
@@ -707,6 +861,9 @@ def main() -> None:
     # Configure checkpoint path
     checkpoint_path = Path(args.checkpoint_file) if args.checkpoint_file else out_csv_path.parent / "checkpoint.json"
 
+    # Refuse a second concurrent writer on this CSV/checkpoint.
+    _acquire_extraction_lock(out_csv_path.parent)
+
     # Set up checkpoint manager
     config = {
         "method": args.method,
@@ -740,9 +897,17 @@ def main() -> None:
     range_end = args.end if args.end is not None else len(items)
     if args.resume:
         if not ckpt_mgr.load():
+            # Try canonical locations to give a helpful hint
+            canonical = out_csv_path.parent / "checkpoint.json"
+            alt = Path(args.checkpoint_file) if args.checkpoint_file else canonical
+            hint = ""
+            if checkpoint_path != canonical:
+                hint = f" (also tried {canonical})"
             raise SystemExit(
-                f"[checkpoint] --resume requested but no valid checkpoint was found at "
-                f"{checkpoint_path}. Run without --resume to start fresh."
+                f"[checkpoint] --resume requested but no valid checkpoint found at "
+                f"{checkpoint_path}{hint}. "
+                f"Use --checkpoint-file PATH if your checkpoint is elsewhere, "
+                f"or run without --resume to start fresh."
             )
         if ckpt_mgr.state.completed_indices and not out_csv_path.exists():
             raise SystemExit(
@@ -907,6 +1072,22 @@ def main() -> None:
             print("Nothing to do: every sample in the requested range is already completed.")
             return
 
+        csv_buffer: List[dict] = []
+        ckpt_buffer: List[Tuple[int, str]] = []  # (sample idx, video path)
+
+        def _flush_csv() -> None:
+            """Durably persist buffered successes, then checkpoint them.
+
+            Checkpoints are saved only AFTER the CSV rewrite lands, so a crash
+            can never mark rows done that a later --resume would then skip.
+            """
+            if not csv_buffer:
+                return
+            _append_entries_to_csv_atomic(csv_buffer, out_csv_path)
+            for _idx, _vp in ckpt_buffer:
+                ckpt_mgr.save(_idx, "processed", _vp)
+            csv_buffer.clear()
+            ckpt_buffer.clear()
         def _record_result(entry: dict) -> None:
             """Persist one worker result: append to CSV (success only) and
             save the checkpoint atomically. Skips duplicates."""
@@ -932,9 +1113,11 @@ def main() -> None:
                 print(f"  -> Gated (low signal quality): {video_path.name} "
                       f"({entry.get('gate_reason', 'unknown')})")
             else:
-                _append_entry_to_csv_atomic(entry, out_csv_path)
-                ckpt_mgr.save(idx, "processed", str(video_path))
+                csv_buffer.append(entry)
+                ckpt_buffer.append((idx, str(video_path)))
                 stats["processed"] += 1
+                if len(csv_buffer) >= _CSV_FLUSH_EVERY:
+                    _flush_csv()
 
         with mp.Pool(
             n_workers,
@@ -955,6 +1138,7 @@ def main() -> None:
                         _record_result(entry)
                     except (mp.TimeoutError, StopIteration):
                         pass
+                    _flush_csv()
                     ckpt_mgr.mark_paused()
                     print(f"[pause] {ckpt_mgr.state.processed_count} samples completed overall. "
                           f"Resume with --resume to continue.")
@@ -963,6 +1147,7 @@ def main() -> None:
                 try:
                     entry = results.next(timeout=ITEM_TIMEOUT_S)
                 except mp.TimeoutError:
+                    _flush_csv()
                     pool.terminate()
                     raise SystemExit(
                         f"FATAL: worker hung for > {ITEM_TIMEOUT_S}s "
@@ -983,6 +1168,7 @@ def main() -> None:
                               f"{stats['no_features']} no-feat / {stats['gated']} gated | "
                               f"{rate:.2f} vid/s | ETA ~{remain / 60:.0f} min")
 
+        _flush_csv()
         if stats["processed"] == 0 and not out_csv_path.exists():
             print("No features extracted from any videos.")
             return
