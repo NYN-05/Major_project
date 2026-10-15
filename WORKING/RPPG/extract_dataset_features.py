@@ -386,7 +386,6 @@ class CheckpointManager:
                 delay += random.uniform(0, 0.5)
                 print(f"  [ckpt-retry] {type(exc).__name__} writing checkpoint "
                       f"(attempt {attempt}/{_CKPT_WRITE_RETRIES}); retrying in {delay:.1f}s")
-                time.sleep(delay)ing in {delay:.1f}s")
                 time.sleep(delay)
 
     def mark_paused(self) -> None:
