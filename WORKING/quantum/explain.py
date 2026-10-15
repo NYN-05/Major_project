@@ -258,32 +258,3 @@ def build_explanation(
     )
 
 
-def create_explanation_from_pipeline_result(
-    prob_real: float,
-    pqs_result: Optional['PQSResult'] = None,
-    visual_result: Optional[Dict] = None,
-    decision_cfg = None,
-    features: Optional[Dict] = None,
-) -> DecisionExplanation:
-    """Convenience function to create explanation from pipeline results."""
-    from quantum.config import DecisionConfig
-    cfg = decision_cfg or DecisionConfig()
-    return build_explanation(prob_real, cfg, pqs_result, visual_result)
-
-
-if __name__ == "__main__":
-    # Quick test
-    from rppg.pqs import PQSResult, PQSComponents
-    
-    # Test with mock PQS
-    comp = PQSComponents(
-        snr_quality=0.8, frame_utilization=0.9, roi_validity=0.9,
-        cross_roi_consistency=0.8, frequency_stability=0.7,
-        signal_amplitude=0.6, temporal_consistency=0.5
-    )
-    pqs = PQSResult(pqs=0.75, quality_tier="HIGH", components=comp)
-    
-    expl = build_explanation(0.8, decision_cfg=None, pqs_result=pqs)
-    print(expl.to_text())
-    print()
-    print(expl.to_json())

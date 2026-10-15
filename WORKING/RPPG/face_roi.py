@@ -50,6 +50,8 @@ except ImportError:  # pragma: no cover
 
 import hashlib  # noqa: E402
 
+from quantum.config import sha256_file as _sha256_file, verify_sha256 as _verify_sha256  # noqa: E402
+
 _REPOSITORY_MODELS_DIR = Path(__file__).resolve().parent  # WORKING/RPPG/
 
 _BUNDLED_FACE_LANDMARKER = _REPOSITORY_MODELS_DIR / "face_landmarker.task"
@@ -64,16 +66,14 @@ HAAR_SHA256 = "0F7D4527844EB514D4A4948E822DA90FBB16A34A0BBBBC6ADC6498747A5AAFB0"
 
 
 def _asset_sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest().upper()
+    """SHA-256 of an asset file (delegates to quantum.config.sha256_file)."""
+    return _sha256_file(path).upper()
 
 
 def _verify_asset(path: Path, expected: str, what: str) -> None:
-    actual = _asset_sha256(path)
-    if actual != expected:
+    """Verify asset SHA-256 (delegates to quantum.config.verify_sha256)."""
+    actual = _verify_sha256(path)
+    if actual.upper() != expected:
         raise RuntimeError(
             f"{what} checksum mismatch at {path}:\n"
             f"  expected SHA-256: {expected}\n"
@@ -362,10 +362,6 @@ if _MEDIAPIPE_AVAILABLE:
                 bbox=bbox,
                 confidence=1.0,
             )
-
-        def reset_tracking(self):
-            self._smoother.reset()
-            self._ref_pts = None
 
         # -- ROI extraction --------------------------------------------------
 

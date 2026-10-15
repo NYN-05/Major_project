@@ -63,6 +63,9 @@ _PAUSE_REQUESTED = False
 _CSV_WRITE_RETRIES = 5
 _CSV_RETRY_BASE_S = 0.5
 _CSV_FLUSH_EVERY = 25
+# Checkpoint-specific: more retries + longer base delay for WinError 32 resilience
+_CKPT_WRITE_RETRIES = 10
+_CKPT_RETRY_BASE_S = 1.0
 
 
 def _atomic_csv_replace(out_df, out_csv_path: Path) -> None:
@@ -250,13 +253,6 @@ class CheckpointManager:
         sample_str = f"{label}|{path}|{source}"
         return hashlib.sha256(sample_str.encode()).hexdigest()[:16]
 
-    def _get_index_for_path(self, path: str) -> Optional[int]:
-        """Get the index for a sample path, or None if not found."""
-        for i, s in enumerate(self.samples):
-            if str(s[1]) == path:
-                return i
-        return None
-
     def load(self) -> bool:
         """Load checkpoint from disk. Returns True if valid and compatible."""
         if not self.checkpoint_path.exists():
@@ -341,7 +337,11 @@ class CheckpointManager:
             self._write_locked()
 
     def _write_locked(self) -> None:
-        """Serialize state to the checkpoint file atomically (lock held)."""
+        """Serialize state to the checkpoint file atomically (lock held).
+
+        Uses the same retry logic as CSV writes for WinError-5 resilience.
+        """
+        import time
         data = {
             "last_completed_index": self.state.last_completed_index,
             "total_samples": self.state.total_samples,
@@ -357,30 +357,43 @@ class CheckpointManager:
             "paused": self.state.paused,
             "resume_from_index": self.state.resume_from_index,
         }
-        # Atomic write: write to temp then rename
         temp_path = self.checkpoint_path.with_suffix(".tmp")
-        try:
-            with open(temp_path, "w") as f:
-                json.dump(data, f)
-            os.replace(temp_path, self.checkpoint_path)
-        except OSError:
-            if temp_path.exists():
-                temp_path.unlink()
-            raise
+        attempt = 0
+        while True:
+            try:
+                with open(temp_path, "w") as f:
+                    json.dump(data, f)
+                os.replace(temp_path, self.checkpoint_path)
+                return
+            except OSError as exc:
+                # WinError 32 = ERROR_SHARING_VIOLATION (file locked by AV/Defender)
+                # WinError 5 = ERROR_ACCESS_DENIED
+                is_sharing = getattr(exc, "winerror", None) == 32 or getattr(exc, "errno", None) == 32
+                is_access_denied = getattr(exc, "winerror", None) == 5 or getattr(exc, "errno", None) == 13
+                if not (is_sharing or is_access_denied or isinstance(exc, PermissionError)):
+                    raise  # Non-transient error, re-raise immediately
+                attempt += 1
+                try:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                except OSError:
+                    pass
+                if attempt > _CKPT_WRITE_RETRIES:
+                    raise
+                delay = _CKPT_RETRY_BASE_S * (2 ** (attempt - 1))
+                # Add jitter to avoid thundering herd
+                import random
+                delay += random.uniform(0, 0.5)
+                print(f"  [ckpt-retry] {type(exc).__name__} writing checkpoint "
+                      f"(attempt {attempt}/{_CKPT_WRITE_RETRIES}); retrying in {delay:.1f}s")
+                time.sleep(delay)ing in {delay:.1f}s")
+                time.sleep(delay)
 
     def mark_paused(self) -> None:
         """Mark checkpoint as paused without double-counting progress."""
         with self._lock:
             self.state.paused = True
             self._write_locked()
-
-    def get_start_index(self) -> int:
-        """Get the index to resume from."""
-        return self.state.resume_from_index if self.state.resume_from_index >= 0 else self.state.last_completed_index + 1
-
-    def is_sample_completed(self, sample_path: str) -> bool:
-        """Check if a sample has already been completed."""
-        return sample_path in self.state.completed_samples
 
     def is_index_completed(self, index: int) -> bool:
         """Check if a sample index has already been processed."""
@@ -656,32 +669,6 @@ def _feature_entry(result, label: int, video_path: Path, root: Path, source: str
     return feat
 
 
-def _fail_summary(result) -> str:
-    """Human-readable reason breakdown for clips with features=None.
-
-    Uses the frame quality log: usable frames, frames where no face was
-    found, and frames rejected by the blur/brightness gate.
-    """
-    n_usable = result.n_frames_usable
-    n_no_face = sum(1 for q in result.quality_log if not q.face_found)
-    n_total = len(result.quality_log)
-    n_quality = max(0, n_total - n_usable - n_no_face)
-    return f"(usable={n_usable}/{n_total}: no_face={n_no_face}, quality_rejected={n_quality})"
-
-
-def _write_features_csv(features_list: List[dict], out_csv_path: Path) -> None:
-    """Write the accumulated feature rows to CSV, sorted by video_path.
-
-    Called after every successful extraction, so the CSV is created after
-    the first video and refreshed after each subsequent one. A full rewrite
-    of a few thousand rows costs tens of ms — negligible next to the
-    per-clip MediaPipe runtime.
-    """
-    out_df = pd.DataFrame(features_list)
-    out_df = out_df.sort_values("video_path").reset_index(drop=True)
-    os.makedirs(out_csv_path.parent, exist_ok=True)
-    out_df.to_csv(str(out_csv_path), index=False)
-
 
 def _write_features_csv_atomic(features_list: List[dict], out_csv_path: Path) -> None:
     """Atomically write the accumulated feature rows to CSV, sorted by video_path.
@@ -691,21 +678,6 @@ def _write_features_csv_atomic(features_list: List[dict], out_csv_path: Path) ->
     retried (see _atomic_csv_replace).
     """
     out_df = pd.DataFrame(features_list)
-    out_df = out_df.sort_values("video_path").reset_index(drop=True)
-    _atomic_csv_replace(out_df, out_csv_path)
-
-
-def _append_entry_to_csv_atomic(entry: dict, out_csv_path: Path) -> None:
-    """Append a single entry to the CSV atomically.
-
-    Reads the existing CSV (if any), appends the new entry, sorts by video_path,
-    and writes atomically via temp file + rename. Transient lock errors are
-    retried (see _atomic_csv_replace).
-    """
-    out_df = pd.DataFrame([entry])
-    existing_df = _read_existing_csv(out_csv_path)
-    if existing_df is not None:
-        out_df = pd.concat([existing_df, out_df], ignore_index=True)
     out_df = out_df.sort_values("video_path").reset_index(drop=True)
     _atomic_csv_replace(out_df, out_csv_path)
 

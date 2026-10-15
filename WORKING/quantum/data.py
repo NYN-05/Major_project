@@ -248,6 +248,7 @@ def _grouped_train_val_test_split(X, y, groups, paths, cfg):
     grouped = {}
     for i, g in enumerate(groups):
         grouped.setdefault(g, []).append(i)
+    paths = np.array(paths)  # enable numpy array indexing
 
     rng = np.random.RandomState(cfg.seed)
     mixed, single = [], {c: [] for c in range(n_classes)}

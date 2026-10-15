@@ -182,23 +182,3 @@ def create_test_dataset(
     return features, X, y
 
 
-def create_test_video_frames(
-    n_frames: int = 30,
-    frame_size: tuple = (224, 224),
-    add_face: bool = True
-) -> List[np.ndarray]:
-    """Create synthetic video frames for testing."""
-    frames = []
-    for i in range(n_frames):
-        frame = np.random.randint(0, 255, (*frame_size, 3), dtype=np.uint8)
-        if add_face:
-            # Add a simple face-like region
-            h, w = frame_size
-            cv2.rectangle(frame, (w//3, h//3), (2*w//3, 2*h//3), (200, 150, 100), -1)
-        frames.append(frame)
-    return frames
-
-
-# Test data paths
-TEST_DATA_DIR = Path(__file__).parent
-SAMPLE_VIDEO_PATH = None  # Set to actual test video path if available
