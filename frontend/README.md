@@ -1,4 +1,8 @@
-# Frontend - Web UI for Deepfake KYC Verification
+# Frontend — Web UI for Deepfake KYC Verification
+
+![React + Vite](https://img.shields.io/badge/frontend-React%20%2B%20Vite-646CFF?style=flat-square)
+![Python stdlib backend](https://img.shields.io/badge/backend-Python%20stdlib-3776AB?style=flat-square)
+![SSE live progress](https://img.shields.io/badge/progress-SSE%20live-2ea043?style=flat-square)
 
 Web UI for the deepfake-verification project (rPPG + visual + hybrid quantum-classical
 decision layer). Upload a KYC video, watch the four-stage pipeline run live,
@@ -6,14 +10,30 @@ and read the verdict with its evidence dossier (accepted frames, physiological
 features, quantum probabilities and plots, the pulse waveform of the analyzed
 video).
 
-The UI drives the **existing** Python pipeline untouched — the backend spawns
-`WORKING/run_pipeline.py` as a subprocess. No existing project code is modified.
+> The UI drives the **existing** Python pipeline untouched — the backend spawns
+> `WORKING/run_pipeline.py` as a subprocess. No existing project code is modified.
+
+## Contents
+
+- [Stack](#stack)
+- [Layout](#layout)
+- [Run It](#run-it)
+- [Production Build](#production-build)
+- [API Contract](#api-contract)
+- [Upload Limits & Validation](#upload-limits--validation)
+- [Frontend State Machine](#frontend-state-machine)
+- [Pipeline Stages (as shown in UI)](#pipeline-stages-as-shown-in-ui)
+- [Artifacts Served](#artifacts-served)
+- [Environment Variables](#environment-variables)
+- [Notes](#notes)
+- [Verified E2E Flow](#verified-e2e-flow)
 
 ## Stack
 
-- **Frontend**: React + Vite (dev server on `http://localhost:5173`)
-- **Backend**: `server.py` — pure Python stdlib (`http.server`), no pip installs.
-  Serves upload, progress (SSE), results, and artifact files from `MAJ_OUTPUT_ROOT/`.
+| Layer    | Technology                                                              |
+| -------- | ----------------------------------------------------------------------- |
+| Frontend | React + Vite (dev server on `http://localhost:5173`)                   |
+| Backend  | `server.py` — pure Python stdlib (`http.server`), no pip installs. Serves upload, progress (SSE), results, and artifact files from `MAJ_OUTPUT_ROOT/`. |
 
 ## Layout
 
@@ -33,7 +53,9 @@ frontend/
 
 ## Run It
 
-### Terminal 1 — Backend (must use the Python env with torch/pennylane/mediapipe)
+### Terminal 1 — Backend
+
+> Must use the Python env with torch/pennylane/mediapipe.
 
 ```bash
 cd frontend
@@ -58,32 +80,36 @@ npm run build             # Outputs to dist/
 npm run preview           # Serves built app (still expects /api on :8000)
 ```
 
-## API Contract (`server.py`)
+## API Contract
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/detect` | POST | Upload video (raw body + `X-Filename` header) → `{job: <id>}` |
-| `/api/jobs/<id>` | GET | Job status: `{done, error, video, signal, lines[-400:], result}` |
-| `/api/jobs/<id>/events` | GET | SSE stream: `line` / `stage` / `result` / `signal` / `error` |
-| `/api/previous` | GET | Last canonical pipeline result (with `_signal`) |
-| `/api/health` | GET | `{ok, platform, running, has_previous, sequences, artifacts}` |
-| `/api/artifacts?dir=` | GET | List files under ``MAJ_OUTPUT_ROOT/<rel>` |
-| `/api/files?rel=` | GET | Serve artifact file (path traversal protected) |
+`server.py` endpoints:
+
+| Endpoint              | Method | Description                                                        |
+| --------------------- | ------ | ------------------------------------------------------------------ |
+| `/api/detect`         | POST   | Upload video (raw body + `X-Filename` header) → `{job: <id>}`      |
+| `/api/jobs/<id>`      | GET    | Job status: `{done, error, video, signal, lines[-400:], result}`   |
+| `/api/jobs/<id>/events` | GET  | SSE stream: `line` / `stage` / `result` / `signal` / `error`       |
+| `/api/previous`       | GET    | Last canonical pipeline result (with `_signal`)                    |
+| `/api/health`         | GET    | `{ok, platform, running, has_previous, sequences, artifacts}`      |
+| `/api/artifacts?dir=` | GET    | List files under `MAJ_OUTPUT_ROOT/<rel>`                           |
+| `/api/files?rel=`     | GET    | Serve artifact file (path traversal protected)                     |
 
 ### Upload Limits & Validation
 
-- **Max size**: 200 MB
-- **Magic-byte validation**: MP4/MOV `ftyp`, AVI `RIFF`, WebM `EBML`
-- **Concurrency cap**: Max 2 simultaneous jobs (returns 429 on overflow)
-- **Job TTL**: 1 hour; frame sequences: 24 hours
-- **Sanitized filenames**: `{job8}_{stem}.ext` for thumbnail consistency
-- **CORS**: Restricted to localhost origins (`localhost:5173`, `localhost:8000`)
-- **Hard timeout**: 30 minutes per pipeline run (worker killed)
-- **Upload streaming**: 64 KB chunks (no 200 MB in-memory buffer)
+| Rule                   | Value                                                        |
+| ---------------------- | ------------------------------------------------------------ |
+| Max size               | 200 MB                                                       |
+| Magic-byte validation  | MP4/MOV `ftyp`, AVI `RIFF`, WebM `EBML`                      |
+| Concurrency cap        | Max 2 simultaneous jobs (returns 429 on overflow)            |
+| Job TTL                | 1 hour; frame sequences: 24 hours                            |
+| Sanitized filenames    | `{job8}_{stem}.ext` for thumbnail consistency                |
+| CORS                   | Restricted to localhost origins (`localhost:5173`, `localhost:8000`) |
+| Hard timeout           | 30 minutes per pipeline run (worker killed)                  |
+| Upload streaming       | 64 KB chunks (no 200 MB in-memory buffer)                    |
 
 ## Frontend State Machine
 
-```
+```text
 idle
   -> selected (preview + metadata + Start button)
   -> running (7-stage pipeline + live panel + creeping progress + continuous sheen)
@@ -97,33 +123,35 @@ idle
 
 ## Pipeline Stages (as shown in UI)
 
-1. **Upload** - Video received, validated (magic-byte check, 200 MB limit)
-2. **Frames** - Frame sampling at 30 fps + YOLO face detection + quality gates
-3. **rPPG** - MediaPipe ROIs → POS/CHROM pulse → 20 physiological features
-4. **Visual** - ResNet50 + handcrafted features from face crops → 39 visual features
-5. **Fusion** - 59 fused features (20 rPPG + 39 visual)
-6. **Quantum** - QAOA feature selection (59 → 3) → Hybrid VQC → P(real)
-7. **Verdict** - Decision bins: REAL (≥0.5), FAKE (<0.5)
-8. **Artifacts** - Result JSON, signal waveform, frame thumbnails, plots
+| # | Stage     | What happens                                                        |
+| - | --------- | ------------------------------------------------------------------- |
+| 1 | Upload    | Video received, validated (magic-byte check, 200 MB limit)          |
+| 2 | Frames    | Frame sampling at 30 fps + YOLO face detection + quality gates     |
+| 3 | rPPG      | MediaPipe ROIs → POS/CHROM pulse → 20 physiological features        |
+| 4 | Visual    | ResNet50 + handcrafted features from face crops → 39 visual features |
+| 5 | Fusion    | 59 fused features (20 rPPG + 39 visual)                            |
+| 6 | Quantum   | QAOA feature selection (59 → 3) → Hybrid VQC → P(real)              |
+| 7 | Verdict   | Decision bins: REAL (≥0.5), FAKE (<0.5)                              |
+| 8 | Artifacts | Result JSON, signal waveform, frame thumbnails, plots               |
 
 ## Artifacts Served
 
 The UI reads artifacts from `MAJ_OUTPUT_ROOT/` via `/api/files` and `/api/artifacts`:
 
-| Source | Artifacts |
-|--------|-----------|
-| Stage 1 (frames) | `MAJ_OUTPUT_ROOT/frames/frame_sequences/<job>/frames/*.jpg`, `frame_metadata.jsonl` |
-| Stage 2 (rPPG) | `MAJ_OUTPUT_ROOT/rppg/plots/`, `dataset_features.csv` |
-| Stage 3 (visual) | `MAJ_OUTPUT_ROOT/visual/visual_features.csv`, `fused_features.csv` |
-| Stage 4 (quantum) | `MAJ_OUTPUT_ROOT/quantum/plots/`, `metrics_quantum.json`, `hybrid_vqc_fused.pt` |
-| Pipeline | `MAJ_OUTPUT_ROOT/pipeline/pipeline_result.json` |
+| Source            | Artifacts                                                                        |
+| ----------------- | -------------------------------------------------------------------------------- |
+| Stage 1 (frames)  | `MAJ_OUTPUT_ROOT/frames/frame_sequences/<job>/frames/*.jpg`, `frame_metadata.jsonl` |
+| Stage 2 (rPPG)    | `MAJ_OUTPUT_ROOT/rppg/plots/`, `dataset_features.csv`                            |
+| Stage 3 (visual)  | `MAJ_OUTPUT_ROOT/visual/visual_features.csv`, `fused_features.csv`               |
+| Stage 4 (quantum) | `MAJ_OUTPUT_ROOT/quantum/plots/`, `metrics_quantum.json`, `hybrid_vqc_fused.pt`  |
+| Pipeline          | `MAJ_OUTPUT_ROOT/pipeline/pipeline_result.json`                                  |
 
 ## Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FRONTEND_PORT` | Backend API port | `8000` |
-| `FRONTEMD_PORT` | Deprecated alias for `FRONTEND_PORT` | `8000` |
+| Variable        | Description                    | Default |
+| --------------- | ------------------------------ | ------- |
+| `FRONTEND_PORT` | Backend API port               | `8000`  |
+| `FRONTEMD_PORT` | Deprecated alias for `FRONTEND_PORT` | `8000`  |
 
 ## Notes
 

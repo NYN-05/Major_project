@@ -1,7 +1,6 @@
 # rPPG Physiological Feature Extraction (Stage 2)
 
-**Component 2** of the deepfake-verification system under `WORKING/`:
-`frame/` (stage 1) → `RPPG/` (this directory, stage 2) → `visual/` (stage 3) → `quantum/` (stage 4).
+> **Stage 2 of 4:** `frame/` (stage 1) → `RPPG/` (this directory, physiological features) → `visual/` (stage 3) → `quantum/` (stage 4).
 
 Extracts **20** physiological features from facial video via remote photoplethysmography (rPPG).
 The feature table `MAJ_OUTPUT_ROOT/rppg/dataset_features.csv` is the **direct data source** for the quantum
@@ -11,9 +10,28 @@ training/eval splits from this table.
 
 Current table: **TBD rows** @30 fps (DFDC archive, rebuild in progress).
 
+## Contents
+
+- [Project Structure](#project-structure)
+- [Core Pipeline](#core-pipeline)
+- [20 Physiological Features](#20-physiological-features)
+- [Failure Mode](#failure-mode)
+- [Data Generation](#data-generation)
+- [Train rPPG Classifier (Side Path)](#train-rppg-classifier-side-path---not-used-for-final-verdict)
+- [Run Inference](#run-inference)
+- [Key Optimizations (Completed)](#key-optimizations-completed)
+- [Install](#install)
+- [MediaPipe Face Landmarker](#mediapipe-face-landmarker)
+- [Signal Extraction Methods](#signal-extraction-methods)
+- [Feature Computation Details](#feature-computation-details)
+- [Output Files](#output-files)
+- [Validation Strategy](#validation-strategy)
+- [Limitations](#limitations)
+- [Recommended Workflow](#recommended-workflow)
+
 ## Project Structure
 
-```
+```text
 WORKING/RPPG/
 ├── __init__.py                   # Package exports (RPPGPipeline, features)
 ├── extract_dataset_features.py   # Build dataset_features.csv from archive/ (--gpu for YuNet)
@@ -30,7 +48,7 @@ WORKING/RPPG/
 └── README.md
 ```
 
-## Core Pipeline (`pipeline.py`)
+## Core Pipeline
 
 ### `RPPGPipeline` Class
 
@@ -49,11 +67,12 @@ pipeline = RPPGPipeline(
 ### Two Entry Points
 
 | Method | Input | Use Case |
-|--------|-------|----------|
+| ------ | ----- | -------- |
 | `process_video(video_path)` | Raw video file | Standalone scripts, direct video read |
 | `process_frames(frames_dir, metadata_path, fps)` | Stage-1 accepted frames + JSONL | **Called by `run_pipeline.py`** (stage-1 handoff) |
 
 **Stage-1 handoff path** (used by `run_pipeline.py`):
+
 - Receives accepted JPEGs from `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frames/`
 - Receives `frame_metadata.jsonl` with per-frame timestamps
 - Runs at stage-1 sample rate (30 fps)
@@ -64,47 +83,49 @@ pipeline = RPPGPipeline(
 
 ### Output: `RPPGResult` Dataclass
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `fps` | float | Effective sampling rate |
-| `n_frames_total` | int | Total frames processed |
-| `n_frames_usable` | int | Frames with face detected |
-| `features` | `RPPGFeatures \| None` | **20-feature vector (or None if < 24 usable frames / degenerate signal)** |
-| `combined_signal` | `np.ndarray \| None` | Cleaned combined pulse waveform |
-| `left_cheek_signal` | `np.ndarray \| None` | Cleaned left cheek pulse |
-| `right_cheek_signal` | `np.ndarray \| None` | Cleaned right cheek pulse |
-| `forehead_signal` | `np.ndarray \| None` | Cleaned forehead pulse |
-| `quality_log` | `List[FrameQuality]` | Per-frame quality records |
-| `warnings` | `List[str]` | Runtime warnings |
+| Field                | Type                  | Description                                                      |
+| -------------------- | --------------------- | ---------------------------------------------------------------- |
+| `fps`                | float                 | Effective sampling rate                                          |
+| `n_frames_total`     | int                   | Total frames processed                                           |
+| `n_frames_usable`    | int                   | Frames with face detected                                        |
+| `features`           | `RPPGFeatures \| None`| **20-feature vector (or None if < 24 usable frames / degenerate signal)** |
+| `combined_signal`    | `np.ndarray \| None`  | Cleaned combined pulse waveform                                  |
+| `left_cheek_signal`  | `np.ndarray \| None`  | Cleaned left cheek pulse                                         |
+| `right_cheek_signal` | `np.ndarray \| None`  | Cleaned right cheek pulse                                        |
+| `forehead_signal`    | `np.ndarray \| None`  | Cleaned forehead pulse                                           |
+| `quality_log`        | `List[FrameQuality]`  | Per-frame quality records                                        |
+| `warnings`           | `List[str]`           | Runtime warnings                                                 |
 
-### 20 Physiological Features (`features.py`)
+## 20 Physiological Features
 
-| Feature | Description | Units/Range |
-|---------|-------------|-------------|
-| `heart_rate_bpm` | Dominant pulse frequency from PSD peak | ~40-180 BPM |
-| `snr_db` | Signal-to-noise ratio (HR band vs rest) | dB (higher = cleaner) |
-| `prv_std_ms` | Pulse rate variability (std of inter-beat intervals) | ms |
-| `spectral_entropy` | Normalized Shannon entropy of in-band PSD | 0-1 (lower = more periodic) |
-| `mad` | Mean absolute deviation of waveform | Amplitude units |
-| `signal_quality_index` | Beat regularity + spectral concentration | 0-1 |
-| `cheek_forehead_correlation` | Pearson r between cheek & forehead pulses | -1 to 1 |
-| `left_right_cheek_correlation` | Pearson r between left & right cheek pulses | -1 to 1 |
-| `hr_half_diff` | Abs. HR difference between first/second halves of the pulse (stability marker) | BPM (0 = stable) |
-| `peak_prominence` | Spectral peak-to-mean ratio of the in-band PSD (dominance of the pulse peak) | ratio (>>1 = strong pulse) |
-| `systolic_peak_width` | Median half-height width of systolic peaks (morphology) | ms |
-| `diastolic_notch_ratio` | Mean dicrotic-notch depth relative to systolic peak height (morphology) | ratio |
-| `forehead_cheek_phase_lag` | Time lag between forehead and cheek pulse signals | ms |
-| `signal_to_motion_ratio` | Log ratio of physiological-band to motion-band spectral power | dB |
-| `peak_amplitude_variability` | Coefficient of variation of systolic peak amplitudes | ratio |
-| `pulse_transit_time_proxy` | Inter-ROI propagation delay (pulse transit time proxy) | ms |
-| `spectral_flatness` | Geometric/arithmetic mean ratio of in-band PSD (flat=1, tonal<1) | 0-1 |
-| `spectral_centroid` | Center of mass of in-band power spectrum (Hz) | Hz |
-| `kurtosis` | Fisher kurtosis of time-domain pulse waveform (heavy-tailed=artifacts) | ratio |
-| `phase_coherence_lr` | Phase coherence std between left/right cheek signals (lower=more coherent) | 0-1 |
+From `features.py`:
 
-**Feature order is fixed** - must match `RPPG_FEATURE_NAMES` in `quantum/config.py` and `RPPGFeatures.feature_names()`.
+| Feature                          | Description                                                                                   | Units/Range               |
+| -------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------- |
+| `heart_rate_bpm`                 | Dominant pulse frequency from PSD peak                                                        | ~40-180 BPM               |
+| `snr_db`                         | Signal-to-noise ratio (HR band vs rest)                                                       | dB (higher = cleaner)     |
+| `prv_std_ms`                     | Pulse rate variability (std of inter-beat intervals)                                          | ms                        |
+| `spectral_entropy`               | Normalized Shannon entropy of in-band PSD                                                     | 0-1 (lower = more periodic) |
+| `mad`                            | Mean absolute deviation of waveform                                                           | Amplitude units           |
+| `signal_quality_index`           | Beat regularity + spectral concentration                                                      | 0-1                       |
+| `cheek_forehead_correlation`     | Pearson r between cheek & forehead pulses                                                     | -1 to 1                   |
+| `left_right_cheek_correlation`   | Pearson r between left & right cheek pulses                                                   | -1 to 1                   |
+| `hr_half_diff`                   | Abs. HR difference between first/second halves of the pulse (stability marker)                | BPM (0 = stable)          |
+| `peak_prominence`                | Spectral peak-to-mean ratio of the in-band PSD (dominance of the pulse peak)                  | ratio (>>1 = strong pulse) |
+| `systolic_peak_width`            | Median half-height width of systolic peaks (morphology)                                       | ms                        |
+| `diastolic_notch_ratio`          | Mean dicrotic-notch depth relative to systolic peak height (morphology)                       | ratio                     |
+| `forehead_cheek_phase_lag`       | Time lag between forehead and cheek pulse signals                                             | ms                        |
+| `signal_to_motion_ratio`         | Log ratio of physiological-band to motion-band spectral power                                 | dB                        |
+| `peak_amplitude_variability`     | Coefficient of variation of systolic peak amplitudes                                          | ratio                     |
+| `pulse_transit_time_proxy`       | Inter-ROI propagation delay (pulse transit time proxy)                                        | ms                        |
+| `spectral_flatness`              | Geometric/arithmetic mean ratio of in-band PSD (flat=1, tonal<1)                               | 0-1                       |
+| `spectral_centroid`              | Center of mass of in-band power spectrum (Hz)                                                 | Hz                        |
+| `kurtosis`                       | Fisher kurtosis of time-domain pulse waveform (heavy-tailed=artifacts)                        | ratio                     |
+| `phase_coherence_lr`             | Phase coherence std between left/right cheek signals (lower=more coherent)                    | 0-1                       |
 
-### Failure Mode
+**Feature order is fixed** — must match `RPPG_FEATURE_NAMES` in `quantum/config.py` and `RPPGFeatures.feature_names()`.
+
+## Failure Mode
 
 Returns `features=None` when `n_frames_usable < min_usable_frames` (24) **or** when the
 raw features are degenerate (≥ 2 NaN values or `signal_quality_index == 0.0` — a flat/dead
@@ -120,17 +141,19 @@ pulse). Degenerate signals are rejected at the pipeline level instead of being f
 # From WORKING/
 # Full extraction (DFDC only, rebuild in progress):
 python RPPG/extract_dataset_features.py --workers 0 --gpu
-
-# Optional flags:
-#   --max-per-class N     cap samples per class (smoke test)
-#   --output <path>       redirect the output CSV
-#   --gpu                 GPU-accelerated face detection (YuNet via ONNX Runtime CUDA)
-#   --gpu-workers N       GPU worker processes (default 8 when --gpu)
-#   --min-sqi N           drop clips below this signal quality index (default 0.10)
-#   --max-nan-features N  drop clips with more than N median-filled features (default 1)
 ```
 
+| Flag                   | Description                                                              |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `--max-per-class N`    | Cap samples per class (smoke test)                                       |
+| `--output <path>`      | Redirect the output CSV                                                  |
+| `--gpu`                | GPU-accelerated face detection (YuNet via ONNX Runtime CUDA)             |
+| `--gpu-workers N`      | GPU worker processes (default 8 when `--gpu`)                            |
+| `--min-sqi N`          | Drop clips below this signal quality index (default 0.10)                |
+| `--max-nan-features N` | Drop clips with more than N median-filled features (default 1)           |
+
 Reads videos from (see `collect_samples()`):
+
 - `archive/DFDC_Dataset/Fake/` and `Real/` (DFDC phone-style face-swaps)
 - No FaceForensics++ (FF++) support
 
@@ -149,15 +172,16 @@ Writes: `WORKING/MAJ_OUTPUT_ROOT/rppg/dataset_features.csv` (relative to `WORKIN
   green-channel; ROI configurations) from the remediation plan
   (covered in semester report `Docs/maj_proj_report_sem_6/SEM6_report/`), not classifier changes.
 
-### Train rPPG Classifier (Side Path - Not Used for Final Verdict)
+## Train rPPG Classifier (Side Path — Not Used for Final Verdict)
 
 ```bash
 python RPPG/train_classifier.py
 ```
 
 Saves to `WORKING/MAJ_OUTPUT_ROOT/rppg/`:
-- `rppg_classifier.pkl` - RandomForest model
-- `rppg_classifier_metadata.json` - Training summary, column metadata
+
+- `rppg_classifier.pkl` — RandomForest model
+- `rppg_classifier_metadata.json` — Training summary, column metadata
 
 **Label convention**: CSV uses `1 = fake, 0 = real`. This is flipped in quantum layer.
 
@@ -170,12 +194,14 @@ python run_pipeline.py --source path/to/video.mp4 --method POS
 
 ## Key Optimizations (Completed)
 
-- **POS vectorization** (`signal_extraction.py`): `sliding_window_view` + batched matmul + `np.add.at` overlap-add — bit-identical to original loop, removes Python-level window iteration
-- **Shared Welch PSD** (`features.py`): Single periodogram for HR, SNR, entropy, SQI — 3 fewer `scipy.signal.welch` calls per video
-- **Cached filter/detrend** (`preprocessing.py`): `@lru_cache` on Butterworth coefficients + detrend sparse matrix
-- **Skin-mask hoist** (`face_roi.py`): Compute YCrCb+inRange once/frame instead of 3×
-- **Discarded quality work** (`pipeline.py`): Stage-1 path still computes Laplacian/brightness (recorded in metadata) but the rPPG gate uses only `face.found`
-- **ROI mean via `cv2.mean`** (`face_roi.py`): `mean_rgb` uses `cv2.mean(frame, mask)` instead of `frame[mask > 0].mean(axis=0)` — no masked-pixel array allocation per ROI per frame
+| Area | What changed |
+| ---- | ------------ |
+| POS vectorization (`signal_extraction.py`) | `sliding_window_view` + batched matmul + `np.add.at` overlap-add — bit-identical to original loop, removes Python-level window iteration |
+| Shared Welch PSD (`features.py`) | Single periodogram for HR, SNR, entropy, SQI — 3 fewer `scipy.signal.welch` calls per video |
+| Cached filter/detrend (`preprocessing.py`) | `@lru_cache` on Butterworth coefficients + detrend sparse matrix |
+| Skin-mask hoist (`face_roi.py`) | Compute YCrCb+inRange once/frame instead of 3× |
+| Discarded quality work (`pipeline.py`) | Stage-1 path still computes Laplacian/brightness (recorded in metadata) but the rPPG gate uses only `face.found` |
+| ROI mean via `cv2.mean` (`face_roi.py`) | `mean_rgb` uses `cv2.mean(frame, mask)` instead of `frame[mask > 0].mean(axis=0)` — no masked-pixel array allocation per ROI per frame |
 
 ## Install
 
@@ -193,6 +219,7 @@ If no internet access, place the model manually or provide a custom path through
 ## MediaPipe Face Landmarker
 
 The `FaceROIExtractor` in `face_roi.py` uses MediaPipe to detect 468 facial landmarks, then extracts three ROIs:
+
 - **Left cheek**: Landmarks around left cheek region
 - **Right cheek**: Landmarks around right cheek region
 - **Forehead**: Landmarks above eyebrows
@@ -209,26 +236,24 @@ long extractions where MediaPipe CPU inference is the bottleneck.
 
 ## Signal Extraction Methods
 
-### POS (Plane-Orthogonal-to-Skin)
-- Projects RGB into a plane orthogonal to the skin-tone direction
-- More robust to illumination changes
-- Default method
-
-### CHROM (Chrominance-based)
-- Uses chrominance ratio (R-G, R-B) for pulse extraction
-- Alternative when POS struggles
+| Method | How it works | Note |
+| ------ | ------------ | ---- |
+| POS (Plane-Orthogonal-to-Skin) | Projects RGB into a plane orthogonal to the skin-tone direction | More robust to illumination changes. **Default method.** |
+| CHROM (Chrominance-based) | Uses chrominance ratio (R-G, R-B) for pulse extraction | Alternative when POS struggles |
 
 Both implemented in `signal_extraction.py` with vectorized sliding-window processing.
 
 ## Feature Computation Details
 
 All spectral features share **one Welch periodogram** per video:
+
 - `heart_rate_bpm`: Peak frequency in 0.7-4.0 Hz band × 60
 - `snr_db`: Power at HR fundamental + 1st harmonic vs rest of band
 - `spectral_entropy`: Normalized Shannon entropy of in-band PSD
 - `signal_quality_index`: Beat regularity (peak spacing) + spectral concentration
 
 Time-domain features:
+
 - `prv_std_ms`: Std of inter-beat intervals from peak detection
 - `mad`: Mean absolute deviation of cleaned waveform
 - Correlations: Pearson r between per-ROI cleaned signals
@@ -238,10 +263,12 @@ NaN features are filled with physiologically neutral fallbacks (HR=72, SNR=0, et
 rejected as `features=None` before the fallback runs, and `estimate_snr` returns NaN
 (not `-inf`) for zero-power signals so NaN is the single missing-value convention.
 
-## Output Files (in `WORKING/MAJ_OUTPUT_ROOT/rppg/`)
+## Output Files
+
+In `WORKING/MAJ_OUTPUT_ROOT/rppg/`:
 
 | File | Description |
-|------|-------------|
+| ---- | ----------- |
 | `dataset_features.csv` | 20 features + label per video (1=fake, 0=real) |
 | `rppg_classifier.pkl` | Trained RandomForest (side path) |
 | `rppg_classifier_metadata.json` | Training summary, feature columns, metrics |

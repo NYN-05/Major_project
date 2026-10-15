@@ -1,16 +1,27 @@
 # Frame Sampling & Quality Layer (Stage 1)
 
-**Component 1** of the deepfake-verification system under `WORKING/`:
-`frame/` (this directory, stage 1) → `RPPG/` (stage 2) → `visual/` (stage 3) → `quantum/` (stage 4).
+> **Stage 1 of 4:** `frame/` (this directory, sampling + quality) → `RPPG/` (stage 2) → `visual/` (stage 3) → `quantum/` (stage 4).
 
 Invoked automatically by `WORKING/run_pipeline.py` (stage 1: frame sampling
 + quality assessment feeding the rPPG and visual stages at **30 fps**).
 
 Quality thresholds **relaxed** for short/low-quality videos.
 
+## Contents
+
+- [Project Structure](#project-structure)
+- [Module Responsibilities](#module-responsibilities)
+- [Pipeline Flow](#pipeline-flow)
+- [Output Contract (for Stage 2 rPPG & Stage 3 Visual)](#output-contract-for-stage-2-rppg--stage-3-visual)
+- [Quality Rejection Categories (Relaxed Thresholds)](#quality-rejection-categories-relaxed-thresholds)
+- [Install](#install)
+- [Run](#run)
+- [Model Weight Behavior](#model-weight-behavior)
+- [Metadata Record Example](#metadata-record-example)
+
 ## Project Structure
 
-```
+```text
 WORKING/frame/
 ├── detector.py         # YOLO face detection wrapper
 ├── pipeline.py         # Frame extraction CLI + run_frame_sampling_quality_layer()
@@ -24,15 +35,15 @@ WORKING/frame/
 
 ## Module Responsibilities
 
-| File | Responsibility |
-|------|----------------|
-| `pipeline.py` | `run_frame_sampling_quality_layer()` (stage-1 entry used by `run_pipeline.py`) + the frame-extraction CLI (`python -m frame.pipeline`) |
-| `detector.py` | `FaceDetector` - loads YOLO weights, runs inference, returns face boxes + confidences |
-| `processing.py` | `FrameIngestor`, `FrameQualityAssessor` implementations |
+| File            | Responsibility                                                                                                   |
+| --------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `pipeline.py`   | `run_frame_sampling_quality_layer()` (stage-1 entry used by `run_pipeline.py`) + the frame-extraction CLI (`python -m frame.pipeline`) |
+| `detector.py`   | `FaceDetector` — loads YOLO weights, runs inference, returns face boxes + confidences                            |
+| `processing.py` | `FrameIngestor`, `FrameQualityAssessor` implementations                                                          |
 
 ## Pipeline Flow
 
-```
+```text
 Input video
   → FrameIngestor (sample at --sample-fps, default 10 FPS standalone; 30 FPS via run_pipeline.py)
   → FaceDetector (YOLO face detection)
@@ -44,24 +55,24 @@ Input video
 
 ## Output Contract (for Stage 2 rPPG & Stage 3 Visual)
 
-| Artifact | Path | Description |
-|----------|------|-------------|
-| **Accepted frames** | `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frames/frame_XXXXXX_tYYYYYYYYYY.jpg` | Sampled frames passing all quality gates |
-| **Frame metadata** | `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frame_metadata.jsonl` | Per-frame: `frame_id`, `source_frame_id`, `timestamp_ms`, `quality` (accepted, score, rejection_reasons, blur_score, brightness_score, face_confidence, max_face_area_ratio, face_too_small, extreme_pose) |
-| **Extraction log** | `MAJ_OUTPUT_ROOT`/frames/frame_extraction_log.jsonl | Per-video success/failure + summary |
-| **Summary** | `MAJ_OUTPUT_ROOT/frames/frame_extraction_summary.json` | Aggregate: `sampled_frames`, `accepted_frames`, `rejected_frames`, `rejections` (by category), `rppg_checks` (face resolution, color variation), `rppg_input_ready` boolean |
-| **Docs** | `MAJ_OUTPUT_ROOT`/frames/docs/ | Sampling rate comparison, quality checklist, examples report |
+| Artifact            | Path                                                                                 | Description                                                  |
+| ------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| **Accepted frames** | `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frames/frame_XXXXXX_tYYYYYYYYYY.jpg` | Sampled frames passing all quality gates                     |
+| **Frame metadata**  | `MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frame_metadata.jsonl`                | Per-frame: `frame_id`, `source_frame_id`, `timestamp_ms`, `quality` (accepted, score, rejection_reasons, blur_score, brightness_score, face_confidence, max_face_area_ratio, face_too_small, extreme_pose) |
+| **Extraction log**  | `MAJ_OUTPUT_ROOT/frames/frame_extraction_log.jsonl`                                  | Per-video success/failure + summary                          |
+| **Summary**         | `MAJ_OUTPUT_ROOT/frames/frame_extraction_summary.json`                               | Aggregate: `sampled_frames`, `accepted_frames`, `rejected_frames`, `rejections` (by category), `rppg_checks` (face resolution, color variation), `rppg_input_ready` boolean |
+| **Docs**            | `MAJ_OUTPUT_ROOT/frames/docs/`                                                       | Sampling rate comparison, quality checklist, examples report |
 
 ## Quality Rejection Categories (Relaxed Thresholds)
 
-| Category | Condition | Default |
-|----------|-----------|---------|
-| `blur` | Laplacian variance < `--blur-threshold` | `3.0` (was 8.0) |
-| `dark_frame` | Gray mean < `--dark-threshold` | `30.0` (was 45.0) |
-| `overexposed_frame` | Gray mean > `--bright-threshold` | `235.0` (was 220.0) |
-| `no_face` | YOLO detects no face above `--conf` | `0.25` (was 0.35) |
-| `face_too_small` | Largest face area ratio < `--min-face-area-ratio` | `0.002` (was 0.005) |
-| `extreme_pose` | Unusual face aspect ratio (edge-touch allowed for cropped inputs) | - |
+| Category            | Condition                                                        | Default          |
+| ------------------- | ---------------------------------------------------------------- | ---------------- |
+| `blur`              | Laplacian variance < `--blur-threshold`                          | `3.0` (was 8.0)  |
+| `dark_frame`        | Gray mean < `--dark-threshold`                                   | `30.0` (was 45.0) |
+| `overexposed_frame` | Gray mean > `--bright-threshold`                                 | `235.0` (was 220.0) |
+| `no_face`           | YOLO detects no face above `--conf`                              | `0.25` (was 0.35) |
+| `face_too_small`    | Largest face area ratio < `--min-face-area-ratio`                | `0.002` (was 0.005) |
+| `extreme_pose`      | Unusual face aspect ratio (edge-touch allowed for cropped inputs) | —                |
 
 ## Install
 
@@ -92,18 +103,18 @@ python -m frame.pipeline --input-dir path/to/videos/ --save-quality-examples
 
 ### Extraction Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--source` | Single video path | required |
-| `--input-dir` | Directory of videos (batch mode) | - |
-| `--sample-fps` | Controlled frame sampling rate | `10.0` |
-| `--min-seq-len` | Minimum accepted frames for temporal modeling | `32` (was 64) |
-| `--blur-threshold` | Blur rejection threshold | `3.0` |
-| `--dark-threshold` | Dark-frame rejection threshold | `30.0` |
-| `--bright-threshold` | Overexposed-frame rejection threshold | `235.0` |
-| `--min-face-area-ratio` | Minimum face area ratio | `0.002` |
-| `--compare-rates` | Sampling-rate comparison list for docs | `5,10,15` |
-| `--save-quality-examples` | Save accepted/rejected example frames | off |
+| Option                    | Description                                  | Default         |
+| ------------------------- | -------------------------------------------- | --------------- |
+| `--source`                | Single video path                            | required        |
+| `--input-dir`             | Directory of videos (batch mode)             | —               |
+| `--sample-fps`            | Controlled frame sampling rate               | `10.0`          |
+| `--min-seq-len`           | Minimum accepted frames for temporal modeling | `32` (was 64)  |
+| `--blur-threshold`        | Blur rejection threshold                     | `3.0`           |
+| `--dark-threshold`        | Dark-frame rejection threshold               | `30.0`          |
+| `--bright-threshold`      | Overexposed-frame rejection threshold        | `235.0`         |
+| `--min-face-area-ratio`   | Minimum face area ratio                      | `0.002`         |
+| `--compare-rates`         | Sampling-rate comparison list for docs       | `5,10,15`       |
+| `--save-quality-examples` | Save accepted/rejected example frames        | off             |
 
 ## Model Weight Behavior
 

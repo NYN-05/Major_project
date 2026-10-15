@@ -82,6 +82,8 @@
 
 
 | 2026-10-15 19:40 IST | setup_and_run.ps1 + visual pipeline | Fixed the console-tee one-liner (PowerShell quoting: single quotes inside; print-before-write order so benign-line filter actually prints); added output_csv.parent.mkdir guards before CSV writes in WORKING/visual/pipeline.py after a transient missing-directory failure. Validation: dummy-emitter tee test (console 2/5 lines, file 5/5), visual rerun exit 0 with 162 videos fused to 59 features. | Complete |
+
+| 2026-10-15 19:55 IST | Documentation | Beautified all six README.md files (root, frame, RPPG, visual, quantum, frontend): added tables of contents, standardized stage breadcrumbs and heading vocabulary, converted lists to tables, fixed malformed MAJ_OUTPUT_ROOT backticks, added versionless shields; all technical content preserved, no source changes. | Complete |
 ## Historical Entries
 
 ### Architecture and Feature Fusion
