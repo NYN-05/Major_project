@@ -86,6 +86,8 @@
 | 2026-10-15 19:55 IST | Documentation | Beautified all six README.md files (root, frame, RPPG, visual, quantum, frontend): added tables of contents, standardized stage breadcrumbs and heading vocabulary, converted lists to tables, fixed malformed MAJ_OUTPUT_ROOT backticks, added versionless shields; all technical content preserved, no source changes. | Complete |
 
 | 2026-10-15 20:30 IST | rPPG extraction durability | Fixed WinError-5 crash on CSV rewrite during full extraction: added retry-with-backoff atomic CSV replace, batched multi-worker appends (25/flush, checkpoints saved only after CSV lands), and an exclusive extraction.lck (stale reclaim, second writer refused). Added tests/rppg/test_extract_csv.py (6 tests). Validation: 24/24 rppg tests pass, 2-video GPU smoke clean with lock release. | Complete |
+
+| 2026-10-15 21:10 IST | rPPG resume robustness | Fixed --resume crash on identity/config mismatches: split config into identity keys (method, thresholds, max_per_class - must match) vs runtime keys (gpu, workers - warn only); added detailed diff messages showing exactly which flags differ; normalized resume_from_index default to -1; improved missing-checkpoint error with canonical path hint and --checkpoint-file guidance; added tests/rppg/test_resume.py (5 tests) + extended test_extract_csv.py. Validation: 29/29 rppg tests pass, --resume with matching params resumes, runtime changes (gpu/workers) load cleanly, identity changes (method, max_per_class) refuse with actionable diff message. | Complete |
 ## Historical Entries
 
 ### Architecture and Feature Fusion
