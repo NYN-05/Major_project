@@ -12,6 +12,7 @@
 
 | Date and time | Area | Change | Status |
 |---|---|---|---|
+| 2026-10-15 23:36 IST | Documentation | Generated `research_paper_report.md`, an evidence-based academic draft covering all 20 requested requirements, traceability, diagrams, smoke-run results, limitations, and unavailable evidence. | Complete |
 | Date/time not recorded | Architecture | Added a visual feature branch and introduced rPPG, visual, and fused experiment paths. | Superseded |
 | Date/time not recorded | rPPG | Added quality-weighted signal processing as an experimental alternative to binary frame rejection. | Experimental |
 | Date/time not recorded | rPPG | Added overlapping short temporal-window analysis and feature aggregation. | Experimental |
