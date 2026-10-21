@@ -7,6 +7,7 @@ Visual feature extraction pipeline for batch processing.
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -109,6 +110,11 @@ def extract_visual_features_dataset(
     video_crops: dict[str, list[np.ndarray]] = {}
     raw_features: dict[str, np.ndarray] = {}
     stats = {"processed": 0, "failed": 0, "no_frames": 0}
+    total_videos = len(video_dirs)
+    received = 0
+    t_start = time.time()
+    # Machine-readable total for live progress wrappers (setup_progress.py).
+    print(f"TOTAL samples={total_videos} pending={total_videos}", flush=True)
 
     for video_dir in video_dirs:
         video_name = video_dir.name
@@ -126,6 +132,14 @@ def extract_visual_features_dataset(
         except Exception as e:
             print(f"  Failed to process {video_name}: {e}")
             stats["failed"] += 1
+        received += 1
+        print(
+            f"PROGRESS received={received} total={total_videos} "
+            f"ok={len(video_crops)} err={stats['failed']} "
+            f"nofeat={stats['no_frames']} gated=0 "
+            f"elapsed={time.time() - t_start:.1f}",
+            flush=True,
+        )
 
     pca_path = output_csv.parent / "visual_pca.npz"
     _fit_shared_pca(raw_features, training_stems, extractor, pca_path)
@@ -222,6 +236,11 @@ def extract_visual_features_from_videos(
     video_crops: dict[str, list[np.ndarray]] = {}
     raw_features: dict[str, np.ndarray] = {}
     stats = {"processed": 0, "failed": 0}
+    total_videos = len(video_files)
+    received = 0
+    t_start = time.time()
+    # Machine-readable total for live progress wrappers (setup_progress.py).
+    print(f"TOTAL samples={total_videos} pending={total_videos}", flush=True)
 
     for video_path in video_files:
         try:
@@ -237,6 +256,14 @@ def extract_visual_features_from_videos(
         except Exception as e:
             print(f"  Failed to process {video_path.name}: {e}")
             stats["failed"] += 1
+        received += 1
+        print(
+            f"PROGRESS received={received} total={total_videos} "
+            f"ok={len(video_crops)} err={stats['failed']} "
+            f"nofeat=0 gated=0 "
+            f"elapsed={time.time() - t_start:.1f}",
+            flush=True,
+        )
 
     pca_path = output_csv.parent / "visual_pca.npz"
     _fit_shared_pca(raw_features, training_stems, extractor, pca_path)

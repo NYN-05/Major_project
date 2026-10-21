@@ -964,6 +964,24 @@ def main() -> None:
             except (OSError, ValueError):
                 features_list = []
 
+        pending_total = sum(
+            1 for i in range(len(items))
+            if range_start <= i < range_end and not ckpt_mgr.is_index_completed(i)
+        )
+        # Machine-readable total for live progress wrappers (setup_progress.py).
+        print(f"TOTAL samples={len(items)} pending={pending_total}", flush=True)
+        progress_counter = {"received": 0}
+
+        def _emit_progress() -> None:
+            progress_counter["received"] += 1
+            print(
+                f"PROGRESS received={progress_counter['received']} total={pending_total} "
+                f"ok={stats['processed']} err={stats['failed']} "
+                f"nofeat={stats['no_features']} gated={stats['gated']} "
+                f"elapsed={time.time() - t_start:.1f}",
+                flush=True,
+            )
+
         for idx, (label, video_path, source, _root) in enumerate(items):
             # Range window: indices outside [--start, --end) are not ours
             if not (range_start <= idx < range_end):
@@ -990,23 +1008,27 @@ def main() -> None:
                 print(f"  -> Error processing {video_path.name}: {exc}")
                 stats["failed"] += 1
                 ckpt_mgr.save(idx, "failed", str(video_path))
+                _emit_progress()
                 continue
             if result.features is None:
                 print(f"  -> Failed to extract features: {video_path.name}")
                 stats["no_features"] += 1
                 ckpt_mgr.save(idx, "no_features", str(video_path))
+                _emit_progress()
                 continue
             gate = _gate_result(result, args.min_sqi, args.max_nan_features)
             if gate is not None:
                 print(f"  -> Gated (low signal quality): {video_path.name} ({gate})")
                 stats["gated"] += 1
                 ckpt_mgr.save(idx, "gated", str(video_path))
+                _emit_progress()
                 continue
             entry = _feature_entry(result, label, video_path, root, source)
             features_list.append(entry)
             _write_features_csv_atomic(features_list, out_csv_path)
             stats["processed"] += 1
             ckpt_mgr.save(idx, "processed", str(video_path))
+            _emit_progress()
 
             # Check pause request after each sample
             if _PAUSE_REQUESTED:
@@ -1039,6 +1061,8 @@ def main() -> None:
         ]
         print(f"[checkpoint] {len(pending)} of {len(items)} samples to process "
               f"in index range [{range_start}, {range_end})")
+        # Machine-readable total for live progress wrappers (setup_progress.py).
+        print(f"TOTAL samples={len(items)} pending={len(pending)}", flush=True)
         if not pending:
             print("Nothing to do: every sample in the requested range is already completed.")
             return
@@ -1129,6 +1153,14 @@ def main() -> None:
                     break
                 received += 1
                 _record_result(entry)
+                # Machine-readable progress line for setup_progress.py.
+                print(
+                    f"PROGRESS received={received} total={len(pending)} "
+                    f"ok={stats['processed']} err={stats['failed']} "
+                    f"nofeat={stats['no_features']} gated={stats['gated']} "
+                    f"elapsed={time.time() - t_start:.1f}",
+                    flush=True,
+                )
 
                 if stats["processed"] > 0 and stats["processed"] % 100 == 0:
                     done = stats["processed"] + stats["failed"] + stats["no_features"] + stats["gated"]
