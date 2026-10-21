@@ -404,7 +404,11 @@ if (Test-Artifact $FusedCsv) {
     $framesRoot = Join-Path $OutRoot 'frames\frame_sequences'
     $null = New-Item -ItemType Directory -Force -Path $visualDir
 
-    # Check if stage-1 frames exist for videos present in the rPPG CSV
+    # Check if stage-1 frames exist for videos present in the rPPG CSV.
+    # Frame mode is only used when the frame sequences cover the rPPG CSV
+    # well enough (>= 90% of stems); a stray leftover directory from a
+    # single-video inference run must not switch the whole dataset run into
+    # frames mode (which previously died at the PCA fit with only 2 videos).
     $useStage1Frames = $false
     if (Test-Path $framesRoot) {
         $rppgStems = @{}
@@ -413,11 +417,15 @@ if (Test-Artifact $FusedCsv) {
                 $rppgStems[([System.IO.Path]::GetFileNameWithoutExtension([string]$row.video_path)).ToLowerInvariant()] = $true
             }
         }
+        $totalStems = $rppgStems.Count
+        $coveredStems = 0
         foreach ($frameDir in @(Get-ChildItem -LiteralPath $framesRoot -Directory -ErrorAction SilentlyContinue)) {
-            if ($rppgStems.ContainsKey($frameDir.Name.ToLowerInvariant())) { $useStage1Frames = $true; break }
+            if ($rppgStems.ContainsKey($frameDir.Name.ToLowerInvariant())) { $coveredStems++ }
         }
-        if (-not $useStage1Frames) {
-            Write-Warn "Stage-1 frames do not cover the rPPG CSV videos; falling back to video extraction"
+        if ($totalStems -gt 0 -and ($coveredStems / $totalStems) -ge 0.9) {
+            $useStage1Frames = $true
+        } else {
+            Write-Warn "Stage-1 frames cover $coveredStems of $totalStems rPPG videos (<90%); falling back to video extraction"
         }
     }
     $visualLog = Join-Path $visualDir 'visual_stage.log'

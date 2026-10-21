@@ -43,7 +43,7 @@ WORKING/visual/
 | File           | Responsibility |
 | -------------- | -------------- |
 | `extractor.py` | `VisualFeatureExtractor` class (ResNet50 + handcrafted features), `VisualFeatures` dataclass (39 fields) + `VISUAL_FEATURE_NAMES` (fixed order), `compute_visual_features()` (stage-1 handoff), `iter_video_center_crops()` shared video sampler |
-| `pipeline.py`  | `extract_visual_features_dataset()`, `fuse_features()`, `create_experiment_splits()`, CLI entry point |
+| `pipeline.py`  | `extract_visual_features_dataset()`, `extract_visual_features_from_videos()` (streaming + checkpoint-resumable `parts/` store), `fuse_features()`, `create_experiment_splits()`, CLI entry point |
 
 ## Feature Breakdown (39 Total)
 
@@ -68,6 +68,21 @@ Stage-1 frames (JPEGs) + cropped_faces/
   → fuse_features() with rPPG CSV → MAJ_OUTPUT_ROOT/visual/fused_features.csv (59 features)
   → create_experiment_splits() → metadata-aware grouped train/val/test splits
 ```
+
+### Memory & checkpointing
+
+> The batch stage streams from disk and is checkpoint-resumable. Each video
+> is processed in isolation: face crops are materialised only for that one
+> video, a compact record (2048-dim deep-feature mean, 23-dim handcrafted
+> aggregate, frame count) is written atomically to `parts/<stem>.npz`, and
+> the crops are released before the next video starts - peak RAM stays
+> bounded to a single video. Training-partition videos additionally persist
+> their per-frame ResNet50 rows to `parts/deep_train/<stem>.npy` so the
+> shared PCA is still fitted once at the end on exactly the same pooled
+> matrix. A rerun after an interruption skips completed videos (auto-resume),
+> transient CUDA-OOM / OpenCV allocation failures trigger one cache-clearing
+> retry per video, and the stage fails fast (exit code 2) when no available
+> video overlaps the rPPG training split.
 
 ### Split integrity
 
@@ -133,6 +148,8 @@ In `MAJ_OUTPUT_ROOT/visual/`:
 | `fused_features.csv`           | 59 features (20 rPPG + 39 visual) + label                    |
 | `experiments/fused_split.npz`  | Train/val/test arrays for quantum layer                      |
 | `experiments/split_indices.npz`| Split indices for reproducibility                            |
+| `parts/<stem>.npz`             | Per-video checkpoint record (deep mean + handcrafted aggregate) |
+| `parts/deep_train/<stem>.npy`  | Per-frame ResNet50 rows of training videos (shared-PCA input)  |
 
 ## Feature Contract
 

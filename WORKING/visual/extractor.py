@@ -5,6 +5,11 @@ Visual feature extraction from face crops using a pre-trained CNN backbone.
 """
 
 import os
+
+# Allocator pressure mitigation - must run before any torch import in this
+# process (Windows CUDA allocator fragments over long free/alloc cycles).
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:128")
+
 import cv2
 import numpy as np
 import torch
@@ -19,6 +24,8 @@ from quantum.operations import resolve_torch_device
 
 RESNET_FEATURE_DIM = 2048
 PCA_PREPROCESSING_VERSION = "resnet50_imagenet_v1_bgr_to_rgb_224_normalized"
+# Fixed per-frame handcrafted layout: LBP(10) + texture(4) + color(6) + frequency(3)
+HANDCRAFTED_DIM = 23
 
 
 @dataclass
@@ -398,6 +405,95 @@ class VisualFeatureExtractor:
         total = low_energy + mid_energy + high_energy + 1e-12
         return low_energy / total, mid_energy / total, high_energy / total
 
+    def compute_handcrafted_frame(self, crop: np.ndarray) -> np.ndarray:
+        """Compute one frame's 23-dim handcrafted row in fixed VisualFeatures order.
+
+        Layout mirrors the VisualFeatures field order - LBP(10), texture(4),
+        color(6), frequency(3) - so per-frame rows can be stacked and averaged
+        directly by aggregate_handcrafted().
+        """
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        lbp_hist = self.compute_lbp_histogram(gray)
+        contrast, energy, homogeneity, correlation = self.compute_texture_features(gray)
+        color_mean_r, color_mean_g, color_mean_b, color_std_r, color_std_g, color_std_b = self.compute_color_stats(crop)
+        freq_low, freq_mid, freq_high = self.compute_frequency_features(gray)
+        return np.asarray(
+            [
+                *lbp_hist,
+                contrast, energy, homogeneity, correlation,
+                color_mean_r, color_mean_g, color_mean_b,
+                color_std_r, color_std_g, color_std_b,
+                freq_low, freq_mid, freq_high,
+            ],
+            dtype=np.float64,
+        )
+
+    def aggregate_handcrafted(self, face_crops: List[np.ndarray]) -> np.ndarray:
+        """Mean handcrafted row (23-dim) across the face crops of one video."""
+        if not face_crops:
+            raise ValueError("Cannot aggregate handcrafted features from an empty crop list")
+        rows = np.stack([self.compute_handcrafted_frame(crop) for crop in face_crops], axis=0)
+        return rows.mean(axis=0)
+
+    def build_features_from_aggregates(
+        self,
+        deep_mean: np.ndarray,
+        handcrafted: np.ndarray,
+    ) -> VisualFeatures:
+        """Assemble VisualFeatures from per-video aggregates.
+
+        Same math as extract_from_crops(): the per-video mean of per-frame
+        ResNet50 GAP features is PCA-reduced with the shared training artifact,
+        and the handcrafted row is the per-video mean of the per-frame rows.
+        Used by the batch pipeline to rebuild features from persisted records
+        without keeping face crops in memory.
+        """
+        deep_mean = np.asarray(deep_mean, dtype=np.float32)
+        if deep_mean.shape != (RESNET_FEATURE_DIM,):
+            raise ValueError(
+                f"Expected a deep-feature mean of shape ({RESNET_FEATURE_DIM},), "
+                f"got {deep_mean.shape}"
+            )
+        handcrafted = np.asarray(handcrafted, dtype=np.float64)
+        if handcrafted.shape != (HANDCRAFTED_DIM,):
+            raise ValueError(
+                f"Expected a handcrafted aggregate of shape ({HANDCRAFTED_DIM},), "
+                f"got {handcrafted.shape}"
+            )
+
+        deep_reduced = self._apply_pca(deep_mean.reshape(1, -1)).flatten()
+
+        features = VisualFeatures()
+
+        for i in range(16):
+            setattr(features, f"deep_feat_{i}", float(deep_reduced[i]))
+
+        lbp_agg = handcrafted[:10]
+        texture_agg = handcrafted[10:14]
+        color_agg = handcrafted[14:20]
+        freq_agg = handcrafted[20:23]
+
+        for i in range(10):
+            setattr(features, f"lbp_uniform_hist_{i}", float(lbp_agg[i]))
+
+        features.texture_contrast = float(texture_agg[0])
+        features.texture_energy = float(texture_agg[1])
+        features.texture_homogeneity = float(texture_agg[2])
+        features.texture_correlation = float(texture_agg[3])
+
+        features.color_mean_r = float(color_agg[0])
+        features.color_mean_g = float(color_agg[1])
+        features.color_mean_b = float(color_agg[2])
+        features.color_std_r = float(color_agg[3])
+        features.color_std_g = float(color_agg[4])
+        features.color_std_b = float(color_agg[5])
+
+        features.freq_low_energy = float(freq_agg[0])
+        features.freq_mid_energy = float(freq_agg[1])
+        features.freq_high_energy = float(freq_agg[2])
+
+        return features
+
     def extract_from_crops(
         self,
         face_crops: List[np.ndarray],
@@ -406,12 +502,14 @@ class VisualFeatureExtractor:
         """
         Extract full visual feature vector from a sequence of face crops.
 
-        Aggregates per-frame features by averaging across frames.
+        Aggregates per-frame features by averaging across frames. Deep features
+        are PCA-reduced with the shared training artifact; handcrafted rows are
+        computed by the shared helper so the batch pipeline and the single-video
+        inference path cannot drift apart.
         """
         if not face_crops:
             return VisualFeatures()
 
-        # Transform each frame with the shared training PCA, then aggregate.
         deep_feats = (
             self.extract_deep_features(face_crops)
             if deep_features is None
@@ -422,67 +520,8 @@ class VisualFeatureExtractor:
                 f"Expected deep features with shape ({len(face_crops)}, "
                 f"{RESNET_FEATURE_DIM}), got {deep_feats.shape}"
             )
-        deep_agg = deep_feats.mean(axis=0)  # (2048,)
-        deep_reduced = self._apply_pca(deep_agg.reshape(1, -1)).flatten()
-
-        # Handcrafted features - compute on each frame and average
-        lbp_hists = []
-        texture_feats = []
-        color_feats = []
-        freq_feats = []
-
-        for crop in face_crops:
-            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-
-            lbp_hist = self.compute_lbp_histogram(gray)
-            lbp_hists.append(lbp_hist)
-
-            contrast, energy, homogeneity, correlation = self.compute_texture_features(gray)
-            texture_feats.append([contrast, energy, homogeneity, correlation])
-
-            color_mean_r, color_mean_g, color_mean_b, color_std_r, color_std_g, color_std_b = self.compute_color_stats(crop)
-            color_feats.append([color_mean_r, color_mean_g, color_mean_b, color_std_r, color_std_g, color_std_b])
-
-            freq_low, freq_mid, freq_high = self.compute_frequency_features(gray)
-            freq_feats.append([freq_low, freq_mid, freq_high])
-
-        lbp_agg = np.mean(lbp_hists, axis=0)  # (10,)
-        texture_agg = np.mean(texture_feats, axis=0)  # (4,)
-        color_agg = np.mean(color_feats, axis=0)  # (6,)
-        freq_agg = np.mean(freq_feats, axis=0)  # (3,)
-
-        # Build VisualFeatures object
-        features = VisualFeatures()
-
-        # Deep features (16)
-        for i in range(16):
-            setattr(features, f"deep_feat_{i}", float(deep_reduced[i]))
-
-        # LBP (10)
-        for i in range(10):
-            setattr(features, f"lbp_uniform_hist_{i}", float(lbp_agg[i]))
-
-        # Texture (4)
-        features.texture_contrast = float(texture_agg[0])
-        features.texture_energy = float(texture_agg[1])
-        features.texture_homogeneity = float(texture_agg[2])
-        features.texture_correlation = float(texture_agg[3])
-
-        # Color (6)
-        features.color_mean_r = float(color_agg[0])
-        features.color_mean_g = float(color_agg[1])
-        features.color_mean_b = float(color_agg[2])
-        features.color_std_r = float(color_agg[3])
-        features.color_std_g = float(color_agg[4])
-        features.color_std_b = float(color_agg[5])
-
-        # Frequency (3)
-        features.freq_low_energy = float(freq_agg[0])
-        features.freq_mid_energy = float(freq_agg[1])
-        features.freq_high_energy = float(freq_agg[2])
-
-        return features
-
+        handcrafted = self.aggregate_handcrafted(face_crops)
+        return self.build_features_from_aggregates(deep_feats.mean(axis=0), handcrafted)
 
 def compute_visual_features(
     frames_dir: str,
