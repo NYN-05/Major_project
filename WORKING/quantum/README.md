@@ -15,9 +15,9 @@ No synthetic data is generated anywhere in the pipeline.
 - [Artifacts](#artifacts)
 - [Usage](#usage)
 - [Constraints (Do Not Break)](#constraints-do-not-break)
-- [Current Results (Post-P7, Fused Mode, DFDC Only)](#current-results-post-p7-fused-mode-dfdc-only)
+- [Current Results (Full-Dataset Run 2026-10-21, Fused Mode, DFDC Only)](#current-results-full-dataset-run-2026-10-21-fused-mode-dfdc-only)
 - [Performance Notes](#performance-notes)
-- [Remediation Status](#remediation-status)
+- [Remediation Status and Open Work](#remediation-status-and-open-work)
 - [Integration with End-to-End Pipeline](#integration-with-end-to-end-pipeline)
 
 ## Module Map
@@ -97,22 +97,33 @@ python -m quantum.tests
   cross-verification; `test_qaoa_sim_matches_pennylane` / `test_torch_layer_matches_pennylane`
   pin them to ≤1e-6 / ≤1e-5.
 
-## Current Results (Post-P7, Fused Mode, DFDC Only)
+## Current Results (Full-Dataset Run 2026-10-21, Fused Mode, DFDC Only)
 
-| Metric                        | VQC Test    | VQC 5-Fold CV   | Best Classical (LR) |
-| ----------------------------- | ----------- | --------------- | ------------------- |
-| Accuracy                      | 0.552       | 0.556 ± 0.019   | TBD                 |
-| **Balanced Accuracy**          | **0.499**   | **0.545 ± TBD** | **TBD**             |
-| Specificity (FAKE recall)      | **0.702**   | **TBD ± TBD**   | 0.525               |
-| AUC-ROC                       | 0.535       | 0.556 ± 0.019   | 0.582               |
-| Decision Bins                 | REAL / FAKE | —               | —                   |
+Data: 3,912 labelled rows (2,087 REAL / 1,827 FAKE) after the HR-plausibility
+filter; seed-42 clip-grouped 60/20/20 split (train 2,348 / val 782 /
+test 782). Metrics are read from `MAJ_OUTPUT_ROOT/quantum/metrics_quantum.json`
+and `metrics_baselines.json`; headline metrics are computed at the 0.5 cut
+(all six classical baselines share that cut), while the deployed decision
+bins use the calibrated validation-only threshold τ* = 0.47942 persisted in
+the checkpoint and consumed at inference (`pipeline.py:114`).
 
-- **QAOA selection (59 → 3):** `['cheek_forehead_correlation', 'left_right_cheek_correlation', 'signal_to_motion_ratio']` (seed 44, cost −0.767). Restart spread [11.73, −0.098, −0.767, 9.83] with `success: false` — the QUBO landscape is difficult; the greedy classical reference overlaps on 2/3 features (`selection_comparison.json`).
-- **VQC test:** acc 0.552 / AUC-ROC 0.535 / specificity 0.702 / balanced acc 0.499 / ECE 0.068 — confusion `[[177,75],[202,105]]`. **First practical quantum advantage in FAKE detection** (VQC specificity 0.702 vs LR 0.525).
-- **Classical baselines:** best test AUC 0.582 (LogisticRegression), LinearSVC 0.581, GNB 0.568 — same ceiling as the VQC.
-- **Decision bins:** REAL (>=0.5) / FAKE (<0.5) at 0.5 threshold.
-- **Phase 1C diagnosis** (`threshold_analysis.json`): Case B — test scores lie in [0.428, 0.503], classes do not separate; thresholds cannot fix discrimination. Next lever is the upstream rPPG method/ROI probe (Phase 4 of the remediation plan, covered in semester report).
-- **Phase 1B experiment** (balanced class weighting in the focal loss): the collapse flipped to all-FAKE (acc 0.444 / specificity 0.974 / AUC 0.486) — still no separation, still no separation. Discrimination is the bottleneck, not the loss weighting.
+| Metric                            | Quantum VQC (test)                 | VQC 5-Fold CV  | Best Classical (MLP) |
+| --------------------------------- | ---------------------------------- | -------------- | -------------------- |
+| Accuracy (0.5 cut)                | 0.569 (Wilson 95% [0.534, 0.603])  | 0.589 ± 0.020  | 0.632                |
+| **Balanced Accuracy**             | **0.582**                          | 0.596 ± 0.020  | 0.631                |
+| Specificity (FAKE recall)         | 0.773                              | 0.709 ± 0.039  | 0.616                |
+| AUC-ROC                           | 0.658                              | 0.645 ± 0.020  | 0.684                |
+| PR-AUC (REAL-positive)            | 0.687                              | 0.668 ± 0.023  | 0.730                |
+| ECE / Brier                       | 0.080 / 0.236                      | 0.053 (ECE)    | 0.027 / 0.222        |
+| Confusion @0.5 [[TN,FP],[FN,TP]]  | [[282, 83], [254, 163]]             | —              | —                    |
+| Decision Bins (τ*)                | 378 REAL / 404 FAKE                | —              | —                    |
+
+- **QAOA selection (59 → 3):** `['lbp_uniform_hist_0', 'deep_feat_5', 'lbp_uniform_hist_9']` — three visual-side features (chosen seed 47, cost -2.4726, `success: false`, 8-restart spread [-2.423, -2.473], `selection_stability.mean_jaccard` 1.0 over n_runs 1).
+- **VQC test:** acc 0.569 / AUC-ROC 0.658 / FAKE rejection (specificity) 0.773 / balanced acc 0.582 / ECE 0.080 — confusion `[[282,83],[254,163]]` (REAL-positive); FAR 0.227 (FAKE accepted as genuine), FRR 0.609.
+- **Classical baselines (same split, same 0.5 cut):** best test AUC 0.684 and accuracy 0.632 (MLP); baseline range acc 0.598-0.632, AUC 0.634-0.684, PR-AUC 0.670-0.730. **Every classical baseline currently exceeds the VQC in accuracy, AUC and PR-AUC on this split — no quantum-advantage claim is supportable.**
+- **CV:** grouped 5-fold over the 2,348 training rows: VQC acc 0.589 ± 0.020, AUC 0.645 ± 0.020, balanced acc 0.596 ± 0.020, ECE 0.053.
+- **Single-seed caveat:** all figures are seed-42, single-split. Repeatability work (multi-seed, bootstrap CIs, at-τ* metrics, EER) is staged in `paper_experiments/` and tracked in `reviewer_findings_response.md`.
+- **Historical Phase 1B/1C experiments** (balanced focal weighting collapse flip; `threshold_analysis.json` Case-B non-separation) ran on a small smoke split and are retained as process history only.
 
 ## Performance Notes
 
@@ -123,16 +134,20 @@ python -m quantum.tests
 | Lazy imports | sklearn and xgboost are imported lazily so QAOA spawn workers and module imports stay cheap. |
 | Simulator rationale | `lightning.gpu` is not installable on Windows (cuQuantum/custatevec has no Windows wheels) and PennyLane ≥ 0.39 removed `default.qubit.torch` — which is why the project ships its own exact torch-native simulators. |
 
-## Remediation Status
+## Remediation Status and Open Work
 
-Severity-ordered plan in `Docs/maj_proj_report_sem_6/SEM6_report/` (24 phases, covered by semester report):
+Severity-ordered plan in `Docs/maj_proj_report_sem_6/SEM6_report/` (24 phases, covered by semester report).
 
-| Phase | Status |
-| ----- | ------ |
+| Item | Status |
+| ---- | ------ |
 | **Phase 1A** (label/probability mapping) | **DONE.** Explicit conversion contract + regression test. |
 | **Phase 1B** (single-class collapse) | **Intervention tested.** Balanced weighting added to focal loss; flipped collapse but no class separation. |
-| **Phase 1C** (threshold vs discrimination diagnosis) | **DONE.** `threshold_analysis.json` diagnosis: **Case B** — all test scores in [0.428, 0.503], classes don't separate; next lever is upstream rPPG. |
-| **Phase 4** (rPPG method/ROI probe) | **NEXT.** POS vs CHROM vs green-channel; ROI configurations. |
+| **Phase 1C** (threshold vs discrimination diagnosis) | **DONE (historical, smoke-run scale).** `threshold_analysis.json` diagnosis: **Case B** — all test scores in [0.428, 0.503], classes did not separate. |
+| Phase 4 probe features (spectral flatness/centroid/kurtosis/coherence) | **Integrated** in the 20-name rPPG contract (`RPPG_FEATURE_NAMES`). |
+| **Full-dataset training** | **DONE 2026-10-21** — figures in the table above; artifacts re-verified. |
+| Multi-seed repeatability + bootstrap CIs | **PENDING** — scripts in `paper_experiments/` (multi_seed_repeats.py, ci_from_recorded.py), not yet executed. |
+| EER + at-τ* metric reporting | **PENDING** — small evaluator extension (reviewer item T6). |
+| Ablation matrix / robustness grid / latency benchmarks | **READY (unblocked by the full run)** — protocols provided, execution awaits authorization. |
 
 ## Integration with End-to-End Pipeline
 

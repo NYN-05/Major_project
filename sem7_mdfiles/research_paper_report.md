@@ -12,6 +12,18 @@ hybrid variational quantum classifier (VQC). The codebase contains a fused
 QAOA-inspired selector, a classical-baseline evaluator, and a browser/API
 application.
 
+> **Post-run status update (2026-10-22):** the smoke-run limitation described
+> below is **superseded** — full-dataset training completed on 2026-10-21
+> (3,912 labelled rows; held-out test n = 782: 417 REAL / 365 FAKE). Current
+> headline figures: VQC test accuracy 0.569 / AUC-ROC 0.658 / balanced
+> accuracy 0.582 / ECE 0.080, decision bins 378 REAL / 404 FAKE at the
+> calibrated threshold τ* = 0.47942 (single seed, single split); the best
+> classical baseline (MLP) reaches accuracy 0.632 / AUC 0.684, so no
+> quantum-advantage claim is supported. Canonical numbers live in
+> `WORKING/output/quantum/metrics_quantum.json`, `metrics_baselines.json`,
+> and `reviewer_findings_response.md` §1; the smoke-run figures quoted in
+> the sections below now document the historical state only.
+
 The results in the present artifact directory must not be interpreted as
 full-dataset results. The local dataset contains 4,093 clips, but the persisted
 training artifacts were produced by a 38-clip smoke run (20 fake and 18 real)

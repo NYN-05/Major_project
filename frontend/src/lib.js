@@ -40,7 +40,7 @@ export const PIPELINE = [
   { title: "Frame quality", sub: "Filtering blurry or dark frames", icon: ScanSearch },
   { title: "Face detection", sub: "Locating the face region", icon: ScanFace },
   { title: "rPPG signal", sub: "Extracting the pulse from skin-color changes", icon: HeartPulse },
-  { title: "Feature analysis", sub: "Measuring 29 physiological features", icon: Gauge },
+  { title: "Feature analysis", sub: "Measuring 20 physiological features", icon: Gauge },
   { title: "Quantum classifier", sub: "QAOA selection + hybrid VQC scoring", icon: Atom },
   { title: "Final decision", sub: "Issuing the verification verdict", icon: ShieldCheck },
 ];

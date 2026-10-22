@@ -10,6 +10,18 @@
 | Reproduction status | **No experiment was executed for this report.** All metrics below are read directly from existing artifacts and are labelled *reported (artifact-read), not independently reproduced*. |
 | Status vocabulary | **Verified** - directly confirmed in inspected files. **Partially Verified** - some elements confirmed, others missing or unconfirmed. **Unverified** - claim exists but no supporting artifact could be checked. **Not Available** - no supporting evidence exists in the inspected project files. |
 
+> **Post-run status update (2026-10-22):** the global "38-video smoke run"
+> caveat below is **superseded** — full-dataset training completed on
+> 2026-10-21 (3,912 labelled rows — 2,087 REAL / 1,827 FAKE — held-out test
+> n = 782; VQC test accuracy 0.569 / AUC 0.658; best classical baseline MLP
+> 0.632 / AUC 0.684, so no quantum-advantage claim holds). Item statuses
+> citing the 1,024-row FAKE-only CSV, the smoke-run metrics, or the removed
+> inconclusive path are outdated: `run_pipeline.py` emits `INCONCLUSIVE`
+> (exit 3) when the rPPG or visual stage returns no features, and the
+> calibrated threshold τ* = 0.47942 is persisted in the checkpoint and used
+> at inference. Current canonical figures: the `WORKING/output/quantum/`
+> metrics artifacts and `reviewer_findings_response.md` (revised 2026-10-22).
+
 > **Global caveat that governs every results section (Sections 11-15):** the trained artifacts currently on disk were produced by a **38-video smoke run** executed on **2026-10-11 23:06-23:09 IST** (file timestamps under `WORKING/output/`), corresponding to the `changes.md` entry *"2026-10-11 23:10 IST ... -Quick smoke run completed end-to-end (38 videos, fused 59 features, quantum VQC trained+evaluated)."* They are **not** results over the full 4,093-video dataset present on disk. All metrics therefore have a test set of **n = 8 clips** and are statistically indicative only.
 
 ---

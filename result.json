@@ -1,59 +1,60 @@
 {
-  "video": "C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\DFDC_Dataset\\Fake\\id3_id9_0000.mp4",
-  "timestamp": "2026-10-21T20:41:14.406642",
+  "video": "C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\DFDC_Dataset\\Fake\\id8_id3_0002.mp4",
+  "timestamp": "2026-10-22T10:30:32.503949",
   "pipeline_version": "p2-1",
   "stages": {
     "frames": {
       "status": "success",
       "layer_status": "success",
       "stats": {
-        "sampled_frames": 388,
-        "accepted_frames": 303,
+        "sampled_frames": 455,
+        "accepted_frames": 0,
         "rejections": {
-          "extreme_pose": 85
+          "dark_frame": 455,
+          "extreme_pose": 8
         },
-        "mean_quality_score": 0.8319971649484535,
-        "mean_face_confidence": 0.8744567656765676,
-        "temporal_coverage_ratio": 0.7809278350515464
+        "mean_quality_score": 0.7238076923076923,
+        "mean_face_confidence": 0.0,
+        "temporal_coverage_ratio": 0.0
       }
     },
     "rppg": {
       "method": "POS",
-      "input_mode": "stage1_frames",
+      "input_mode": "video_direct",
       "fps_used": 30.0,
-      "n_frames_total": 303,
-      "n_frames_usable": 303,
+      "n_frames_total": 525,
+      "n_frames_usable": 525,
       "warnings": [
-        "Signal diagnostics: fps=30.0, n_total=303, n_usable=303, valid_ratio=1.00, combined_signal_len=303, left_valid=True, right_valid=True, forehead_valid=True",
-        "Feature diagnostics: raw_nan_count=0, SQI=0.613, HR=80.9BPM, SNR=-0.0dB, PRV=136.0ms, Entropy=0.855, MAD=0.805",
-        "PQS: 0.510 (MEDIUM), components: SNR=0.12, frames=1.00, ROI=0.00, crossROI=0.61, freq=0.65, amp=1.00, temp=0.50"
+        "Signal diagnostics: fps=30.0, n_total=525, n_usable=525, valid_ratio=1.00, combined_signal_len=525, left_valid=True, right_valid=True, forehead_valid=True",
+        "Feature diagnostics: raw_nan_count=0, SQI=0.628, HR=98.4BPM, SNR=-0.2dB, PRV=114.9ms, Entropy=0.877, MAD=0.720",
+        "PQS: 0.606 (MEDIUM), components: SNR=0.11, frames=1.00, ROI=1.00, crossROI=0.67, freq=0.00, amp=1.00, temp=0.50"
       ],
       "features": {
-        "heart_rate_bpm": 80.859375,
-        "snr_db": -0.040521704932394494,
-        "prv_std_ms": 136.01586326550802,
-        "spectral_entropy": 0.8549672100295451,
-        "mad": 0.8053016045804057,
-        "signal_quality_index": 0.6134464800564973,
-        "cheek_forehead_correlation": 0.5344912711826102,
-        "left_right_cheek_correlation": -0.10248072201100163,
-        "hr_half_diff": 7.03125,
-        "peak_prominence": 5.184040970153081,
-        "systolic_peak_width": 184.21333036859954,
-        "diastolic_notch_ratio": 0.9164394536370826,
+        "heart_rate_bpm": 98.4375,
+        "snr_db": -0.1641226351359324,
+        "prv_std_ms": 114.90562180002611,
+        "spectral_entropy": 0.8766945999156799,
+        "mad": 0.7200301041297559,
+        "signal_quality_index": 0.628437815965281,
+        "cheek_forehead_correlation": 0.5749236555688256,
+        "left_right_cheek_correlation": 0.09706353088303465,
+        "hr_half_diff": 49.21875,
+        "peak_prominence": 5.784126994659111,
+        "systolic_peak_width": 192.9933611741717,
+        "diastolic_notch_ratio": 2.0024473862037135,
         "forehead_cheek_phase_lag": 0.0,
-        "signal_to_motion_ratio": 20.905480814970577,
-        "peak_amplitude_variability": 1.213701630289197,
+        "signal_to_motion_ratio": 25.319067749296664,
+        "peak_amplitude_variability": 0.8382322846525699,
         "pulse_transit_time_proxy": 0.0,
-        "spectral_flatness": 0.4312783800903271,
-        "spectral_centroid": 1.6377727261057629,
-        "kurtosis": -0.018509581629845062,
-        "phase_coherence_lr": 1.772571449668969
+        "spectral_flatness": 0.4320842307900352,
+        "spectral_centroid": 1.7187462068898653,
+        "kurtosis": 2.2707112602354886,
+        "phase_coherence_lr": 1.808309034115077
       }
     },
     "visual": {
       "status": "failure",
-      "reason": "Training-fitted visual PCA artifact not found: C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\WORKING\\output\\visual\\visual_pca.npz. Run the visual training extraction first."
+      "reason": "No frames found in: C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\WORKING\\output\\frames\\frame_sequences\\id8_id3_0002\\frames"
     }
   },
   "verdict": {
@@ -62,14 +63,14 @@
     "reason": "Visual feature extraction failed"
   },
   "diagnostics": {
-    "processing_time_seconds": 25.644,
-    "frame_count": 388,
-    "valid_frame_count": 303,
-    "rppg_quality": 0.6134464800564973,
+    "processing_time_seconds": 22.374,
+    "frame_count": 455,
+    "valid_frame_count": 0,
+    "rppg_quality": 0.628437815965281,
     "final_score": null,
     "decision": "INCONCLUSIVE",
     "memory": {
-      "rss_mb": 1380.66,
+      "rss_mb": 1237.98,
       "cuda_allocated_mb": null,
       "cuda_reserved_mb": null
     }

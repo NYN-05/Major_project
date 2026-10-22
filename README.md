@@ -66,15 +66,39 @@ frames → rPPG → visual → quantum (fused) → verdict (REAL / FAKE)
 | `Docs/` | Project docs: RMTT semester report, key findings, remediation plan, problem analysis, bottleneck diagnosis |
 | `Scrape/` | Dev scratch: tests, temp scripts, debug artifacts (gitignored) |
 
-## Current Performance (Fused Mode, DFDC Only)
+## Current Performance (Full-DFDC Run, 2026-10-21, Fused Mode Only)
 
-| Metric                    | VQC Test    | VQC 5-Fold CV   | Best Classical (LR) |
-| ------------------------- | ----------- | --------------- | ------------------- |
-| Accuracy                  | 0.552       | 0.556 ± 0.019   | TBD                 |
-| **Balanced Accuracy**     | **0.499**   | **0.545 ± TBD** | **TBD**             |
-| Specificity (FAKE recall) | **0.702**   | **TBD ± TBD**   | 0.525               |
-| AUC-ROC                   | 0.535       | 0.556 ± 0.019   | 0.582               |
-| Decision Bins             | REAL / FAKE | —               | —                   |
+Figures below are read directly from the regenerated artifacts
+`WORKING/output/quantum/metrics_quantum.json` and `metrics_baselines.json`
+produced by the first full-dataset training run (2026-10-21). Test split:
+n = 782 (417 REAL / 365 FAKE) from a seed-42 clip-grouped 60/20/20 split of
+3,912 labelled rows (2,087 REAL / 1,827 FAKE). Headline metrics are computed
+at the 0.5 cut (all six classical baselines share that cut); the deployed
+decision bins use the calibrated, validation-only threshold
+τ* = 0.47942 persisted in the checkpoint and consumed at inference
+(`quantum/pipeline.py`).
+
+| Metric                           | Quantum VQC                        | VQC 5-Fold CV  | Best Classical (MLP) | Baseline Range |
+| -------------------------------- | ---------------------------------- | -------------- | -------------------- | -------------- |
+| Accuracy (0.5 cut)               | 0.569 (Wilson 95% [0.534, 0.603])  | 0.589 ± 0.020  | 0.632                | 0.598 – 0.632  |
+| **Balanced Accuracy**            | **0.582**                          | 0.596 ± 0.020  | 0.631                | 0.602 – 0.631  |
+| Specificity (FAKE recall)        | 0.773                              | 0.709 ± 0.039  | 0.616                | 0.466 – 0.668  |
+| AUC-ROC                          | 0.658                              | 0.645 ± 0.020  | 0.684                | 0.634 – 0.684  |
+| PR-AUC (REAL-positive)           | 0.687                              | 0.668 ± 0.023  | 0.730                | 0.670 – 0.730  |
+| ECE / Brier                      | 0.080 / 0.236                      | 0.053 (ECE)    | 0.027 / 0.222        | —              |
+| Confusion @0.5 [[TN,FP],[FN,TP]] | [[282, 83], [254, 163]]             | —              | —                    | —              |
+| Decision Bins                    | 378 REAL / 404 FAKE (τ*)           | —              | —                    | —              |
+
+KYC reading of the 0.5-cut confusion matrix (REAL-positive): 22.7% of FAKE
+videos are accepted as genuine (FAR 0.227) and 60.9% of REAL videos are
+rejected (FRR 0.609).
+
+**Honest reading:** these are single-seed, single-split results on a
+3-feature regime — **every classical baseline currently exceeds the VQC in
+accuracy, AUC and PR-AUC on this split**, so no quantum-advantage claim is
+supportable. Repeatability work (multi-seed runs, bootstrap CIs, at-τ*
+metrics, EER) is staged in `paper_experiments/` and tracked in
+`reviewer_findings_response.md`.
 
 *Run `python -m quantum.pipeline --all` from `WORKING/` to regenerate metrics from trained artifacts.*
 
@@ -219,7 +243,7 @@ python server.py          # Backend API on http://127.0.0.1:8000
 npm run dev               # React dev server on http://localhost:5173 (proxies /api)
 ```
 
-Upload a KYC video, watch the three-stage pipeline run live via SSE,
+Upload a KYC video, watch the four-stage pipeline run live via SSE,
 and read the verdict with its evidence dossier (accepted frames, physiological
 features, quantum probabilities and plots, the pulse waveform).
 
@@ -279,7 +303,7 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
 - `Docs/maj_proj_report_sem_6/research_paper/` — 23+ research papers on deepfake detection, QML, and rPPG
 - `Docs/charts/` — 5 performance comparison charts
 - `Docs/QML/M1-M5.pdf` — 5 Quantum Machine Learning module PDFs
-- `changes.md` — historical development log (Phases 1–10, superseded)
+- `changes.md` — active change log and historical development record (every code change must be recorded here)
 
 ## Team
 

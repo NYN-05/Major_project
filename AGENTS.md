@@ -7,7 +7,7 @@ This repository implements deepfake-video detection for KYC using:
 - rPPG physiological evidence
 - visual features from ResNet50 and handcrafted descriptors
 - hybrid quantum-classical machine learning with PennyLane and PyTorch
-- two decision outcomes: `REAL` and `FAKE`
+- verdicts of `REAL` or `FAKE` (plus `INCONCLUSIVE` with exit code 3 when signal extraction fails)
 
 Active application code is located in [`WORKING/`](WORKING/) and
 [`frontend/`](frontend/). The root contains documentation, PDFs, and

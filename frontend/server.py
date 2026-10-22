@@ -1,7 +1,7 @@
 """
 server.py
 =========
-Minimal stdlib-only backend for the frontemd React UI.
+Minimal stdlib-only backend for the frontend React UI.
 
 Endpoints
 ---------
@@ -10,8 +10,8 @@ GET  /api/jobs/<id>                 {done, error, lines, result}
 GET  /api/jobs/<id>/events          SSE: line / stage / result / error events
 GET  /api/health                    {ok, artifacts...}
 GET  /api/previous                  last canonical pipeline result, if any
-GET  /api/artifacts?dir=<rel>       list files under Scrape/output/<rel>
-GET  /api/files?rel=<rel>           serve a file relative to Scrape/output/
+GET  /api/artifacts?dir=<rel>       list files under MAJ_OUTPUT_ROOT/<rel>
+GET  /api/files?rel=<rel>           serve a file relative to MAJ_OUTPUT_ROOT/
 
 The heavy lifting is delegated to the existing stack unchanged: each job
 spawns `python run_pipeline.py` inside WORKING/ as a subprocess. No
@@ -281,7 +281,7 @@ def _write_canonical(result: dict) -> None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "frontemd/0.1"
+    server_version = "frontend/0.1"
 
     # -- helpers ---------------------------------------------------------
 
@@ -583,12 +583,12 @@ def main() -> None:
     INBOX.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"[frontemd] backend on http://127.0.0.1:{PORT}  (WORKING={WORKING})")
-    print("[frontemd] start the UI with: npm run dev   (http://localhost:5173)")
+    print(f"[frontend] backend on http://127.0.0.1:{PORT}  (WORKING={WORKING})")
+    print("[frontend] start the UI with: npm run dev   (http://localhost:5173)")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n[frontemd] stopped")
+        print("\n[frontend] stopped")
         httpd.server_close()
 
 

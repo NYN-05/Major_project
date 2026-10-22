@@ -44,7 +44,7 @@ frontend/
 │   ├── App.jsx        # Main app: verdict rig, progress rail, evidence cards
 │   ├── api.js         # Thin fetch/EventSource client
 │   ├── styles.css     # Instrument-panel design system
-│   ├── components/    # React components (VerdictGauge, SignalCanvas, FrameStrip, etc.)
+│   ├── components/    # React components (VerdictHeader, VerdictCard, KeyMetrics, SignalPanel, CrossCheck, etc.)
 │   └── hooks.js       # Custom hooks (useJob, useSSE, etc.)
 ├── package.json
 ├── vite.config.js
@@ -114,8 +114,8 @@ idle
   -> selected (preview + metadata + Start button)
   -> running (7-stage pipeline + live panel + creeping progress + continuous sheen)
   -> done (pipeline persists with 100% bar + result strip;
-           dashboard: Verdict radial gauge, Insights 6 metrics,
-           Signal canvas, Quantum flow, FileInfo, FrameSamples)
+           dashboard: VerdictHeader, VerdictCard, KeyMetrics,
+           SignalPanel, CrossCheck, PreviousRun)
   -> error (inline banner)
 ```
 
@@ -131,7 +131,7 @@ idle
 | 4 | Visual    | ResNet50 + handcrafted features from face crops → 39 visual features |
 | 5 | Fusion    | 59 fused features (20 rPPG + 39 visual)                            |
 | 6 | Quantum   | QAOA feature selection (59 → 3) → Hybrid VQC → P(real)              |
-| 7 | Verdict   | Decision bins: REAL (≥0.5), FAKE (<0.5)                              |
+| 7 | Verdict   | P(real) vs the calibrated checkpoint threshold τ* (REAL ≥ τ*, FAKE < τ*)                              |
 | 8 | Artifacts | Result JSON, signal waveform, frame thumbnails, plots               |
 
 ## Artifacts Served
@@ -155,7 +155,7 @@ The UI reads artifacts from `MAJ_OUTPUT_ROOT/` via `/api/files` and `/api/artifa
 
 ## Notes
 
-- Videos are stored temporarily in `WORKING/MAJ_OUTPUT_ROOT/frontend_inbox/`
+- Videos are stored temporarily in `frontend_inbox/` under `MAJ_OUTPUT_ROOT`
 - Each job runs the pipeline at 30 fps sampling; verdicts take 1–4 minutes
   depending on video length
 - A run's evidence (frames, plots, waveform) is readable from the artifact

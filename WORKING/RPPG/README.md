@@ -8,7 +8,7 @@ decision layer (`WORKING/quantum/`): it consumes the 20 rPPG features as-is (no 
 flips the label convention (CSV `1 = fake` → quantum `0 = fake`), and builds its
 training/eval splits from this table.
 
-Current table: **TBD rows** @30 fps (DFDC archive, rebuild in progress).
+Current table: **3,914 labelled rows** @30 fps (full DFDC walk complete — 4,093 clips walked: 2,087 REAL / 1,827 FAKE; 179 clips yielded no usable features).
 
 ## Contents
 
@@ -139,7 +139,7 @@ pulse). Degenerate signals are rejected at the pipeline level instead of being f
 
 ```bash
 # From WORKING/
-# Full extraction (DFDC only, rebuild in progress):
+# Full extraction (DFDC only, full walk complete):
 python RPPG/extract_dataset_features.py --workers 0 --gpu
 ```
 

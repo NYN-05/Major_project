@@ -10,12 +10,13 @@ Stages
 1. FRAMES  : frame sampling + quality assessment via the `frame/` module
              (YOLO face detection, blur/dark/bright/face checks).
 2. RPPG    : physiological feature extraction via the `RPPG/` module
-             (POS/CHROM pulse reconstruction -> 24-feature vector).
+             (POS/CHROM pulse reconstruction -> 20-feature vector).
 3. VISUAL  : visual feature extraction via the `visual/` module
              (ResNet50 + handcrafted -> 39-feature vector from face crops).
 4. QUANTUM : train-fitted feature scaling + QAOA-selected subset of the
               fused (rPPG + visual) features -> trained Hybrid VQC checkpoint -> P(real) ->
-              KYC decision bins (real >= 0.5, fake < 0.5).
+              KYC decision bins using the calibrated threshold persisted in
+              the checkpoint metadata (Youden's J on validation; fallback 0.5).
 
 The quantum layer consumes fused features directly (same names/order as
 RPPGFeatures.feature_names() + VISUAL_FEATURE_NAMES); no synthetic or transformed data is used.

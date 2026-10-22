@@ -6,6 +6,18 @@
 **Evidence basis:** repository source code, configuration, generated artifacts under `WORKING/output/`, git history, and scripts newly created in `paper_experiments/`. Documentation files were used only as secondary context; conflicts are flagged in Appendix B.
 **Status vocabulary:** **[FOUND]** (directly extracted, source cited) · **[COMPUTED]** (executed in this audit; command and environment in Appendix A) · **[MISSING]** (not present and not computable from the repository) · **[HUMAN-VERIFY]** (requires author confirmation).
 
+> **Post-run status update (2026-10-22):** the blocking findings that this
+> audit bases on the 1,024-row FAKE-only CSV and the deleted smoke-run
+> artifacts are **superseded**: the full-dataset chain completed on
+> 2026-10-21 (rPPG checkpoint 3,914 rows — 2,087 REAL / 1,827 FAKE; visual
+> stage streamed 3,914/3,914 videos with 0 errors; quantum train+evaluate
+> produced fresh `data_fused.npz`, `metrics_quantum.json`,
+> `metrics_baselines.json`, plots and checksummed checkpoints under
+> `WORKING/output/quantum/`). Headline: VQC test accuracy 0.569 / AUC 0.658
+> (single seed, τ* = 0.47942); best classical MLP 0.632 / AUC 0.684. The
+> item-by-item post-run response with every original finding re-classified
+> is `reviewer_findings_response.md` (revised 2026-10-22).
+
 ---
 
 ## Executive Summary

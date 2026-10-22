@@ -8,6 +8,15 @@
 > the configurable regenerated-artifact root (set via `.env` → `MAJ_OUTPUT_ROOT`;
 > the current repository `.env` points it at `WORKING/output`).
 > Pipeline version: `p2-1` (`WORKING/run_pipeline.py`, `frontend/contract.py`).
+>
+> **Post-run status update (2026-10-22):** smoke-run metrics quoted later in
+> this document are superseded by the completed full-dataset run of
+> 2026-10-21 (3,912 rows, held-out test n = 782; VQC test accuracy 0.569 /
+> AUC 0.658 / ECE 0.080, decision bins at τ* = 0.47942; best classical
+> baseline MLP 0.632 / AUC 0.684 — no quantum-advantage claim). The stale
+> `README.md` performance-table and `run_pipeline.py` "24-feature vector"
+> items flagged in the discrepancy list are now corrected in-repo.
+
 
 ---
 
