@@ -1,76 +1,130 @@
 {
-  "video": "C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\DFDC_Dataset\\Fake\\id8_id3_0002.mp4",
-  "timestamp": "2026-10-22T10:30:32.503949",
+  "video": "C:\\Users\\JHASHANK\\Downloads\\deep_1.mp4",
+  "timestamp": "2026-10-22T14:26:23.921607",
   "pipeline_version": "p2-1",
   "stages": {
     "frames": {
       "status": "success",
       "layer_status": "success",
       "stats": {
-        "sampled_frames": 455,
-        "accepted_frames": 0,
-        "rejections": {
-          "dark_frame": 455,
-          "extreme_pose": 8
-        },
-        "mean_quality_score": 0.7238076923076923,
-        "mean_face_confidence": 0.0,
-        "temporal_coverage_ratio": 0.0
+        "sampled_frames": 200,
+        "accepted_frames": 200,
+        "rejections": {},
+        "mean_quality_score": 0.9567,
+        "mean_face_confidence": 0.8615459999999999,
+        "temporal_coverage_ratio": 1.0
       }
     },
     "rppg": {
       "method": "POS",
-      "input_mode": "video_direct",
+      "input_mode": "stage1_frames",
       "fps_used": 30.0,
-      "n_frames_total": 525,
-      "n_frames_usable": 525,
+      "n_frames_total": 200,
+      "n_frames_usable": 200,
       "warnings": [
-        "Signal diagnostics: fps=30.0, n_total=525, n_usable=525, valid_ratio=1.00, combined_signal_len=525, left_valid=True, right_valid=True, forehead_valid=True",
-        "Feature diagnostics: raw_nan_count=0, SQI=0.628, HR=98.4BPM, SNR=-0.2dB, PRV=114.9ms, Entropy=0.877, MAD=0.720",
-        "PQS: 0.606 (MEDIUM), components: SNR=0.11, frames=1.00, ROI=1.00, crossROI=0.67, freq=0.00, amp=1.00, temp=0.50"
+        "Signal diagnostics: fps=30.0, n_total=200, n_usable=200, valid_ratio=1.00, combined_signal_len=200, left_valid=True, right_valid=True, forehead_valid=True",
+        "Feature diagnostics: raw_nan_count=0, SQI=0.635, HR=84.4BPM, SNR=-1.8dB, PRV=146.4ms, Entropy=0.827, MAD=0.810",
+        "PQS: 0.482 (MEDIUM), components: SNR=0.06, frames=1.00, ROI=0.00, crossROI=0.85, freq=0.00, amp=1.00, temp=0.50"
       ],
       "features": {
-        "heart_rate_bpm": 98.4375,
-        "snr_db": -0.1641226351359324,
-        "prv_std_ms": 114.90562180002611,
-        "spectral_entropy": 0.8766945999156799,
-        "mad": 0.7200301041297559,
-        "signal_quality_index": 0.628437815965281,
-        "cheek_forehead_correlation": 0.5749236555688256,
-        "left_right_cheek_correlation": 0.09706353088303465,
-        "hr_half_diff": 49.21875,
-        "peak_prominence": 5.784126994659111,
-        "systolic_peak_width": 192.9933611741717,
-        "diastolic_notch_ratio": 2.0024473862037135,
+        "heart_rate_bpm": 84.375,
+        "snr_db": -1.783848387034648,
+        "prv_std_ms": 146.40105049866867,
+        "spectral_entropy": 0.8265965997410502,
+        "mad": 0.8099447446313534,
+        "signal_quality_index": 0.6346964809325454,
+        "cheek_forehead_correlation": 0.7721669430723923,
+        "left_right_cheek_correlation": 0.6198094442990305,
+        "hr_half_diff": 28.125,
+        "peak_prominence": 4.2231213223887805,
+        "systolic_peak_width": 184.9280576015165,
+        "diastolic_notch_ratio": 2.292285254386976,
         "forehead_cheek_phase_lag": 0.0,
-        "signal_to_motion_ratio": 25.319067749296664,
-        "peak_amplitude_variability": 0.8382322846525699,
+        "signal_to_motion_ratio": 21.28064774690205,
+        "peak_amplitude_variability": 0.8627476526907235,
         "pulse_transit_time_proxy": 0.0,
-        "spectral_flatness": 0.4320842307900352,
-        "spectral_centroid": 1.7187462068898653,
-        "kurtosis": 2.2707112602354886,
-        "phase_coherence_lr": 1.808309034115077
+        "spectral_flatness": 0.46854045488383805,
+        "spectral_centroid": 1.6727395837543313,
+        "kurtosis": -0.40496403041039875,
+        "phase_coherence_lr": 1.2154902866506412
       }
     },
     "visual": {
-      "status": "failure",
-      "reason": "No frames found in: C:\\Users\\JHASHANK\\Desktop\\Maj_Proj\\WORKING\\output\\frames\\frame_sequences\\id8_id3_0002\\frames"
+      "status": "success",
+      "features": {
+        "deep_feat_0": -7.539828653804673,
+        "deep_feat_1": 0.601096832759282,
+        "deep_feat_2": 0.5741668990587314,
+        "deep_feat_3": -0.0642343966562291,
+        "deep_feat_4": 0.29490130318205443,
+        "deep_feat_5": 0.05107562598741455,
+        "deep_feat_6": -0.7109881641581429,
+        "deep_feat_7": 1.7717995330765044,
+        "deep_feat_8": 1.139382824654762,
+        "deep_feat_9": -1.2706547511452282,
+        "deep_feat_10": 0.5868284093405799,
+        "deep_feat_11": 1.7047967285167211,
+        "deep_feat_12": -0.7164590082856608,
+        "deep_feat_13": 0.8399876501035294,
+        "deep_feat_14": 1.525704769277504,
+        "deep_feat_15": -0.866385568043099,
+        "lbp_uniform_hist_0": 0.021886284722222225,
+        "lbp_uniform_hist_1": 0.04397877604166668,
+        "lbp_uniform_hist_2": 0.02280902777777779,
+        "lbp_uniform_hist_3": 0.09241888020833336,
+        "lbp_uniform_hist_4": 0.10814466145833332,
+        "lbp_uniform_hist_5": 0.1719341145833333,
+        "lbp_uniform_hist_6": 0.054008723958333345,
+        "lbp_uniform_hist_7": 0.0801359375,
+        "lbp_uniform_hist_8": 0.3301438802083333,
+        "lbp_uniform_hist_9": 0.07453971354166666,
+        "texture_contrast": 1.247721058919329,
+        "texture_energy": 0.23462842353427585,
+        "texture_homogeneity": 0.8543964530417659,
+        "texture_correlation": 0.9810749933979421,
+        "color_mean_r": 128.72536345486108,
+        "color_mean_g": 120.74262569444447,
+        "color_mean_b": 120.67050512152777,
+        "color_std_r": 48.04098570281046,
+        "color_std_g": 45.946935472013976,
+        "color_std_b": 48.14208444882376,
+        "freq_low_energy": 0.9941704691548346,
+        "freq_mid_energy": 0.003873710379916097,
+        "freq_high_energy": 0.0019558204652481846
+      }
+    },
+    "quantum": {
+      "prob_real": 0.5799914002418518,
+      "verdict": "REAL",
+      "confidence": 0.1599828004837036,
+      "explanation": {
+        "final_verdict": "REAL",
+        "physiological_evidence": {
+          "verdict": "REAL",
+          "probability_real": 0.5799914002418518,
+          "confidence": 0.1599828004837036,
+          "reliability": "Low reliability"
+        },
+        "visual_evidence": null,
+        "decision_logic": "P(Real)=0.580 >= 0.5 \u2192 REAL",
+        "coverage": 1.0,
+        "overall_confidence": 0.1599828004837036
+      }
     }
   },
   "verdict": {
-    "label": "INCONCLUSIVE",
-    "confidence": null,
-    "reason": "Visual feature extraction failed"
+    "label": "REAL",
+    "confidence": 0.1599828004837036
   },
   "diagnostics": {
-    "processing_time_seconds": 22.374,
-    "frame_count": 455,
-    "valid_frame_count": 0,
-    "rppg_quality": 0.628437815965281,
-    "final_score": null,
-    "decision": "INCONCLUSIVE",
+    "processing_time_seconds": 43.573,
+    "frame_count": 200,
+    "valid_frame_count": 200,
+    "rppg_quality": 0.6346964809325454,
+    "final_score": 0.5799914002418518,
+    "decision": "REAL",
     "memory": {
-      "rss_mb": 1237.98,
+      "rss_mb": 707.58,
       "cuda_allocated_mb": null,
       "cuda_reserved_mb": null
     }

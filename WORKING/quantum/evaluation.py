@@ -170,10 +170,22 @@ def balanced_accuracy(y_true, prob_real, decision_threshold=0.5):
 
 def _aggregate_cv(rows):
     """Mean/std summary across cross-validation folds."""
-    keys = sorted(rows[0].keys())
-    mean = {k: float(np.mean([r[k] for r in rows])) for k in keys}
-    std = {k: float(np.std([r[k] for r in rows])) for k in keys}
-    return {"mean": mean, "std": std, "folds": rows}
+    # The per-fold confusion matrix is a 2x2 list: averaging it collapses it
+    # to a meaningless scalar, so it is summed element-wise (pooled) instead.
+    matrix_key = "confusion_matrix_binary"
+    keys = sorted(k for k in rows[0].keys() if k != matrix_key)
+    # AUC/PR-AUC are None for a single-class fold; average only defined values.
+    mean, std = {}, {}
+    for k in keys:
+        vals = [r[k] for r in rows if r[k] is not None]
+        mean[k] = float(np.mean(vals)) if vals else None
+        std[k] = float(np.std(vals)) if vals else None
+    out = {"mean": mean, "std": std, "folds": rows}
+    if matrix_key in rows[0]:
+        out["confusion_matrix_pooled"] = np.sum(
+            [np.asarray(r[matrix_key]) for r in rows], axis=0
+        ).astype(int).tolist()
+    return out
 
 
 def run_cv(fit_predict, X, y, n_splits=5, seed=42, n_jobs=0, groups=None):
@@ -384,6 +396,12 @@ def evaluate_quantum_model(
 
     payload = {
         "metrics": classification_metrics(y_test, prob_real),
+        # Metrics at the deployed, validation-calibrated cut that inference
+        # actually uses; "metrics" above stays at 0.5 for baseline parity.
+        "metrics_at_deployed_threshold": classification_metrics(
+            y_test, prob_real, decision_threshold=opt_threshold
+        ),
+        "deployed_threshold": float(opt_threshold),
         "balanced_accuracy": balanced_accuracy(y_test, prob_real),
         "decision_bins": decision_bins(y_test, prob_real, decision_cfg_opt, pqs=pqs),
     }
@@ -414,7 +432,9 @@ def evaluate_quantum_model(
         )
 
     plot_roc_curve(y_test, prob_real, decision_cfg.roc_plot)
-    plot_confusion_matrix(y_test, (prob_real >= 0.5).astype(int), decision_cfg.confusion_plot)
+    plot_confusion_matrix(
+        y_test, (prob_real >= opt_threshold).astype(int), decision_cfg.confusion_plot
+    )
     plot_calibration_curve(y_test, prob_real, decision_cfg.calibration_plot)
     with open(vqc_cfg.metrics_file, "w") as fh:
         json.dump(payload, fh, indent=2)
