@@ -213,9 +213,11 @@ def run_rppg_stage(video_path: Path, method: str = "POS", handoff: dict | None =
 # ---------------------------------------------------------------------------
 
 def run_visual_stage(video_path: Path, frame_handoff: dict | None = None) -> tuple[dict, dict | None]:
-    """Visual feature extraction from stage-1 face crops.
-    
-    Uses the face crops saved by stage-1 (MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/cropped_faces/).
+    """Visual feature extraction from the stage-1 accepted frames.
+
+    Stage 1 saves the accepted full frames as JPEG (MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frames/)
+    and no face crops, so the crops fed to the extractor are the centre-half fallback of those
+    frames - the same geometry the training extraction uses (see visual/extractor.py).
     Returns visual features dict or None if extraction fails."""
     if not frame_handoff:
         return {"status": "skipped", "reason": "no frame handoff"}, None
@@ -426,7 +428,8 @@ def _finish(result: dict, out_path: str | None, exit_code: int) -> None:
         print(f"[warning] diagnostics logging failed: {exc}")
     out = Path(out_path) if out_path else OUTPUT_ROOT / "pipeline_result.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    from quantum.provenance import write_json_with_provenance
+    write_json_with_provenance(out, result, seeds=[0])
     verdict = result["verdict"]
     print("\n" + "=" * 60)
     print(f"FINAL VERDICT: {verdict['label']}")

@@ -229,6 +229,12 @@ class DataConfig:
         default_factory=lambda: OUTPUT_ROOT / "rppg" / "dataset_features.csv"
     )
     data_file: Path = field(default_factory=lambda: OUTPUT_DIR / "data.npz")
+    # Optional frozen split (Stage 1). When set, build_dataset takes the test set and the
+    # development folds from this manifest instead of the seeded random grouped split:
+    # train = development clips outside ``val_fold``, val = ``val_fold``, test = frozen test
+    # set; purged guard-band clips are excluded. None keeps the original behaviour.
+    split_manifest: Path | None = None
+    val_fold: int = 0
 
 
 @dataclass(frozen=True)
@@ -241,6 +247,9 @@ class QAOASelectionConfig:
     seed: int = 42
     restarts: int = 8
     n_jobs: int = 0
+    # Torch device of the native statevector simulator ("cpu" keeps the original behaviour,
+    # "cuda" runs it on the GPU; falls back to the CPU when CUDA is unavailable).
+    torch_device: str = "cpu"
     # Simulator backend: "auto" uses the torch-native statevector sim
     # (fast, float64 complex128; see qaoa_sim.QAOASimulator); "torch"
     # forces the torch sim; "pennylane" uses the legacy PennyLane QNode

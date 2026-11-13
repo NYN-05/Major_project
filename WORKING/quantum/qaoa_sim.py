@@ -62,7 +62,11 @@ class QAOASimulator:
         self.cp = cfg.cardinality_penalty
 
         n_states = 1 << n_wires
-        device = torch.device("cpu")
+        # cfg.torch_device defaults to "cpu" (unchanged behaviour); "cuda" runs the statevector
+        # on the GPU and falls back to the CPU when CUDA is unavailable.
+        requested = str(getattr(cfg, "torch_device", "cpu"))
+        device = torch.device(requested if (not requested.startswith("cuda") or torch.cuda.is_available()) else "cpu")
+        self.device = device
         dtype = torch.complex128
 
         # Precompute integer bitstrings ------------------------------------------------
@@ -75,7 +79,7 @@ class QAOASimulator:
 
         # Precompute classical cost for every bitstring --------------------------------
         if C_values is not None:
-            self.C = C_values.to(torch.float64)
+            self.C = C_values.to(device=device, dtype=torch.float64)
         else:
             self.C = self._compute_C(weights, correlation)
 
@@ -87,19 +91,14 @@ class QAOASimulator:
         amp /= amp.norm()  # 1/sqrt(2^n)
         self._plus_state = amp
 
-        # Precompute per-wire index pairs for the mixer (lo_idx, hi_idx)
-        # where lo has bit w = 0 and hi = lo | (1<<w).
-        self._mixer_pairs = []
-        indices = torch.arange(n_states, dtype=torch.long, device=device)
-        for w in range(n_wires):
-            mask = 1 << w
-            lo_mask = indices[indices & mask == 0]
-            self._mixer_pairs.append((lo_mask, lo_mask | mask))
+        # The mixer views the state as an n-axis (2, ..., 2) tensor (bit w <-> axis n-1-w);
+        # R_x(2 beta) = cos(beta) I - i sin(beta) X, and X on one qubit is a flip of that axis.
+        self._shape = (2,) * n_wires
 
     def _compute_C(self, weights, correlation):
         """Vectorised classical cost for all 2^n bitstrings."""
-        w = torch.asarray(weights, dtype=torch.float64)
-        C = torch.asarray(correlation, dtype=torch.float64)
+        w = torch.asarray(weights, dtype=torch.float64, device=self.device)
+        C = torch.asarray(correlation, dtype=torch.float64, device=self.device)
         b = self.bit_matrix  # (2^n, n)
 
         mi = -(b @ w)  # (2^n,)
@@ -117,13 +116,10 @@ class QAOASimulator:
         """R_x(2 beta) on every qubit using precomputed index pairs."""
         c = torch.cos(beta)
         s = torch.sin(beta)
-        amp = state
-        for lo, hi in self._mixer_pairs:
-            a_lo = amp[lo].clone()
-            a_hi = amp[hi].clone()
-            amp[lo] = c * a_lo - 1j * s * a_hi
-            amp[hi] = c * a_hi - 1j * s * a_lo
-        return amp
+        amp = state.reshape(self._shape)
+        for axis in range(self.n):
+            amp = c * amp - 1j * s * amp.flip(axis)
+        return amp.reshape(-1)
 
     def cost(self, params):
         """expval(H) for QAOA parameter vector [gamma_0, beta_0, ...]."""
@@ -182,7 +178,7 @@ class QAOASimulator:
             # For Pauli-Z string terms: multiply (-1)^{sum bits at wires} per state
             phase = torch.ones(1 << n, dtype=torch.float64)
             for w in wires:
-                phase *= 1.0 - 2.0 * self._lin_sums[:, w]
+                phase *= 1.0 - 2.0 * self._lin_sums[:, w].cpu()
             h_diag += c * phase
 
         # Build a complete cost C_ref(b) from the Hamiltonian diagonal

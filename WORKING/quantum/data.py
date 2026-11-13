@@ -16,6 +16,7 @@ in more than one split.
 
 import csv
 import json
+from pathlib import Path
 
 import numpy as np
 
@@ -298,6 +299,52 @@ def _grouped_train_val_test_split(X, y, groups, paths, cfg):
     return data
 
 
+def _manifest_split(X, y, paths, cfg, csv_file, feature_names):
+    """Split taken from a frozen Stage 1 manifest (group-disjoint test set + dev folds).
+
+    The manifest is bound to the exact feature table it was built from (sha256), the
+    feature-name order, and the labels, so a stale or mismatched manifest fails loudly.
+    Clips marked ``purged`` (guard band) are used nowhere. Group ids are the manifest's
+    union groups, so ``_assert_no_group_leakage`` checks them as usual.
+    """
+    from quantum.config import sha256_file
+
+    with open(cfg.split_manifest, encoding="utf-8") as fh:
+        manifest = json.load(fh)
+    if manifest.get("fused_features_csv_sha256") != sha256_file(csv_file):
+        raise ValueError(f"Split manifest {cfg.split_manifest} was built for a different feature table")
+    if list(manifest.get("feature_names", [])) != list(feature_names):
+        raise ValueError("Split manifest feature names/order differ from the requested feature set")
+    rows = manifest["rows"]
+    stems = [Path(str(p)).stem for p in paths]
+    missing = [s for s in stems if s not in rows]
+    if missing:
+        raise ValueError(f"{len(missing)} clips are missing from the split manifest, e.g. {missing[:3]}")
+    labels = np.asarray([rows[s]["label_real1"] for s in stems])
+    if not np.array_equal(labels, y):
+        raise ValueError("Split manifest labels disagree with the feature table labels")
+
+    which = np.empty(len(stems), dtype=object)
+    for i, s in enumerate(stems):
+        r = rows[s]
+        if r["split"] == "test":
+            which[i] = "test"
+        elif r["split"] == "dev":
+            which[i] = "val" if r["dev_fold"] == cfg.val_fold else "train"
+        else:
+            which[i] = None  # purged
+    groups = np.asarray([rows[s]["group"] for s in stems], dtype=object)
+    paths = np.asarray(paths, dtype=object)
+    data = {}
+    for s in SPLITS:
+        idx = np.where(which == s)[0]
+        data[f"X_{s}"] = X[idx]
+        data[f"y_{s}"] = y[idx]
+        data[f"groups_{s}"] = groups[idx]
+        data[f"paths_{s}"] = paths[idx]
+    return data
+
+
 def _assert_no_group_leakage(split):
     """Fail loudly if any subject group appears in more than one split.
 
@@ -399,7 +446,10 @@ def build_dataset(cfg=None, feature_set: str = "fused", csv_file=None):
         )
 
     # Always use grouped random split for DFDC (no official splits)
-    split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
+    if cfg.split_manifest is not None:
+        split = _manifest_split(X, y, paths, cfg, csv_file, feature_names)
+    else:
+        split = _grouped_train_val_test_split(X, y, groups, paths, cfg)
     _assert_no_group_leakage(split)
     normalised_paths = [_normalise_group_value(path) for path in paths.tolist()]
     if len(set(normalised_paths)) != len(normalised_paths):

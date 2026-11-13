@@ -339,6 +339,122 @@ def test_label_conversion():
     print("PASS test_label_conversion")
 
 
+def test_group_bootstrap_and_nested_cv() -> None:
+    """Group bootstrap CIs, paired difference, and nested-CV group disjointness.
+
+    Uses small hand-built arrays only to exercise the evaluation code paths; no model
+    training data is involved.
+    """
+    from quantum.evaluation import (
+        group_bootstrap,
+        make_grid_search_fit_predict,
+        nested_group_cv,
+        paired_group_bootstrap_diff,
+    )
+
+    rng = np.random.RandomState(0)
+    n_groups, per = 40, 5
+    groups = np.repeat(np.arange(n_groups), per)
+    y = np.tile(np.array([1, 1, 1, 0, 0]), n_groups)
+    perfect = y.astype(float) * 0.8 + 0.1
+    res = group_bootstrap(y, perfect, groups, n_boot=200, seed=1)
+    auc = res["metrics"]["auc"]
+    assert auc["point"] == 1.0 and auc["ci95"] == [1.0, 1.0], auc
+    assert res["n_groups"] == n_groups and res["n_clips"] == n_groups * per
+
+    noisy = np.clip(perfect + rng.normal(0, 0.5, len(y)), 0, 1)
+    ci = group_bootstrap(y, noisy, groups, n_boot=300, seed=2)["metrics"]["auc"]
+    assert ci["ci95"][0] <= ci["point"] <= ci["ci95"][1], ci
+    same = paired_group_bootstrap_diff(y, noisy, noisy, groups, n_boot=100, seed=3)
+    assert same["difference_a_minus_b"] == 0.0 and same["ci95"] == [0.0, 0.0], same
+    better = paired_group_bootstrap_diff(y, perfect, noisy, groups, n_boot=200, seed=4)
+    assert better["difference_a_minus_b"] > 0 and better["ci95"][0] > 0, better
+
+    # nested CV: folds are group-disjoint and the runner refuses overlapping groups
+    X = np.column_stack([y + rng.normal(0, 0.3, len(y)), rng.normal(size=len(y))])
+    outer = (groups % 4).astype(int)
+    from sklearn.linear_model import LogisticRegression
+
+    fp = make_grid_search_fit_predict(
+        lambda params, seed: LogisticRegression(C=params["C"], max_iter=500), [{"C": 0.1}, {"C": 1.0}]
+    )
+    out = nested_group_cv(fp, X, y, groups, outer, seed=0)
+    assert np.isfinite(out["scores"]).all() and len(out["folds"]) == 4
+    assert all(f["auc"] > 0.8 for f in out["folds"]), out["folds"]
+    bad_outer = np.arange(len(y)) % 4  # splits each group across folds
+    try:
+        nested_group_cv(fp, X, y, groups, bad_outer, seed=0)
+        assert False, "overlapping groups must be rejected"
+    except AssertionError as exc:
+        assert "appear in both" in str(exc), exc
+
+    # equal-budget random search: same number of configurations, deterministic, no outer leakage
+    from quantum.evaluation import make_random_search_fit_predict
+
+    rs = make_random_search_fit_predict(
+        lambda params, seed: LogisticRegression(C=params["C"], max_iter=500),
+        {"C": [0.01, 0.1, 1.0, 10.0]}, n_configs=3,
+    )
+    a = nested_group_cv(rs, X, y, groups, outer, seed=1)
+    b = nested_group_cv(rs, X, y, groups, outer, seed=1)
+    assert np.array_equal(a["scores"], b["scores"]), "random search must be deterministic per seed"
+    assert all(f["n_configs"] == 3 for f in a["folds"]), a["folds"]
+
+
+def test_provenance_record(tmp=None) -> None:
+    import json, tempfile
+    from quantum.config import VQCConfig
+    from quantum.provenance import collect_provenance, write_json_with_provenance
+
+    with tempfile.TemporaryDirectory() as d:
+        out = write_json_with_provenance(
+            Path(d) / "r.json", {"auc": 0.5}, seeds=[1, 2], configs={"vqc": VQCConfig()}
+        )
+        rec = json.loads(out.read_text())
+    prov = rec["provenance"]
+    assert rec["auc"] == 0.5 and prov["seeds"] == [1, 2], prov
+    assert prov["configs"]["vqc"]["seed"] == VQCConfig().seed
+    assert prov["git_commit"] is None or len(prov["git_commit"]) == 40
+    assert collect_provenance()["python"], "python version missing"
+
+
+def test_stage1_grouping_split() -> None:
+    import tempfile
+    from quantum.grouping import assert_test_unlocked, build_split, components
+
+    assert len(set(components([(0, 1), (1, 2)], 5).tolist())) == 3
+    rng = np.random.RandomState(0)
+    n, k = 400, 100  # k source families of 4 clips; clips in a family have near-identical backgrounds
+    fam = np.repeat(np.arange(k), n // k)
+    base = rng.randn(k, 40)
+    sig = base[fam] + 0.01 * rng.randn(n, 40)
+    sig /= np.linalg.norm(sig, axis=1, keepdims=True)
+    sim = sig @ sig.T
+    y = (fam % 2).astype(int)
+    stems = [f"c{i}" for i in range(n)]
+    m = build_split(
+        rng.randn(n, 3), y, fam.astype(str), stems, stems, sim, fam % 50, [], csv_sha256="x"
+    )
+    assert m["gate_passed"], m["overlap_test_vs_dev_by_grouping"]
+    assert all(v == 0 for v in m["overlap_test_vs_dev_by_grouping"].values())
+    fams = {}
+    for i, st in enumerate(stems):
+        fams.setdefault(int(fam[i]), set()).add(m["rows"][st]["split"] == "test")
+    assert all(len(v) == 1 for v in fams.values()), "a source family straddles test and non-test"
+    again = build_split(
+        rng.randn(n, 3), y, fam.astype(str), stems, stems, sim, fam % 50, [], csv_sha256="x"
+    )
+    assert again["split_hash"] == m["split_hash"], "split must be deterministic"
+    with tempfile.TemporaryDirectory() as d:
+        assert_test_unlocked(d)
+        (Path(d) / "TEST_ACCESSED.lock").write_text("x")
+        try:
+            assert_test_unlocked(d)
+        except RuntimeError:
+            return
+        raise AssertionError("second test-set access must be blocked")
+
+
 def main() -> None:
     checks = [
         test_beta_alive,
@@ -351,6 +467,9 @@ def main() -> None:
         test_qaoa_sim_matches_pennylane,
         test_torch_layer_matches_pennylane,
         test_checkpoint_state_dict_compat,
+        test_group_bootstrap_and_nested_cv,
+        test_provenance_record,
+        test_stage1_grouping_split,
     ]
     failures = 0
     for check in checks:

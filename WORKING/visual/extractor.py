@@ -557,7 +557,13 @@ def load_face_crops_from_frames(
     frames_dir: str,
     max_frames: Optional[int] = None,
 ) -> List[np.ndarray]:
-    """Load the accepted stage-1 face crop for each frame."""
+    """Load the crop used for each accepted stage-1 frame.
+
+    Stage 1 currently writes only full frames, so ``cropped_faces/`` is normally absent and the
+    centre-half fallback below is what runs (identical geometry to ``iter_video_center_crops``,
+    which the training extraction uses). If a stage-1 version ever writes face crops, they would
+    take precedence here and training would have to be re-extracted the same way.
+    """
     frames_root = Path(frames_dir)
     frame_paths = sorted(frames_root.glob("*.jpg"))
     if not frame_paths:

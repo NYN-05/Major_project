@@ -21,6 +21,7 @@ from quantum.config import (
 )
 from quantum.data import build_dataset, load_dataset, FEATURE_SETS
 from quantum.evaluation import evaluate_quantum_model, run_baselines
+from quantum.provenance import write_json_with_provenance
 from quantum.scaling import FeatureScaler, transform_features
 from quantum.qaoa import (
     QAOASelector,
@@ -221,8 +222,10 @@ def run_pipeline_for_feature_set(
         comparison = compare_selections(selection, classical, feature_names=feature_names)
         comparison_file = OUTPUT_DIR / f"selection_comparison_{feature_set}.json"
         comparison_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(comparison_file, "w") as fh:
-            json.dump(comparison, fh, indent=2)
+        write_json_with_provenance(
+            comparison_file, comparison,
+            seeds=[qaoa_cfg.seed], configs={"qaoa": qaoa_cfg},
+        )
         print(f"  Classical AUC-greedy reference: {classical['selected_features']}")
         print(f"  Overlap with QAOA: {comparison['overlap_count']} features (see {comparison_file})")
     else:

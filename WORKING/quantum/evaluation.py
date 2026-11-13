@@ -534,6 +534,227 @@ def run_baselines(
 
 
 # ---------------------------------------------------------------------------
+# Group-aware uncertainty and nested cross-validation (Stage 3).
+#
+# Clips from one source group are not independent, so uncertainty is estimated
+# by resampling whole groups, and every fitted step (scaling, feature selection,
+# tuning, threshold) must live inside the training portion of each fold.
+# ---------------------------------------------------------------------------
+
+
+def _auc_rank(y, s):
+    """ROC-AUC via average ranks; cheap enough for thousands of bootstrap resamples."""
+    from scipy.stats import rankdata
+
+    y = np.asarray(y)
+    n1 = int((y == 1).sum())
+    n0 = len(y) - n1
+    if n1 == 0 or n0 == 0:
+        return float("nan")
+    ranks = rankdata(s)
+    return float((ranks[y == 1].sum() - n1 * (n1 + 1) / 2.0) / (n1 * n0))
+
+
+def _balanced_accuracy_from_pred(y, pred):
+    pos = np.asarray(y) == 1
+    if not pos.any() or pos.all():
+        return float("nan")
+    return float(0.5 * (pred[pos].mean() + (~pred[~pos]).mean()))
+
+
+def _metrics_over_seeds(y, scores, thresholds):
+    """Metrics of ``scores`` (n_seeds x n) against ``y``, averaged over the seeds."""
+    names = ["auc", "accuracy@0.5", "balanced_accuracy@0.5"]
+    if thresholds is not None:
+        names += ["accuracy@fold_threshold", "balanced_accuracy@fold_threshold"]
+    acc = {k: [] for k in names}
+    real = np.asarray(y) == 1
+    for k in range(scores.shape[0]):
+        s = scores[k]
+        p = s >= 0.5
+        acc["auc"].append(_auc_rank(y, s))
+        acc["accuracy@0.5"].append(float((p == real).mean()))
+        acc["balanced_accuracy@0.5"].append(_balanced_accuracy_from_pred(y, p))
+        if thresholds is not None:
+            pt = s >= thresholds[k]
+            acc["accuracy@fold_threshold"].append(float((pt == real).mean()))
+            acc["balanced_accuracy@fold_threshold"].append(_balanced_accuracy_from_pred(y, pt))
+    return {k: float(np.nanmean(v)) for k, v in acc.items()}
+
+
+def _group_resamples(groups, n_boot, seed):
+    """Yield index arrays that resample whole groups with replacement."""
+    groups = np.asarray(groups)
+    uniq, inverse = np.unique(groups, return_inverse=True)
+    members = [np.where(inverse == g)[0] for g in range(len(uniq))]
+    rng = np.random.RandomState(seed)
+    for _ in range(n_boot):
+        pick = rng.randint(0, len(uniq), size=len(uniq))
+        yield np.concatenate([members[g] for g in pick])
+
+
+def group_bootstrap(y, scores, groups, thresholds=None, n_boot=2000, seed=0, alpha=0.05):
+    """Percentile CIs from resampling source groups (not clips).
+
+    ``scores`` is P(real) with shape (n,) or (n_seeds, n); the reported metric is the mean over
+    seeds, so the interval reflects group-sampling uncertainty of that seed-averaged metric.
+    ``thresholds`` (same shape) are the per-clip fold thresholds chosen inside training data.
+    The result states the number of independent groups; narrow intervals do not imply
+    generalisation beyond the dataset or correctness of the grouping.
+    """
+    y = np.asarray(y)
+    scores = np.atleast_2d(np.asarray(scores, dtype=float))
+    thr = None if thresholds is None else np.atleast_2d(np.asarray(thresholds, dtype=float))
+    point = _metrics_over_seeds(y, scores, thr)
+    boots = {k: [] for k in point}
+    for idx in _group_resamples(groups, n_boot, seed):
+        m = _metrics_over_seeds(y[idx], scores[:, idx], None if thr is None else thr[:, idx])
+        for k, v in m.items():
+            boots[k].append(v)
+    out = {}
+    for k, v in boots.items():
+        lo, hi = np.nanpercentile(v, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+        out[k] = {"point": point[k], "ci95": [float(lo), float(hi)]}
+    return {
+        "n_clips": int(len(y)),
+        "n_groups": int(len(np.unique(groups))),
+        "n_seeds": int(scores.shape[0]),
+        "n_boot": int(n_boot),
+        "metrics": out,
+    }
+
+
+def paired_group_bootstrap_diff(y, scores_a, scores_b, groups, metric="auc", n_boot=2000, seed=0,
+                                thresholds_a=None, thresholds_b=None, alpha=0.05):
+    """Paired group bootstrap of metric(A) - metric(B) on identical resamples."""
+    y = np.asarray(y)
+    a = np.atleast_2d(np.asarray(scores_a, dtype=float))
+    b = np.atleast_2d(np.asarray(scores_b, dtype=float))
+    ta = None if thresholds_a is None else np.atleast_2d(np.asarray(thresholds_a, dtype=float))
+    tb = None if thresholds_b is None else np.atleast_2d(np.asarray(thresholds_b, dtype=float))
+    point = (_metrics_over_seeds(y, a, ta)[metric] - _metrics_over_seeds(y, b, tb)[metric])
+    diffs = []
+    for idx in _group_resamples(groups, n_boot, seed):
+        da = _metrics_over_seeds(y[idx], a[:, idx], None if ta is None else ta[:, idx])[metric]
+        db = _metrics_over_seeds(y[idx], b[:, idx], None if tb is None else tb[:, idx])[metric]
+        diffs.append(da - db)
+    lo, hi = np.nanpercentile(diffs, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+    return {
+        "metric": metric, "difference_a_minus_b": float(point), "ci95": [float(lo), float(hi)],
+        "fraction_of_resamples_a_not_better": float(np.mean(np.asarray(diffs) <= 0.0)),
+        "n_groups": int(len(np.unique(groups))), "n_boot": int(n_boot),
+    }
+
+
+def nested_group_cv(fit_predict, X, y, groups, outer_fold, seed):
+    """Outer loop over frozen development folds (``outer_fold`` >= 0; -1 rows are ignored).
+
+    ``fit_predict(X_tr, y_tr, g_tr, X_te, seed) -> {"p_test": P(real), "threshold": float, ...}``
+    must fit everything (scaling, selection, tuning, threshold) on its training arguments only.
+    Raises AssertionError if an outer test group also appears in the training portion.
+    Returns per-clip scores / thresholds (NaN outside the folds) and one record per fold.
+    """
+    X = np.asarray(X)
+    y = np.asarray(y)
+    groups = np.asarray(groups)
+    outer_fold = np.asarray(outer_fold)
+    scores = np.full(len(y), np.nan)
+    thresholds = np.full(len(y), np.nan)
+    records = []
+    for k in sorted(int(f) for f in np.unique(outer_fold) if f >= 0):
+        te = np.where(outer_fold == k)[0]
+        tr = np.where((outer_fold >= 0) & (outer_fold != k))[0]
+        shared = set(groups[tr].tolist()) & set(groups[te].tolist())
+        assert not shared, f"outer fold {k}: {len(shared)} groups appear in both train and test"
+        out = fit_predict(X[tr], y[tr], groups[tr], X[te], seed)
+        p = np.asarray(out["p_test"], dtype=float)
+        scores[te] = p
+        thresholds[te] = float(out["threshold"])
+        rec = {"fold": k, "n_train": int(len(tr)), "n_test": int(len(te)), "threshold": float(out["threshold"]),
+               "auc": _auc_rank(y[te], p), "accuracy@0.5": float(((p >= 0.5) == (y[te] == 1)).mean()),
+               "accuracy@fold_threshold": float(((p >= out["threshold"]) == (y[te] == 1)).mean())}
+        rec.update({kk: vv for kk, vv in out.items() if kk not in ("p_test", "threshold")})
+        records.append(rec)
+    return {"scores": scores, "thresholds": thresholds, "folds": records}
+
+
+def make_grid_search_fit_predict(make_estimator, param_grid, inner_splits=3):
+    """Build a ``fit_predict`` that tunes by inner grouped CV (AUC), then refits and predicts.
+
+    ``make_estimator(params, seed)`` returns an unfitted sklearn-style estimator. The decision
+    threshold is the Youden cut of the inner out-of-fold predictions of the chosen parameters,
+    so it never sees the outer test fold.
+    """
+    sk = _sklearn()
+
+    def fit_predict(X_tr, y_tr, g_tr, X_te, seed):
+        splitter = sk["StratifiedGroupKFold"](n_splits=inner_splits, shuffle=True, random_state=seed)
+        inner = list(splitter.split(X_tr, y_tr, g_tr))
+        best = None
+        for params in param_grid:
+            oof = np.zeros(len(y_tr))
+            for a, b in inner:
+                oof[b] = make_estimator(params, seed).fit(X_tr[a], y_tr[a]).predict_proba(X_tr[b])[:, 1]
+            auc = _auc_rank(y_tr, oof)
+            if best is None or auc > best[0]:
+                best = (auc, params, oof)
+        auc, params, oof = best
+        model = make_estimator(params, seed).fit(X_tr, y_tr)
+        return {
+            "p_test": model.predict_proba(X_te)[:, 1],
+            "threshold": choose_validation_threshold(y_tr, oof, method="youden"),
+            "chosen_params": params, "inner_auc": float(auc),
+        }
+
+    return fit_predict
+
+
+def make_random_search_fit_predict(make_estimator, param_space, n_configs=10, space_seed=1234):
+    """Equal-budget model selection: ``n_configs`` random configurations, one shared inner split.
+
+    Every model compared in Stage 5 gets the same budget: ``n_configs`` configurations sampled
+    from its own ``param_space`` (dict name -> list of values), each trained on the same inner
+    grouped 75/25 split of the outer-training clips and scored by AUC on the held-out quarter.
+    The best configuration is refit on all outer-training clips; the decision threshold is the
+    Youden cut of its inner held-out predictions, so the outer test fold is never consulted.
+    ``make_estimator(params, seed)`` must return an object with ``fit`` and ``predict_proba``.
+    """
+    sk = _sklearn()
+    keys = sorted(param_space)
+
+    def fit_predict(X_tr, y_tr, g_tr, X_te, seed):
+        rng = np.random.RandomState(space_seed)
+        configs, seen = [], set()
+        space_size = int(np.prod([len(param_space[k]) for k in keys]))
+        while len(configs) < min(n_configs, space_size):
+            params = {k: param_space[k][rng.randint(len(param_space[k]))] for k in keys}
+            tag = tuple(str(params[k]) for k in keys)
+            if tag not in seen:
+                seen.add(tag)
+                configs.append(params)
+        splitter = sk["StratifiedGroupKFold"](n_splits=4, shuffle=True, random_state=seed)
+        a, b = next(iter(splitter.split(X_tr, y_tr, g_tr)))
+        best = None
+        for params in configs:
+            p = make_estimator(params, seed).fit(X_tr[a], y_tr[a]).predict_proba(X_tr[b])[:, 1]
+            auc = _auc_rank(y_tr[b], p)
+            if best is None or auc > best[0]:
+                best = (auc, params, p)
+        auc, params, p_inner = best
+        model = make_estimator(params, seed).fit(X_tr, y_tr)
+        out = {
+            "p_test": model.predict_proba(X_te)[:, 1],
+            "threshold": choose_validation_threshold(y_tr[b], p_inner, method="youden"),
+            "chosen_params": params, "inner_auc": float(auc), "n_configs": len(configs),
+        }
+        if hasattr(model, "n_params_"):
+            out["n_params"] = int(model.n_params_)
+        return out
+
+    return fit_predict
+
+
+# ---------------------------------------------------------------------------
 # Figure helpers (formerly quantum/plots.py). Deferred matplotlib/sklearn
 # imports keep `import quantum.evaluation` fast for QAOA spawn workers and
 # server restarts; only evaluation that renders figures pays the import cost.
