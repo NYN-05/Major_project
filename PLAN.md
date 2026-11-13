@@ -1,5 +1,44 @@
 # Accuracy Improvement Plan (2026-11-13)
 
+## Implementation status (updated 2026-11-13 22:10 IST)
+
+| Step | Status | Evidence |
+|---|---|---|
+| Phase 0 — apply τ* at inference | **Done** | `quantum/pipeline.py:predict_features`; `test_inference_uses_checkpoint_threshold` |
+| Phase 0 — QAOA pre-select `k` fix | **Done** | `quantum/qaoa.py:select_classical(k=...)` + `pipeline.py`; `test_select_classical_k_override` |
+| Phase 1 Step 3 — `target_features` 3 → 8 | **Done** | `quantum/config.py`, `AGENTS.md`, `README.md`, `tests/quantum/test_config.py` |
+| Phase 1 Step 5 — FAR ≤ 0.10 threshold | **Done** | `quantum/evaluation.py:far_constrained`, `DecisionConfig.far_target`, `pipeline.py` threshold block; `test_far_constrained_threshold` |
+| Phase 1 Step 4 — hyperparameter sweep | **Done — no config change** | `Scrape/phase1_hparam_sweep.py`, results `Scrape/output/phase1/hparam_sweep.json`: current defaults won 5-fold dev validation (AUC 0.5930 ± 0.0348) vs 0.5437 / 0.5443 for the two top search candidates |
+| Phase 2 Step 6 — 3-seed ensemble | **Done** | `VQC_ENSEMBLE_SEEDS`, `vqc.py` helpers, `pipeline.py` train/infer, `evaluation.py`; `test_vqc_ensemble_averaging` |
+| Retrain artifacts (k=8 + ensemble) | **Done** | `Scrape/phase1_retrain_dev.py` (frozen Stage-1 manifest pinned: train 2007 / val 504 / test 782 untouched; CSV sha matched); 3 checkpoints + threshold 0.489631 written to all members |
+| E2E verification | **Done** | dev-split video `Fake\avenlmlmtn.mp4`: before retrain REAL/0.0301 (wrong), after retrain **FAKE/0.0519** (correct); `Scrape/output/phase1/e2e_before_retrain.json` / `e2e_after_retrain.json` |
+
+Validation: `python -m quantum.tests` **17/17** (4 new regression tests);
+`pytest tests` **73 passed, 1 skipped** (`tests/visual/test_visual.py` has a
+pre-existing `_fit_shared_pca` ImportError, unrelated). Frozen test set
+untouched throughout. Pre-retrain k=3 artifacts backed up to
+`%USERPROFILE%\MajProj_backups\quantum_k3_pre_retrain_20261113` (17 files).
+
+## Execution results (2026-11-13, dev fold 0 — frozen test never read)
+
+| Metric | Quantum (k=8, 3-seed ensemble) | Same-fold baselines |
+|---|---|---|
+| AUC (val fold 0) | **0.5025** | MLP 0.5947, XGB 0.5856, logreg 0.5780, RF 0.5394 |
+| AUC (train CV(5)) | 0.5938 ± 0.0424 | — |
+| Accuracy @ deployed cut | 0.4722 | — |
+| FAR / FRR @ cut 0.4896 | **0.100 / 0.859** | — |
+| ECE | 0.0860 | — |
+
+**Headline finding:** at the owner-approved FAR ≤ 0.10 operating point the
+model yields **FRR = 0.859** (86% of genuine users rejected) on the
+validation fold, and fold-0 AUC is at chance (0.5025) while train CV says
+0.594 — an unusable KYC operating point. Hyperparameters are ruled out as
+the cause (Step 4 sweep: defaults won). Owner decision pending:
+(a) relax the FAR ceiling, (b) pursue deferred Phase 3 feature work
+(deep PCA 64 + layer3), or (c) revisit the quantum-verdict rule (the RF
+cross-check reaches 0.812 accuracy on the same fold at its own cut).
+
+
 Owner approvals recorded in this document:
 - **Approved:** update `AGENTS.md` to set `target_features = 8`.
 - **Approved:** Step 5 FAR target **≤ 0.10** (validation-set, FAR-constrained threshold).

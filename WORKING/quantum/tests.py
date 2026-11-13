@@ -455,6 +455,211 @@ def test_stage1_grouping_split() -> None:
         raise AssertionError("second test-set access must be blocked")
 
 
+def test_inference_uses_checkpoint_threshold():
+    """predict_features must cut at the calibrated threshold stored in the
+    checkpoint metadata, not at the DecisionConfig() default of 0.5.
+
+    Regression guard: opt_threshold was loaded but dead, so every deployed
+    verdict was silently cut at 0.5 regardless of training-time calibration.
+    """
+    import tempfile
+
+    import torch
+
+    from quantum import pipeline as qpipe
+    from quantum.config import VQCConfig, schema_digest, write_sha256
+    from quantum.explain import Verdict
+    from quantum.qaoa import save_selection
+    from quantum.scaling import FeatureScaler
+    from quantum.vqc import HybridModel
+
+    names = list(qpipe.FUSED_FEATURE_NAMES)
+    rng = np.random.RandomState(3)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        scaler_file = tmp_path / "scaler.json"
+        FeatureScaler(names).fit(rng.randn(8, len(names))).save(scaler_file)
+
+        selection_file = tmp_path / "selection.json"
+        save_selection(
+            {
+                "selected_indices": [0, 1, 2],
+                "selected_features": [names[i] for i in (0, 1, 2)],
+            },
+            selection_file,
+        )
+
+        checkpoint_file = tmp_path / "model.pt"
+
+        def write_checkpoint(threshold: float) -> None:
+            model = HybridModel(3, VQCConfig())
+            torch.save(
+                {
+                    "state_dict": model.state_dict(),
+                    "metadata": {
+                        "feature_schema_sha256": schema_digest(names),
+                        "decision_threshold": float(threshold),
+                    },
+                },
+                checkpoint_file,
+            )
+            write_sha256(checkpoint_file)
+
+        original = dict(qpipe.FEATURE_SET_CONFIGS["fused"])
+        qpipe.FEATURE_SET_CONFIGS["fused"] = {
+            **original,
+            "scaler_file": scaler_file,
+            "selection_file": selection_file,
+            "checkpoint_file": checkpoint_file,
+        }
+        try:
+            features = {name: 0.1 for name in names}
+            # A calibrated cut of 1.0 must force FAKE and 0.0 must force REAL
+            # for any sigmoid output in (0, 1). Hard-coding 0.5 (the old bug)
+            # would give the same verdict for both calls and fail here.
+            write_checkpoint(1.0)
+            verdict_hi = qpipe.predict_features(features).final_verdict
+            write_checkpoint(0.0)
+            verdict_lo = qpipe.predict_features(features).final_verdict
+        finally:
+            qpipe.FEATURE_SET_CONFIGS["fused"] = original
+
+    assert verdict_hi is Verdict.FAKE, (
+        f"threshold 1.0 must yield FAKE, got {verdict_hi}"
+    )
+    assert verdict_lo is Verdict.REAL, (
+        f"threshold 0.0 must yield REAL, got {verdict_lo}"
+    )
+
+
+def test_select_classical_k_override():
+    """select_classical(k=...) must widen the candidate pool beyond
+    cfg.target_features.
+
+    Regression guard: the QAOA pre-select stage asked for 18 candidates but
+    only ever received cfg.target_features (3), so QAOA searched 3 of 3
+    features and the selection stage was effectively a no-op.
+    """
+    from quantum.qaoa import select_classical
+
+    rng = np.random.RandomState(5)
+    X = rng.randn(80, 24)
+    y = (X[:, 0] + 0.5 * rng.randn(80) > 0).astype(int)
+    names = [f"f{i}" for i in range(24)]
+    cfg = QAOASelectionConfig(target_features=3)
+
+    wide = select_classical(X, y, cfg, feature_names=names, k=18)
+    default = select_classical(X, y, cfg, feature_names=names)
+
+    assert len(wide["selected_indices"]) == 18, (
+        f"k=18 must return 18 indices, got {len(wide['selected_indices'])}"
+    )
+    assert len(default["selected_indices"]) == 3, (
+        f"default must return cfg.target_features=3, got {len(default['selected_indices'])}"
+    )
+    assert wide["selected_indices"][:3] == default["selected_indices"], (
+        "k override must extend, not reorder, the default ranking"
+    )
+    assert len(set(wide["selected_indices"])) == 18, "selection must be unique features"
+
+
+def test_far_constrained_threshold():
+    """The KYC threshold cut must honour the FAR ceiling (PLAN.md Step 5).
+
+    A FAKE clip accepted as REAL is the expensive error, so the deployed cut
+    is the smallest validation threshold whose false-acceptance rate is
+    <= far_target, not Youden's J-optimal cut (which ignores KYC cost).
+    """
+    from quantum.evaluation import (
+        classification_metrics,
+        choose_validation_threshold,
+        optimal_threshold_far_constrained,
+    )
+
+    rng = np.random.RandomState(7)
+    # Weakly-separating scores: Youden's J-optimal cut is permissive here.
+    y = np.array([0] * 40 + [1] * 40)
+    p = np.r_[rng.uniform(0.30, 0.95, 40), rng.uniform(0.35, 0.98, 40)]
+
+    far_cut = optimal_threshold_far_constrained(y, p, far_target=0.10)
+    youden_cut = choose_validation_threshold(y, p, method="youden")
+
+    at_far = classification_metrics(y, p, decision_threshold=far_cut)
+    assert at_far["false_acceptance_rate"] <= 0.10 + 1e-12, (
+        f"FAR {at_far['false_acceptance_rate']:.3f} exceeds the 0.10 ceiling "
+        f"at threshold {far_cut:.4f}"
+    )
+
+    # Minimality: the next candidate below the chosen cut must break the
+    # ceiling, otherwise a lower (less user-rejecting) cut was available.
+    candidates = np.unique(np.r_[0.0, p, 1.0])
+    lower = float(candidates[candidates < far_cut].max())
+    at_lower = classification_metrics(y, p, decision_threshold=lower)
+    assert at_lower["false_acceptance_rate"] > 0.10, (
+        f"threshold {far_cut:.4f} is not the smallest cut meeting the ceiling"
+    )
+
+    # When Youden violates the ceiling, the constrained cut must be stricter.
+    at_youden = classification_metrics(y, p, decision_threshold=youden_cut)
+    if at_youden["false_acceptance_rate"] > 0.10:
+        assert far_cut > youden_cut, (
+            f"constrained cut {far_cut:.4f} must exceed the permissive "
+            f"Youden cut {youden_cut:.4f}"
+        )
+
+    # Fallback: no cut can satisfy the ceiling (fakes score exactly 1.0), so
+    # the chooser must return the Youden cut instead of raising.
+    y2 = np.array([0, 0, 1, 1])
+    p2 = np.array([1.0, 1.0, 1.0, 1.0])
+    fallback = optimal_threshold_far_constrained(y2, p2, far_target=0.10)
+    assert fallback == choose_validation_threshold(y2, p2, method="youden"), (
+        "infeasible FAR ceiling must fall back to Youden"
+    )
+
+
+def test_vqc_ensemble_averaging():
+    """Seed-ensemble inference must average members and force eval mode.
+
+    Guards PLAN.md Step 6: predict_features/evaluate_quantum_model average
+    P(real) over every checkpoint on disk, and the checkpoint naming contract
+    (member 0 keeps the legacy filename, members 1..n append "_seed<N>").
+    """
+    from quantum.config import VQC_ENSEMBLE_SEEDS, VQCConfig
+    from quantum.vqc import (
+        HybridModel,
+        ensemble_checkpoint_files,
+        predict_vqc,
+        predict_vqc_ensemble,
+    )
+
+    files = ensemble_checkpoint_files(Path("/x/hybrid_vqc_fused.pt"))
+    assert len(files) == len(VQC_ENSEMBLE_SEEDS) == 3, (
+        f"expected a 3-member ensemble, got {len(files)}"
+    )
+    assert files[0] == Path("/x/hybrid_vqc_fused.pt"), (
+        "member 0 must keep the legacy checkpoint filename"
+    )
+    assert files[1].name == "hybrid_vqc_fused_seed43.pt", files[1].name
+    assert files[2].name == "hybrid_vqc_fused_seed44.pt", files[2].name
+
+    cfg = VQCConfig()
+    m1, m2 = HybridModel(4, cfg), HybridModel(4, cfg)
+    rng = np.random.RandomState(11)
+    X = rng.randn(12, 4).astype(np.float32)
+    m1.eval()
+    m2.eval()
+    p1 = predict_vqc(m1, X)
+    p2 = predict_vqc(m2, X)
+
+    m1.train()  # ensemble must switch members back to eval mode itself
+    avg = predict_vqc_ensemble([m1, m2], X)
+    assert not m1.training, "ensemble must put members in eval mode"
+    assert np.allclose(avg, (p1 + p2) / 2.0, atol=1e-6), (
+        f"ensemble must return the mean of member probabilities, "
+        f"max |diff| = {float(np.max(np.abs(avg - (p1 + p2) / 2.0))):.3e}"
+    )
+
+
 def main() -> None:
     checks = [
         test_beta_alive,
@@ -470,6 +675,10 @@ def main() -> None:
         test_group_bootstrap_and_nested_cv,
         test_provenance_record,
         test_stage1_grouping_split,
+        test_inference_uses_checkpoint_threshold,
+        test_select_classical_k_override,
+        test_far_constrained_threshold,
+        test_vqc_ensemble_averaging,
     ]
     failures = 0
     for check in checks:

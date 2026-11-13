@@ -407,6 +407,61 @@ def predict_vqc(model, X):
     return torch.sigmoid(logits).cpu().numpy()
 
 
+def ensemble_checkpoint_files(primary, seeds=None):
+    """Checkpoint paths for the seed ensemble.
+
+    The first member keeps the legacy filename so existing single-checkpoint
+    artifacts and caches stay valid; later members use "<stem>_seed<N>.<ext>".
+    """
+    from quantum.config import VQC_ENSEMBLE_SEEDS
+
+    primary = Path(primary)
+    files = []
+    for i, seed in enumerate(tuple(seeds or VQC_ENSEMBLE_SEEDS)):
+        if i == 0:
+            files.append(primary)
+        else:
+            files.append(
+                primary.with_name(f"{primary.stem}_seed{seed}{primary.suffix}")
+            )
+    return files
+
+
+def load_vqc_ensemble(n_features, cfg=None, files=None):
+    """Load every ensemble member present on disk (at least one required).
+
+    Members that do not exist (older single-checkpoint artifacts) are skipped,
+    so inference degrades gracefully to a single model instead of failing.
+    """
+    from dataclasses import replace
+
+    cfg = cfg or VQCConfig()
+    paths = [Path(p) for p in (files or ensemble_checkpoint_files(cfg.checkpoint_file))]
+    models = []
+    for path in paths:
+        if not path.is_file():
+            continue
+        models.append(load_vqc_model(n_features, replace(cfg, checkpoint_file=path)))
+    if not models:
+        raise FileNotFoundError(
+            "No VQC ensemble checkpoint found among: "
+            f"{', '.join(str(p) for p in paths)}. Rerun training: "
+            "python -m quantum.pipeline --all"
+        )
+    return models
+
+
+def predict_vqc_ensemble(models, X):
+    """Mean P(real) across ensemble members (each put in eval mode first)."""
+    if not models:
+        raise ValueError("predict_vqc_ensemble requires at least one model")
+    member_probs = []
+    for model in models:
+        model.eval()
+        member_probs.append(predict_vqc(model, X))
+    return np.mean(np.stack(member_probs, axis=0), axis=0)
+
+
 def _sanitize_metadata(obj):
     """Recursively convert metadata to JSON-safe (weights_only-loadable) values.
 

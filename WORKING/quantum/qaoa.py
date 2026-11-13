@@ -400,18 +400,23 @@ def remap_selection_to_original_space(selection, preselect_indices, feature_name
     return selection
 
 
-def select_classical(X, y, cfg=None, feature_names=None):
+def select_classical(X, y, cfg=None, feature_names=None, k=None):
     """Classical reference selection: top-k features by discrimination AUC.
 
     Report-only selector used to sanity-check that the QAOA choice is not
     worse than a plain supervised-greedy pick. Same output schema as
     QAOASelector.select() so downstream code can consume either.
+
+    ``k`` overrides ``cfg.target_features`` so callers (e.g. the QAOA
+    pre-select stage) can request a wider candidate pool than the final
+    number of selected features.
     """
     cfg = cfg or QAOASelectionConfig()
     feature_names = feature_names or FEATURE_NAMES
+    n_pick = int(cfg.target_features if k is None else k)
     weights = _normalize_weights(_discrimination_weights(X, y, cfg.seed))
     order = np.argsort(-weights)
-    selected = order[: cfg.target_features]
+    selected = order[:n_pick]
     marginals = np.zeros(X.shape[1])
     for pos, i in enumerate(selected):
         marginals[i] = 1.0 - pos / X.shape[1]

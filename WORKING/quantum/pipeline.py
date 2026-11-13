@@ -1,7 +1,7 @@
 import argparse
 import json
 import torch
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +16,7 @@ from quantum.config import (
     OUTPUT_DIR,
     QAOASelectionConfig,
     VQCConfig,
+    VQC_ENSEMBLE_SEEDS,
     schema_digest,
     write_sha256,
 )
@@ -32,7 +33,12 @@ from quantum.qaoa import (
     select_classical,
     verify_hamiltonian,
 )
-from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
+from quantum.vqc import (
+    ensemble_checkpoint_files,
+    load_vqc_ensemble,
+    predict_vqc_ensemble,
+    train_vqc,
+)
 from quantum.explain import build_explanation, DecisionExplanation, Verdict, PhysiologicalEvidence, ReliabilityLevel
 
 
@@ -99,10 +105,15 @@ def predict_features(features, feature_set: str = "fused"):
             f"{indices}. Rerun training for feature_set={feature_set}."
         )
     try:
-        model = load_vqc_model(len(indices), VQCConfig(checkpoint_file=checkpoint_file))
+        # Seed ensemble (PLAN.md Step 6): every member present on disk is
+        # averaged; older single-checkpoint artifacts load as a 1-member
+        # ensemble, so inference stays backward compatible.
+        models = load_vqc_ensemble(
+            len(indices), VQCConfig(checkpoint_file=checkpoint_file)
+        )
     except Exception as exc:
         raise RuntimeError(
-            f"{checkpoint_file.name} incompatible with the QAOA selection "
+            f"{checkpoint_file.name} ensemble incompatible with the QAOA selection "
             f"({len(indices)} features): {type(exc).__name__}: {exc}. "
             f"Rerun training for feature_set={feature_set}."
         ) from exc
@@ -113,9 +124,13 @@ def predict_features(features, feature_set: str = "fused"):
     if expected_schema and expected_schema != schema_digest(feature_names):
         raise RuntimeError("Checkpoint feature schema does not match the configured schema")
     opt_threshold = ckpt.get("metadata", {}).get("decision_threshold", DecisionConfig().decision_threshold)
-    prob_real = float(predict_vqc(model, x_scaled[:, indices])[0])
-    
-    decision_cfg = DecisionConfig()
+    prob_real = float(predict_vqc_ensemble(models, x_scaled[:, indices])[0])
+
+    # Apply the validation-calibrated threshold saved at training time instead of
+    # the DecisionConfig() default (0.5); mirrors evaluate_quantum_model().
+    decision_cfg = replace(
+        DecisionConfig(), decision_threshold=float(opt_threshold)
+    )
     return build_explanation(
         prob_real=prob_real,
         decision_cfg=decision_cfg,
@@ -175,7 +190,7 @@ def run_pipeline_for_feature_set(
         pre_select_k = 18
         if len(feature_names) > pre_select_k:
             print(f"  Pre-selecting {pre_select_k} features via classical AUC (from {len(feature_names)})")
-            classical_pre = select_classical(X_train, data["y_train"], qaoa_cfg, feature_names=feature_names)
+            classical_pre = select_classical(X_train, data["y_train"], qaoa_cfg, feature_names=feature_names, k=pre_select_k)
             classical_pre = classical_pre["selected_indices"]
             pre_select_k = min(pre_select_k, len(classical_pre))
             classical_pre = classical_pre[:pre_select_k]
@@ -233,51 +248,109 @@ def run_pipeline_for_feature_set(
 
     indices = [int(i) for i in selection["selected_indices"]]
 
-    # Train VQC
+    # Train VQC — seed ensemble (PLAN.md Step 6, VQC_ENSEMBLE_SEEDS)
     if run_train:
-        print(f"[3/6] Training hybrid VQC on {len(indices)} QAOA-selected features...")
+        member_files = ensemble_checkpoint_files(vqc_cfg.checkpoint_file)
+        print(
+            f"[3/6] Training hybrid VQC on {len(indices)} QAOA-selected features "
+            f"({len(member_files)}-member seed ensemble: "
+            f"{list(VQC_ENSEMBLE_SEEDS)})..."
+        )
         from quantum.vqc import qnode_backend_name, resolve_device
 
         print(
             f"  Torch device: {resolve_device()} | QNode simulator: {qnode_backend_name(vqc_cfg)}"
         )
-        train_vqc(
-            X_train[:, indices],
-            data["y_train"].astype(float),
-            vqc_cfg,
-            X_val=X_val[:, indices],
-            y_val=data["y_val"].astype(float),
-            metadata={
-                "selected_indices": indices,
-                "selected_features": selection["selected_features"],
-                "feature_names": feature_names,
-                "n_features": len(indices),
-                "scaler_mean": scaler.mean_.tolist(),
-                "scaler_scale": scaler.scale_.tolist(),
-                "qaoa_config": asdict(qaoa_cfg),
-                "vqc_config": asdict(vqc_cfg),
-                "decision_config": asdict(decision_cfg),
-                "qaoa_selection": selection,
-                "feature_set": feature_set,
-                "feature_schema_sha256": schema_digest(feature_names),
-            },
-        )
-        print(f"  Checkpoint (with metadata): {vqc_cfg.checkpoint_file}")
+        for member_i, (member_seed, member_file) in enumerate(
+            zip(VQC_ENSEMBLE_SEEDS, member_files)
+        ):
+            member_cfg = replace(
+                vqc_cfg,
+                seed=int(member_seed),
+                checkpoint_file=member_file,
+                # One training log per member; member 0 keeps the legacy name.
+                log_file=(
+                    vqc_cfg.log_file
+                    if member_i == 0
+                    else member_file.with_suffix(".jsonl")
+                ),
+            )
+            print(
+                f"  --- ensemble member {member_i + 1}/{len(member_files)} "
+                f"(seed {member_seed}) -> {member_file.name} ---"
+            )
+            train_vqc(
+                X_train[:, indices],
+                data["y_train"].astype(float),
+                member_cfg,
+                X_val=X_val[:, indices],
+                y_val=data["y_val"].astype(float),
+                metadata={
+                    "selected_indices": indices,
+                    "selected_features": selection["selected_features"],
+                    "feature_names": feature_names,
+                    "n_features": len(indices),
+                    "scaler_mean": scaler.mean_.tolist(),
+                    "scaler_scale": scaler.scale_.tolist(),
+                    "qaoa_config": asdict(qaoa_cfg),
+                    "vqc_config": asdict(member_cfg),
+                    "decision_config": asdict(decision_cfg),
+                    "qaoa_selection": selection,
+                    "feature_set": feature_set,
+                    "feature_schema_sha256": schema_digest(feature_names),
+                    "ensemble_seed": int(member_seed),
+                    "ensemble_seeds": [int(s) for s in VQC_ENSEMBLE_SEEDS],
+                },
+            )
+            print(f"  Checkpoint (with metadata): {member_file}")
 
-    # Compute and save optimal threshold using Youden's J on validation set
+    # Compute and save the decision threshold on the validation split only.
+    # KYC-cost criterion: smallest cut whose FAR <= decision_cfg.far_target
+    # (falls back to Youden's J when no cut satisfies the ceiling). The cut is
+    # calibrated on the ENSEMBLE probabilities, i.e. exactly what inference
+    # averages, and is then written to every member's metadata.
     if run_train:
-        print("  Computing optimal threshold (Youden's J) on validation set...")
-        from quantum.evaluation import optimal_threshold_youden
-        val_probs = predict_vqc(load_vqc_model(len(indices), vqc_cfg), X_val[:, indices])
-        opt_threshold = optimal_threshold_youden(data["y_val"].astype(int), val_probs)
-        print(f"    Optimal threshold: {opt_threshold:.6f}")
-        # Update checkpoint metadata with optimal threshold
-        ckpt = torch.load(vqc_cfg.checkpoint_file, map_location="cpu", weights_only=True)
-        if isinstance(ckpt, dict) and "metadata" in ckpt:
-            ckpt["metadata"]["decision_threshold"] = float(opt_threshold)
-            torch.save(ckpt, vqc_cfg.checkpoint_file)
-            write_sha256(vqc_cfg.checkpoint_file)
-            print(f"    Saved optimal threshold to checkpoint")
+        far_target = float(getattr(decision_cfg, "far_target", 0.10))
+        print(
+            f"  Computing threshold on validation set (FAR <= {far_target:.2f}, "
+            "Youden fallback)..."
+        )
+        from quantum.evaluation import (
+            classification_metrics,
+            optimal_threshold_far_constrained,
+        )
+        member_files = ensemble_checkpoint_files(vqc_cfg.checkpoint_file)
+        member_cfgs = [
+            replace(vqc_cfg, checkpoint_file=member_file)
+            for member_file in member_files
+        ]
+        models = load_vqc_ensemble(len(indices), vqc_cfg)
+        val_probs = predict_vqc_ensemble(models, X_val[:, indices])
+        y_val = data["y_val"].astype(int)
+        opt_threshold = optimal_threshold_far_constrained(y_val, val_probs, far_target)
+        at_cut = classification_metrics(y_val, val_probs, decision_threshold=opt_threshold)
+        print(f"    Optimal threshold: {opt_threshold:.6f} (ensemble of {len(models)})")
+        print(
+            "    Validation @ threshold: "
+            f"FAR={at_cut['false_acceptance_rate']:.3f} "
+            f"FRR={at_cut['false_rejection_rate']:.3f} "
+            f"balanced_acc={at_cut['balanced_accuracy']:.3f} "
+            f"auc={at_cut['auc_roc']:.3f}"
+        )
+        # Persist the calibrated cut to every ensemble member's metadata
+        saved = 0
+        for member_cfg in member_cfgs:
+            if not member_cfg.checkpoint_file.is_file():
+                continue
+            ckpt = torch.load(
+                member_cfg.checkpoint_file, map_location="cpu", weights_only=True
+            )
+            if isinstance(ckpt, dict) and "metadata" in ckpt:
+                ckpt["metadata"]["decision_threshold"] = float(opt_threshold)
+                torch.save(ckpt, member_cfg.checkpoint_file)
+                write_sha256(member_cfg.checkpoint_file)
+                saved += 1
+        print(f"    Saved optimal threshold to {saved} ensemble checkpoint(s)")
 
     # Evaluate
     eval_results = None

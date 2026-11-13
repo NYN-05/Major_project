@@ -26,6 +26,8 @@ class TestQuantumConfig(unittest.TestCase):
         """Test DecisionConfig default values (binary contract)."""
         cfg = DecisionConfig()
         self.assertEqual(cfg.decision_threshold, 0.5)
+        # Owner-approved KYC FAR ceiling (PLAN.md Step 5)
+        self.assertEqual(cfg.far_target, 0.10)
 
     def test_data_config_defaults(self):
         """Test DataConfig default values."""
@@ -41,7 +43,8 @@ class TestQuantumConfig(unittest.TestCase):
         """Test QAOASelectionConfig defaults."""
         cfg = QAOASelectionConfig()
         self.assertEqual(cfg.p_layers, 3)
-        self.assertEqual(cfg.target_features, 3)
+        # Owner-approved: raised from 3 to 8 (PLAN.md Step 3, AGENTS.md)
+        self.assertEqual(cfg.target_features, 8)
         self.assertEqual(cfg.restarts, 8)
 
     def test_vqc_config_defaults(self):

@@ -74,6 +74,11 @@ Scrape/               Required location for tests, probes, logs, screenshots,
 - Stage 1 accepted frames feed both the rPPG and visual stages. If frame
   extraction fails or produces no frames, the pipeline may fall back to direct
   video processing.
+- `QAOASelectionConfig.target_features` is **8** (owner-approved, raised from 3
+  in the accuracy plan `PLAN.md`; 3 starved the VQC at 68 parameters). QAOA
+  still pre-selects an 18-feature classical pool first
+  (`pipeline.py`, `pre_select_k = 18`) and then chooses 8 of those 18. Update
+  this line only with owner approval.
 
 ## Data and Label Contracts
 

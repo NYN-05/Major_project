@@ -243,7 +243,7 @@ class QAOASelectionConfig:
     max_iter: int = 500
     redundancy_penalty: float = 0.3
     cardinality_penalty: float = 0.5
-    target_features: int = 3
+    target_features: int = 8
     seed: int = 42
     restarts: int = 8
     n_jobs: int = 0
@@ -293,12 +293,24 @@ class VQCConfig:
     metrics_file: Path = field(default_factory=lambda: OUTPUT_DIR / "metrics_quantum.json")
 
 
+# Seeds for the deployed VQC ensemble (PLAN.md Step 6). Member 0 keeps the
+# legacy checkpoint filename; member i > 0 writes "<stem>_seed<seed>.pt" beside
+# it. Inference averages P(real) over every member that exists on disk, so
+# older single-checkpoint artifacts keep working unchanged.
+VQC_ENSEMBLE_SEEDS: tuple[int, ...] = (42, 43, 44)
+
+
 @dataclass(frozen=True)
 class DecisionConfig:
     # Binary decision threshold
     # prob_real >= decision_threshold -> REAL
     # prob_real < decision_threshold -> FAKE
     decision_threshold: float = 0.5
+    # Validation-set false-acceptance-rate ceiling used when the threshold is
+    # calibrated with method="far_constrained": the smallest cut whose FAR
+    # (fake clips scored as real) is <= this value is chosen, which maximises
+    # genuine acceptance while honouring the KYC security constraint.
+    far_target: float = 0.10
     metrics_baseline_file: Path = field(default_factory=lambda: OUTPUT_DIR / "metrics_baselines.json")
     roc_plot: Path = field(default_factory=lambda: OUTPUT_DIR / "roc_curve.png")
     confusion_plot: Path = field(default_factory=lambda: OUTPUT_DIR / "confusion_matrix.png")

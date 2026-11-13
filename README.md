@@ -1,7 +1,7 @@
 # Deepfake Video Detection for KYC (rPPG + Visual + Quantum ML)
 
 [![GitHubTree](https://img.shields.io/badge/GitHubTree-Major__project-blue?style=flat-square)](https://githubtree.mgks.dev/repo/NYN-05/Major_project/main/?ref=badge)
-![Fused mode only](https://img.shields.io/badge/mode-fused%20rPPG%2Bvisual-2ea043?style=flat-square)
+![Fused mode only](<https://img.shields.io/badge/mode-fused%20rPPG%2Bvisual-2ea043?style=flat-square>)
 ![DFDC only](https://img.shields.io/badge/dataset-DFDC-blue?style=flat-square)
 
 Detection of deepfake videos for video KYC in financial systems using
@@ -48,23 +48,23 @@ frames → rPPG → visual → quantum (fused) → verdict (REAL / FAKE)
 
 ## Repository Layout
 
-| Path | Description |
-| ---- | ----------- |
-| `WORKING/` | Active project root (all four pipeline stages + end-to-end runner) |
-| `WORKING/frame/` | Stage 1 — frame sampling, YOLO face detection, quality filtering |
-| `WORKING/RPPG/` | Stage 2 — MediaPipe face ROIs → POS/CHROM pulse → 20 physiological features |
-| `WORKING/visual/` | Stage 3 — ResNet50 + handcrafted visual features from face crops (39 features) |
-| `WORKING/quantum/` | Stage 4 — QAOA feature selection → hybrid VQC → P(real) → verdict (run via `python -m quantum.pipeline`) |
-| `WORKING/run_pipeline.py` | End-to-end orchestrator: frames → rPPG → visual → quantum → verdict |
-| `WORKING/MAJ_OUTPUT_ROOT` | Default global regenerated-artifacts root (all `MAJ_OUTPUT_ROOT` dirs untracked); configurable via `MAJ_OUTPUT_ROOT` env var (defaults to `Scrape/output/`) |
-| `MAJ_OUTPUT_ROOT/frames/` | Stage 1: `frame_sequences/`, `frame_extraction_*.json(l)`, `docs/` |
-| `MAJ_OUTPUT_ROOT/rppg/` | Stage 2: `dataset_features.csv`, `rppg_classifier.pkl` + metadata, plots |
-| `MAJ_OUTPUT_ROOT/visual/` | Stage 3: `visual_features.csv`, `fused_features.csv` |
-| `MAJ_OUTPUT_ROOT/quantum/` | Stage 4: `data_fused.npz`, `qaoa_selection_fused.json`, `feature_scaler_fused.json`, `hybrid_vqc_fused.pt`, metrics, plots |
-| `MAJ_OUTPUT_ROOT/pipeline/` | `run_pipeline.py` result JSON |
-| `frontend/` | Web UI: React + Vite frontend + stdlib-only API server (port 8000) |
-| `Docs/` | Project docs: RMTT semester report, key findings, remediation plan, problem analysis, bottleneck diagnosis |
-| `Scrape/` | Dev scratch: tests, temp scripts, debug artifacts (gitignored) |
+| Path                          | Description                                                                                                                                                       |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WORKING/`                  | Active project root (all four pipeline stages + end-to-end runner)                                                                                                |
+| `WORKING/frame/`            | Stage 1 — frame sampling, YOLO face detection, quality filtering                                                                                                 |
+| `WORKING/RPPG/`             | Stage 2 — MediaPipe face ROIs → POS/CHROM pulse → 20 physiological features                                                                                    |
+| `WORKING/visual/`           | Stage 3 — ResNet50 + handcrafted visual features from face crops (39 features)                                                                                   |
+| `WORKING/quantum/`          | Stage 4 — QAOA feature selection → hybrid VQC → P(real) → verdict (run via `python -m quantum.pipeline`)                                                    |
+| `WORKING/run_pipeline.py`   | End-to-end orchestrator: frames → rPPG → visual → quantum → verdict                                                                                           |
+| `WORKING/MAJ_OUTPUT_ROOT`   | Default global regenerated-artifacts root (all `MAJ_OUTPUT_ROOT` dirs untracked); configurable via `MAJ_OUTPUT_ROOT` env var (defaults to `Scrape/output/`) |
+| `MAJ_OUTPUT_ROOT/frames/`   | Stage 1: `frame_sequences/`, `frame_extraction_*.json(l)`, `docs/`                                                                                          |
+| `MAJ_OUTPUT_ROOT/rppg/`     | Stage 2: `dataset_features.csv`, `rppg_classifier.pkl` + metadata, plots                                                                                      |
+| `MAJ_OUTPUT_ROOT/visual/`   | Stage 3: `visual_features.csv`, `fused_features.csv`                                                                                                          |
+| `MAJ_OUTPUT_ROOT/quantum/`  | Stage 4: `data_fused.npz`, `qaoa_selection_fused.json`, `feature_scaler_fused.json`, `hybrid_vqc_fused.pt`, metrics, plots                                |
+| `MAJ_OUTPUT_ROOT/pipeline/` | `run_pipeline.py` result JSON                                                                                                                                   |
+| `frontend/`                 | Web UI: React + Vite frontend + stdlib-only API server (port 8000)                                                                                                |
+| `Docs/`                     | Project docs: RMTT semester report, key findings, remediation plan, problem analysis, bottleneck diagnosis                                                        |
+| `Scrape/`                   | Dev scratch: tests, temp scripts, debug artifacts (gitignored)                                                                                                    |
 
 ## Current Performance (Full-DFDC Run, 2026-10-21, Fused Mode Only)
 
@@ -78,16 +78,16 @@ decision bins use the calibrated, validation-only threshold
 τ* = 0.47942 persisted in the checkpoint and consumed at inference
 (`quantum/pipeline.py`).
 
-| Metric                           | Quantum VQC                        | VQC 5-Fold CV  | Best Classical (MLP) | Baseline Range |
-| -------------------------------- | ---------------------------------- | -------------- | -------------------- | -------------- |
-| Accuracy (0.5 cut)               | 0.569 (Wilson 95% [0.534, 0.603])  | 0.589 ± 0.020  | 0.632                | 0.598 – 0.632  |
-| **Balanced Accuracy**            | **0.582**                          | 0.596 ± 0.020  | 0.631                | 0.602 – 0.631  |
-| Specificity (FAKE recall)        | 0.773                              | 0.709 ± 0.039  | 0.616                | 0.466 – 0.668  |
-| AUC-ROC                          | 0.658                              | 0.645 ± 0.020  | 0.684                | 0.634 – 0.684  |
-| PR-AUC (REAL-positive)           | 0.687                              | 0.668 ± 0.023  | 0.730                | 0.670 – 0.730  |
-| ECE / Brier                      | 0.080 / 0.236                      | 0.053 (ECE)    | 0.027 / 0.222        | —              |
-| Confusion @0.5 [[TN,FP],[FN,TP]] | [[282, 83], [254, 163]]             | —              | —                    | —              |
-| Decision Bins                    | 378 REAL / 404 FAKE (τ*)           | —              | —                    | —              |
+| Metric                      | Quantum VQC                       | VQC 5-Fold CV  | Best Classical (MLP) | Baseline Range |
+| --------------------------- | --------------------------------- | -------------- | -------------------- | -------------- |
+| Accuracy (0.5 cut)          | 0.569 (Wilson 95% [0.534, 0.603]) | 0.589 ± 0.020 | 0.632                | 0.598 – 0.632 |
+| **Balanced Accuracy** | **0.582**                   | 0.596 ± 0.020 | 0.631                | 0.602 – 0.631 |
+| Specificity (FAKE recall)   | 0.773                             | 0.709 ± 0.039 | 0.616                | 0.466 – 0.668 |
+| AUC-ROC                     | 0.658                             | 0.645 ± 0.020 | 0.684                | 0.634 – 0.684 |
+| PR-AUC (REAL-positive)      | 0.687                             | 0.668 ± 0.023 | 0.730                | 0.670 – 0.730 |
+| ECE / Brier                 | 0.080 / 0.236                     | 0.053 (ECE)    | 0.027 / 0.222        | —             |
+| Confusion @0.5 [[TN,FP],[FN,TP]]             | [[282, 83], [254, 163]]                                  | —             | —                   | —             |
+| Decision Bins               | 378 REAL / 404 FAKE (τ*)         | —             | —                   | —             |
 
 KYC reading of the 0.5-cut confusion matrix (REAL-positive): 22.7% of FAKE
 videos are accepted as genuine (FAR 0.227) and 60.9% of REAL videos are
@@ -291,7 +291,7 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
 - **Stage 1 feeds stage 2 & 3.** `run_pipeline.py` hands the frame stage's accepted JPEGs (`MAJ_OUTPUT_ROOT/frames/frame_sequences/<video>/frames/`) plus `frame_metadata.jsonl` to `RPPGPipeline.process_frames()` at the stage-1 sample rate (30 fps) and to `visual.extractor.compute_visual_features()` for face crops. rPPG no longer re-gates on blur/brightness (stage 1 did) but still runs MediaPipe per frame; `features=None` handling emits INCONCLUSIVE and exits 3 (same contract as above). If stage 1 fails or yields no frames, `run_pipeline.py` falls back to `RPPGPipeline.process_video()` (direct video read; `input_mode` in the result JSON records which path ran). Standalone RPPG scripts keep using `process_video`. `run_pipeline.py --signal-out <path>` writes the decimated stage-2 waveform JSON (same schema as the retired standalone `frontend/dump_signal.py`).
 - **RandomForest cross-check** is an optional side path; the final verdict comes exclusively from the quantum stage.
 - **rPPG classifier trust:** `MAJ_OUTPUT_ROOT/rppg/` must remain write-protected; `rppg_classifier.pkl` is `pickle.load`-ed by `run_pipeline.py` (arbitrary-code risk if replaced). Never move to shared hosting as-is.
-- **QAOA selection weights:** the selection objective uses supervised discrimination weights (`qaoa._discrimination_weights`: sign-agnostic exact Mann-Whitney AUC strength `2*|AUC-0.5|`, deterministic, no sklearn). `QAOASelectionConfig.target_features` is 3. Keep `_mutual_info_weights` only as a documented alternative — do not reintroduce it into `select()`.
+- **QAOA selection weights:** the selection objective uses supervised discrimination weights (`qaoa._discrimination_weights`: sign-agnostic exact Mann-Whitney AUC strength `2*|AUC-0.5|`, deterministic, no sklearn). `QAOASelectionConfig.target_features` is 8 (owner-approved in `PLAN.md`; it was 3, which starved the VQC and capped the pre-select pool). Keep `_mutual_info_weights` only as a documented alternative — do not reintroduce it into `select()`.
 - **QAOA ansatz:** `_apply_qaoa` applies precomputed cost gates with `gamma` and X-mixer gates with `beta` separately. Regression guard: `test_beta_alive` in `quantum/tests.py`. Any refactor must keep beta alive and re-run `python -m quantum.tests` + `--all`.
 - **Hamiltonian ≡ classical cost:** `_cost_terms` reproduces `_classical_cost` exactly (verified ~1e-14 on real data) and `pipeline.py` hard-asserts `error < 1e-6`.
 - **Torch-native simulators (default):** the default QAOA and VQC circuit backends are the project's exact complex128 statevector simulators (`qaoa_sim.QAOASimulator`, `vqc.QuantumLayerTorch`) — ~20× faster than PennyLane and CPU-process-safe. PennyLane paths remain behind `device="pennylane"` / `qnode_impl="pennylane"` for cross-verification; `test_qaoa_sim_matches_pennylane` and `test_torch_layer_matches_pennylane` pin them to ≤1e-6/1e-5.
@@ -307,8 +307,8 @@ Theme toggle persists `rppgqc.theme` in localStorage; respects `prefers-reduced-
 
 ## Team
 
-| Member    | Responsibility                                                        |
-| --------- | --------------------------------------------------------------------- |
-| **Jhashank** | rPPG-to-classifier pipeline, quantum model (Stage 3)               |
-| **Sumit**    | Input-to-ROI pipeline (data, frames, face detection) (Stage 1)     |
-| **Aswin**    | Preprocessing policy, evaluation, integration (Stage 2)            |
+| Member             | Responsibility                            |
+| ------------------ | ----------------------------------------- |
+| **Jhashank** | frames, visual, Quamtum layer development |
+| **Sumit**    | RPPG layer development                    |
+| **Aswin**    | Review and research paper scripting       |

@@ -17,7 +17,7 @@ import os
 import numpy as np
 
 from quantum.config import DecisionConfig, VQCConfig
-from quantum.vqc import load_vqc_model, predict_vqc, train_vqc
+from quantum.vqc import load_vqc_ensemble, predict_vqc, predict_vqc_ensemble, train_vqc
 
 
 def _sklearn():
@@ -266,8 +266,19 @@ def decision_bins(y_true, prob_real, cfg=None, pqs=None):
     }
 
 
-def choose_validation_threshold(y_true, prob_real, *, method="youden"):
-    """Choose a threshold using validation data only."""
+def choose_validation_threshold(y_true, prob_real, *, method="youden", far_target=None):
+    """Choose a threshold using validation data only.
+
+    Methods:
+        "youden": maximise sensitivity + specificity - 1 (J).
+        "balanced": maximise (sensitivity + specificity) / 2.
+        "far_constrained": smallest threshold whose false-acceptance rate
+            (FAKE clips scored as real) is <= ``far_target``. Among all cuts
+            that satisfy the security ceiling this one maximises genuine
+            acceptance, so FRR stays as low as the FAR constraint allows.
+            Falls back to Youden when no candidate satisfies the ceiling
+            (possible when the score saturates at exactly 1.0 for fakes).
+    """
     y = np.asarray(y_true, dtype=int)
     p = np.asarray(prob_real, dtype=float)
     arr = np.asarray(p, dtype=np.float64)
@@ -280,6 +291,22 @@ def choose_validation_threshold(y_true, prob_real, *, method="youden"):
     if len(y) != len(p) or len(np.unique(y)) < 2:
         raise ValueError("Threshold selection requires paired validation data with both classes")
     candidates = np.unique(np.r_[0.0, p, 1.0])
+
+    if method == "far_constrained":
+        if far_target is None:
+            raise ValueError("far_constrained requires far_target")
+        # Candidates ascend, so the first feasible cut is the smallest one.
+        for threshold in candidates:
+            pred = p >= threshold
+            fp = int(np.sum(pred & (y == 0)))  # FAKE scored as REAL
+            tn = int(np.sum(~pred & (y == 0)))
+            far = fp / (fp + tn) if (fp + tn) else 0.0
+            if far <= float(far_target):
+                return float(threshold)
+        # No cut satisfies the ceiling: fall back to Youden rather than
+        # returning an uncalibrated constant.
+        method = "youden"
+
     best = (float("-inf"), 0.5)
     for threshold in candidates:
         pred = p >= threshold
@@ -301,6 +328,19 @@ def optimal_threshold_youden(y_true, prob_real):
     Returns the threshold that maximizes J = sensitivity + specificity - 1.
     """
     return choose_validation_threshold(y_true, prob_real, method="youden")
+
+
+def optimal_threshold_far_constrained(y_true, prob_real, far_target=0.10):
+    """Smallest validation threshold whose false-acceptance rate <= far_target.
+
+    KYC-cost criterion: a FAKE clip accepted as REAL is the expensive error,
+    so the cut is constrained to FAR <= ``far_target`` and, subject to that,
+    chosen as low as possible to keep genuine users accepted (FRR minimal).
+    Falls back to Youden's J when no candidate cut meets the ceiling.
+    """
+    return choose_validation_threshold(
+        y_true, prob_real, method="far_constrained", far_target=far_target
+    )
 
 
 def analyze_threshold_behavior(y_true, prob_real, cfg=None):
@@ -384,8 +424,11 @@ def evaluate_quantum_model(
 ):
     vqc_cfg = vqc_cfg or VQCConfig()
     decision_cfg = decision_cfg or DecisionConfig()
-    model = load_vqc_model(X_test.shape[1], vqc_cfg)
-    prob_real = predict_vqc(model, X_test)
+    # Average the seed ensemble so reported metrics match deployed inference
+    # (predict_features averages every member on disk); older single-checkpoint
+    # artifacts simply evaluate as a 1-member ensemble.
+    models = load_vqc_ensemble(X_test.shape[1], vqc_cfg)
+    prob_real = predict_vqc_ensemble(models, X_test)
 
     # Load optimal threshold from checkpoint metadata
     import torch
