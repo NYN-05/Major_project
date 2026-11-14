@@ -4,7 +4,7 @@
 # Skips steps whose outputs already exist (idempotent).
 # Supports GPU-accelerated rPPG feature extraction via YuNet (ONNX Runtime CUDA).
 #
-# Long stages (rPPG / visual extraction) stream through setup_progress.py,
+# Long stages (rPPG / visual extraction) stream through sem7_mdfiles/setup_progress.py,
 # which renders a live progress bar with rate + ETA and tees every raw line
 # to a log file next to the stage artifacts.
 #
@@ -37,6 +37,7 @@ $Venv     = Join-Path $RepoRoot 'venv\Scripts\python.exe'
 $Pip      = Join-Path $RepoRoot 'venv\Scripts\pip.exe'
 $Working  = Join-Path $RepoRoot 'WORKING'
 $Frontend = Join-Path $RepoRoot 'frontend'
+$ProgressScript = Join-Path $RepoRoot 'sem7_mdfiles\setup_progress.py'
 
 # Disable torch.compile (inductor/triton not available on Windows)
 $env:TORCH_COMPILE_DISABLE = '1'
@@ -361,7 +362,7 @@ for p in [r'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin',
     Write-Host "  ${C_DIM}log: $stderr_log$C_RESET"
     # The log file is written by setup_progress.py: pwsh file writes are
     # blocked by Controlled Folder Access, so tee through python.
-    & $Venv -u (Join-Path $RepoRoot 'setup_progress.py') --log $stderr_log --label 'rPPG' `
+    & $Venv -u $ProgressScript --log $stderr_log --label 'rPPG' `
         -- $Venv (Join-Path $Working 'RPPG\extract_dataset_features.py') @extractArgs
     if ($LASTEXITCODE -ne 0) {
         Step-Fail "feature extraction (exit $LASTEXITCODE) - see $stderr_log"
@@ -432,7 +433,7 @@ if (Test-Artifact $FusedCsv) {
     if ($useStage1Frames) {
         Write-Green "Using stage-1 frames from $framesRoot"
         Write-Host "  Extracting visual features, fusing, creating splits (live progress)..."
-        & $Venv -u (Join-Path $RepoRoot 'setup_progress.py') --log $visualLog --label 'visual' `
+        & $Venv -u $ProgressScript --log $visualLog --label 'visual' `
             -- $Venv (Join-Path $Working 'visual\pipeline.py') `
             --frames-root $framesRoot `
             --rppg-csv $RppgCsv `
@@ -440,7 +441,7 @@ if (Test-Artifact $FusedCsv) {
             --fuse --create-splits
     } else {
         Write-Host "  Extracting visual features from videos, fusing, creating splits (live progress)..."
-        & $Venv -u (Join-Path $RepoRoot 'setup_progress.py') --log $visualLog --label 'visual' `
+        & $Venv -u $ProgressScript --log $visualLog --label 'visual' `
             -- $Venv (Join-Path $Working 'visual\pipeline.py') `
             --video-root $env:DFDC_DATASET_PATH `
             --rppg-csv $RppgCsv `
